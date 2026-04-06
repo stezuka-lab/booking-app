@@ -1,0 +1,731 @@
+{% extends "base.html" %}
+{% block title %}予約リンク{% endblock %}
+{% set nav = 'links' %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="admin-console">
+  <h1 class="page-title">予約リンク</h1>
+  <p class="page-lead muted">名前・予約区分・担当を指定して専用 URL を発行します。詳細は <a href="/app/settings">設定</a> で編集します。</p>
+
+  <section class="panel admin-section">
+    <div class="admin-toolbar">
+      <button type="button" class="btn primary" id="btn-summary">一覧を読み込む</button>
+      <a class="btn secondary" href="/app/settings">設定を開く</a>
+      <a class="btn secondary" href="/app/calendar">カレンダー認証</a>
+      {% if viewer_is_admin | default(false) %}
+      <a class="btn secondary" href="/app/accounts">アカウント・接続</a>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel admin-section" id="link-create-panel" hidden>
+    <h2 class="panel-title">新規予約リンクを発行</h2>
+    <p class="muted panel-hint">
+      担当を選ばない場合は、組織内の<strong>全アクティブ担当</strong>が予約の割当対象になります。
+    </p>
+    <div class="admin-row">
+      <div class="admin-field grow">
+        <label for="new-link-title">リンク名（予約画面の見出しにも使われます）</label>
+        <input type="text" id="new-link-title" placeholder="例: 初回カウンセリング" />
+      </div>
+      <div class="admin-field">
+        <label for="new-link-service">予約区分 <span class="req">*</span></label>
+        <select id="new-link-service" class="admin-input-wide"></select>
+      </div>
+    </div>
+    <fieldset class="staff-checks" id="new-link-staff-wrap">
+      <legend class="field-label">対象担当（任意）</legend>
+      <div id="new-link-staff"></div>
+      <p class="muted small" style="margin-top: 0.5rem">優先度は数字が小さい担当ほど先に割り当てられます。</p>
+    </fieldset>
+    <div class="admin-row">
+      <div class="admin-field">
+        <label for="new-link-block-days">直近の日数をブロック（組織タイムゾーンの「本日」から N 日。0 で無効）</label>
+        <input type="number" id="new-link-block-days" min="0" max="366" value="0" />
+      </div>
+      <div class="admin-field">
+        <label for="new-link-buffer-minutes">予約の前後余白（分）</label>
+        <input type="number" id="new-link-buffer-minutes" min="0" max="180" step="5" value="0" />
+      </div>
+      <div class="admin-field">
+        <label for="new-link-max-advance-days">先行予約の上限（日）</label>
+        <input type="number" id="new-link-max-advance-days" min="0" max="730" step="1" value="0" />
+      </div>
+      <div class="admin-field">
+        <label for="new-link-bookable-until-date">この日以降は予約不可</label>
+        <input type="date" id="new-link-bookable-until-date" class="admin-input-wide" />
+      </div>
+    </div>
+    <div class="admin-field">
+      <label for="new-link-pre-booking-notice">予約ページのお知らせ</label>
+      <textarea id="new-link-pre-booking-notice" class="admin-input-wide" rows="4" placeholder="例: 当日は開始5分前までにZoomへご入室ください。"></textarea>
+    </div>
+    <div class="admin-field">
+      <label for="new-link-post-booking-message">予約完了後の追加メッセージ</label>
+      <textarea id="new-link-post-booking-message" class="admin-input-wide" rows="4" placeholder="例: 担当より事前確認が必要な場合は別途ご連絡します。"></textarea>
+    </div>
+    <button type="button" class="btn primary" id="btn-create-link">専用リンクを発行</button>
+  </section>
+
+  <section class="panel admin-section" id="services-panel" hidden>
+    <h2 class="panel-title">予約区分</h2>
+    <p class="muted panel-hint">予約リンクで使う区分名と所要時間をここで管理します。</p>
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>名前</th>
+            <th>所要（分）</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="services-tbody"></tbody>
+      </table>
+    </div>
+    <div class="admin-row align-end wrap">
+      <div class="admin-field grow">
+        <label for="new-svc-name">区分名</label>
+        <input type="text" id="new-svc-name" placeholder="例: 60分コース" />
+      </div>
+      <div class="admin-field">
+        <label for="new-svc-dur">所要（分）</label>
+        <input type="number" id="new-svc-dur" min="5" max="480" step="5" value="30" class="admin-input-sm" />
+      </div>
+      <div class="admin-field cal-actions">
+        <button type="button" class="btn primary" id="btn-add-service">区分を追加</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel admin-section" id="links-panel" hidden>
+    <h2 class="panel-title">発行済みの予約リンク</h2>
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>リンク名</th>
+            <th>予約区分</th>
+            <th>担当</th>
+            <th>直近ブロック</th>
+            <th>状態</th>
+            <th>URL</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="links-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <p id="admin-msg" class="admin-msg" role="alert"></p>
+
+  {% if viewer_is_admin | default(false) %}
+  <details class="admin-details">
+    <summary>デバッグ JSON</summary>
+    <pre id="admin-out" class="admin-json">一覧を読み込むと表示されます。</pre>
+  </details>
+  {% endif %}
+</div>
+
+<dialog class="booking-dialog" id="edit-campaign-dialog" aria-labelledby="edit-campaign-dialog-title">
+  <div class="booking-dialog__panel" style="max-width: 32rem">
+    <h2 class="booking-dialog__title" id="edit-campaign-dialog-title">予約リンクを編集</h2>
+    <input type="hidden" id="edit-campaign-id" />
+    <div class="admin-field" style="margin-bottom: 0.75rem">
+      <label for="edit-campaign-title">リンク名</label>
+      <input type="text" id="edit-campaign-title" class="booking-dialog__input-wide" autocomplete="off" />
+    </div>
+    <div class="admin-field" style="margin-bottom: 0.75rem">
+      <label for="edit-campaign-service">予約区分</label>
+      <select id="edit-campaign-service" class="booking-dialog__input-wide"></select>
+    </div>
+    <fieldset class="staff-checks" style="margin: 0.75rem 0">
+      <legend class="field-label">対象担当</legend>
+      <div id="edit-campaign-staff"></div>
+      <p class="muted small" style="margin-top: 0.5rem">優先度は数字が小さい担当ほど先に割り当てられます。</p>
+    </fieldset>
+    <div class="admin-field" style="margin-bottom: 0.75rem">
+      <label class="check-line" style="display: flex; align-items: center; gap: 0.5rem">
+        <input type="checkbox" id="edit-campaign-active" />
+        有効（オフにするとこの URL は予約できなくなります）
+      </label>
+    </div>
+    <div class="admin-field" style="margin-bottom: 0.75rem">
+      <label for="edit-campaign-block-days">直近の日数をブロック</label>
+      <input type="number" id="edit-campaign-block-days" class="booking-dialog__input-wide" min="0" max="366" value="0" />
+    </div>
+    <div class="admin-row" style="margin-bottom: 0.75rem">
+      <div class="admin-field">
+        <label for="edit-campaign-buffer-minutes">予約の前後余白（分）</label>
+        <input type="number" id="edit-campaign-buffer-minutes" class="booking-dialog__input-wide" min="0" max="180" step="5" value="0" />
+      </div>
+      <div class="admin-field">
+        <label for="edit-campaign-max-advance-days">先行予約の上限（日）</label>
+        <input type="number" id="edit-campaign-max-advance-days" class="booking-dialog__input-wide" min="0" max="730" step="1" value="0" />
+      </div>
+      <div class="admin-field">
+        <label for="edit-campaign-bookable-until-date">この日以降は予約不可</label>
+        <input type="date" id="edit-campaign-bookable-until-date" class="booking-dialog__input-wide" />
+      </div>
+    </div>
+    <div class="admin-field" style="margin-bottom: 0.75rem">
+      <label for="edit-campaign-pre-booking-notice">予約ページのお知らせ</label>
+      <textarea id="edit-campaign-pre-booking-notice" class="booking-dialog__input-wide" rows="4"></textarea>
+    </div>
+    <div class="admin-field" style="margin-bottom: 0.75rem">
+      <label for="edit-campaign-post-booking-message">予約完了後の追加メッセージ</label>
+      <textarea id="edit-campaign-post-booking-message" class="booking-dialog__input-wide" rows="4"></textarea>
+    </div>
+    <div class="booking-dialog__actions">
+      <button type="button" class="btn secondary" id="edit-campaign-delete">削除</button>
+      <button type="button" class="btn secondary" id="edit-campaign-cancel">閉じる</button>
+      <button type="button" class="btn primary" id="edit-campaign-save">保存</button>
+    </div>
+  </div>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var currentOrgSlug = 'demo-shop';
+  const msg = document.getElementById('admin-msg');
+  const out = document.getElementById('admin-out');
+  let campaignSummary = null;
+
+  function setMsg(text, kind) {
+    msg.textContent = text || '';
+    msg.className = 'admin-msg' + (kind ? ' ' + kind : '');
+  }
+
+  function slug() {
+    return currentOrgSlug;
+  }
+
+  function headersJson() {
+    return { 'Content-Type': 'application/json' };
+  }
+
+  function showLinkPanels(show) {
+    document.getElementById('link-create-panel').hidden = !show;
+    document.getElementById('services-panel').hidden = !show;
+    document.getElementById('links-panel').hidden = !show;
+  }
+
+  function staffNamesForIds(data, ids) {
+    if (!ids || !ids.length) {
+      return '（指定なし：全アクティブ担当）';
+    }
+    const map = {};
+    (data.staff || []).forEach(function (s) {
+      map[s.id] = s.name;
+    });
+    return ids
+      .map(function (id) {
+        return map[id] || 'id ' + id;
+      })
+      .join('、');
+  }
+
+  function fillServiceSelect(sel, data, selectedId) {
+    sel.innerHTML = '';
+    (data.services || [])
+      .filter(function (s) {
+        return s.active !== false;
+      })
+      .forEach(function (s) {
+        const o = document.createElement('option');
+        o.value = String(s.id);
+        o.textContent = (s.name || '') + '（' + (s.duration_minutes || 30) + '分）';
+        if (selectedId != null && Number(selectedId) === s.id) {
+          o.selected = true;
+        }
+        sel.appendChild(o);
+      });
+  }
+
+  function fillStaffCheckboxes(container, data, checkedIds, priorityOverrides) {
+    container.innerHTML = '';
+    const set = {};
+    const priMap = priorityOverrides || {};
+    (checkedIds || []).forEach(function (id) {
+      set[id] = true;
+    });
+    (data.staff || [])
+      .filter(function (s) {
+        return s.active !== false;
+      })
+      .forEach(function (s) {
+        const row = document.createElement('div');
+        row.className = 'admin-row align-end wrap';
+        row.style.marginBottom = '0.45rem';
+        const lab = document.createElement('label');
+        lab.className = 'check-line';
+        lab.style.flex = '1 1 16rem';
+        const cb = document.createElement('input');
+        cb.type = 'checkbox';
+        cb.value = String(s.id);
+        if (set[s.id]) cb.checked = true;
+        lab.appendChild(cb);
+        lab.appendChild(document.createTextNode(' ' + (s.name || '') + ' (id ' + s.id + ')'));
+        row.appendChild(lab);
+        const priWrap = document.createElement('div');
+        priWrap.className = 'admin-field';
+        priWrap.style.minWidth = '8rem';
+        const priLabel = document.createElement('label');
+        priLabel.className = 'field-label';
+        priLabel.style.marginTop = '0';
+        priLabel.textContent = '優先度';
+        const pri = document.createElement('input');
+        pri.type = 'number';
+        pri.min = '0';
+        pri.max = '999999';
+        pri.step = '1';
+        pri.className = 'admin-input-sm';
+        const linkPriority = priMap[String(s.id)];
+        pri.value = String(linkPriority != null ? linkPriority : (s.priority_rank != null ? s.priority_rank : 100));
+        pri.setAttribute('data-staff-priority-id', String(s.id));
+        priWrap.appendChild(priLabel);
+        priWrap.appendChild(pri);
+        row.appendChild(priWrap);
+        container.appendChild(row);
+      });
+  }
+
+  function collectCheckedStaffIds(selector) {
+    const ids = [];
+    document.querySelectorAll(selector + ' input[type=checkbox]:checked').forEach(function (cb) {
+      ids.push(parseInt(cb.value, 10));
+    });
+    return ids;
+  }
+
+  function collectStaffPriorityOverrides(selector, checkedIds) {
+    const checked = {};
+    const out = {};
+    (checkedIds || []).forEach(function (id) {
+      checked[String(id)] = true;
+    });
+    document.querySelectorAll(selector + ' [data-staff-priority-id]').forEach(function (inp) {
+      const id = parseInt(inp.getAttribute('data-staff-priority-id') || '', 10);
+      const pr = parseInt(inp.value, 10);
+      if (!Number.isFinite(id) || !checked[String(id)]) return;
+      out[String(id)] = Number.isFinite(pr) && pr >= 0 ? pr : 100;
+    });
+    return out;
+  }
+
+  async function saveCampaignLink(linkId, payload, okMessage) {
+    const r = await fetch('/api/booking/admin/links/' + encodeURIComponent(String(linkId)), {
+      method: 'PATCH',
+      credentials: 'same-origin',
+      headers: headersJson(),
+      body: JSON.stringify(payload),
+    });
+    const j = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      throw new Error((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText);
+    }
+    if (okMessage) {
+      setMsg(okMessage, 'ok');
+      setTimeout(function () { setMsg(''); }, 2000);
+    }
+    await loadSummary();
+    return j;
+  }
+
+  function openEditCampaign(linkId) {
+    const data = campaignSummary;
+    if (!data) return;
+    const link = (data.links || []).find(function (x) {
+      return x.id === linkId;
+    });
+    if (!link) return;
+    document.getElementById('edit-campaign-id').value = String(link.id);
+    document.getElementById('edit-campaign-title').value = link.title || '';
+    fillServiceSelect(document.getElementById('edit-campaign-service'), data, link.service_id);
+    fillStaffCheckboxes(
+      document.getElementById('edit-campaign-staff'),
+      data,
+      link.staff_ids || [],
+      link.staff_priority_overrides || {}
+    );
+    document.getElementById('edit-campaign-active').checked = link.active !== false;
+    document.getElementById('edit-campaign-block-days').value = String(
+      link.block_next_days != null ? link.block_next_days : 0
+    );
+    document.getElementById('edit-campaign-buffer-minutes').value = String(
+      link.buffer_minutes != null ? link.buffer_minutes : 0
+    );
+    document.getElementById('edit-campaign-max-advance-days').value = String(
+      link.max_advance_booking_days != null ? link.max_advance_booking_days : 0
+    );
+    document.getElementById('edit-campaign-bookable-until-date').value = link.bookable_until_date || '';
+    document.getElementById('edit-campaign-pre-booking-notice').value = link.pre_booking_notice || '';
+    document.getElementById('edit-campaign-post-booking-message').value = link.post_booking_message || '';
+    document.getElementById('edit-campaign-dialog').showModal();
+  }
+
+  function renderLinksSummary(data) {
+    campaignSummary = data;
+
+    fillServiceSelect(document.getElementById('new-link-service'), data, null);
+    fillServiceSelect(document.getElementById('edit-campaign-service'), data, null);
+
+    const wrap = document.getElementById('new-link-staff');
+    fillStaffCheckboxes(wrap, data, [], {});
+
+    const svcBody = document.getElementById('services-tbody');
+    svcBody.innerHTML = '';
+    const svcs = data.services || [];
+    if (!svcs.length) {
+      const trEmpty = document.createElement('tr');
+      const tdEmpty = document.createElement('td');
+      tdEmpty.colSpan = 3;
+      tdEmpty.className = 'muted';
+      tdEmpty.textContent = '予約区分がまだありません。下のフォームから追加してください。';
+      trEmpty.appendChild(tdEmpty);
+      svcBody.appendChild(trEmpty);
+    }
+    svcs.forEach(function (s) {
+      const trSvc = document.createElement('tr');
+      if (s.active === false) {
+        trSvc.className = 'admin-row-muted';
+      }
+      const tdName = document.createElement('td');
+      const inpName = document.createElement('input');
+      inpName.type = 'text';
+      inpName.className = 'admin-staff-inp admin-input-wide';
+      inpName.value = s.name || '';
+      inpName.placeholder = '区分名';
+      tdName.appendChild(inpName);
+      const tdDur = document.createElement('td');
+      const inpDur = document.createElement('input');
+      inpDur.type = 'number';
+      inpDur.min = '5';
+      inpDur.max = '480';
+      inpDur.step = '5';
+      inpDur.className = 'admin-staff-inp admin-input-sm';
+      inpDur.value = String(s.duration_minutes != null ? s.duration_minutes : 30);
+      tdDur.appendChild(inpDur);
+      const tdAct = document.createElement('td');
+      tdAct.className = 'cal-td-actions';
+      const bSaveSvc = document.createElement('button');
+      bSaveSvc.type = 'button';
+      bSaveSvc.className = 'btn sm primary';
+      bSaveSvc.textContent = '保存';
+      bSaveSvc.addEventListener('click', async function () {
+        setMsg('');
+        const name = inpName.value.trim();
+        if (!name) {
+          setMsg('区分名を入力してください', 'err');
+          return;
+        }
+        const dur = parseInt(inpDur.value, 10);
+        const r = await fetch('/api/booking/admin/services/' + s.id, {
+          method: 'PATCH',
+          credentials: 'same-origin',
+          headers: headersJson(),
+          body: JSON.stringify({
+            name: name,
+            duration_minutes: Number.isFinite(dur) && dur > 0 ? dur : 30,
+          }),
+        });
+        const j = await r.json().catch(function () { return {}; });
+        if (!r.ok) {
+          setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
+          return;
+        }
+        setMsg('予約区分を更新しました', 'ok');
+        setTimeout(function () { setMsg(''); }, 2000);
+        await loadSummary();
+      });
+      tdAct.appendChild(bSaveSvc);
+      trSvc.appendChild(tdName);
+      trSvc.appendChild(tdDur);
+      trSvc.appendChild(tdAct);
+      svcBody.appendChild(trSvc);
+    });
+
+    const ltBody = document.getElementById('links-tbody');
+    ltBody.innerHTML = '';
+    (data.links || []).forEach(function (l) {
+      const tr = document.createElement('tr');
+      const tdT = document.createElement('td');
+      tdT.textContent = l.title || '';
+      const tdCat = document.createElement('td');
+      tdCat.textContent = l.service_name || (l.service_id ? 'id ' + l.service_id : '—');
+      const tdSt = document.createElement('td');
+      tdSt.textContent = staffNamesForIds(data, l.staff_ids || []);
+      const tdBlk = document.createElement('td');
+      const bnd = l.block_next_days != null ? Number(l.block_next_days) : 0;
+      tdBlk.textContent = bnd > 0 ? bnd + '日' : '—';
+      const tdSta = document.createElement('td');
+      tdSta.textContent = l.active === false ? '無効' : '有効';
+      if (l.active === false) {
+        tr.style.opacity = '0.85';
+      }
+      const tdU = document.createElement('td');
+      const code = document.createElement('code');
+      code.className = 'url-cell';
+      code.textContent = l.public_url || '';
+      tdU.appendChild(code);
+      const tdA = document.createElement('td');
+      tdA.className = 'cal-td-actions';
+      const b0 = document.createElement('button');
+      b0.type = 'button';
+      b0.className = 'btn sm secondary';
+      b0.textContent = '編集';
+      b0.addEventListener('click', function () {
+        openEditCampaign(l.id);
+      });
+      const bToggle = document.createElement('button');
+      bToggle.type = 'button';
+      bToggle.className = 'btn sm secondary';
+      bToggle.textContent = l.active === false ? '有効化' : '無効化';
+      bToggle.addEventListener('click', async function () {
+        setMsg('');
+        try {
+          const currentlyActive = l.active !== false;
+          const nextActive = !currentlyActive;
+          await saveCampaignLink(
+            l.id,
+            { active: nextActive },
+            nextActive ? 'リンクを有効にしました' : 'リンクを無効にしました'
+          );
+        } catch (e) {
+          setMsg(String(e), 'err');
+        }
+      });
+      const b1 = document.createElement('button');
+      b1.type = 'button';
+      b1.className = 'btn sm secondary';
+      b1.textContent = 'コピー';
+      b1.addEventListener('click', function () {
+        const url = l.public_url || '';
+        if (navigator.clipboard && url) navigator.clipboard.writeText(url);
+      });
+      const b2 = document.createElement('a');
+      b2.className = 'btn sm ghost';
+      b2.href = l.public_url || '#';
+      b2.target = '_blank';
+      b2.rel = 'noopener noreferrer';
+      b2.textContent = '開く';
+      tdA.appendChild(b0);
+      tdA.appendChild(bToggle);
+      tdA.appendChild(b1);
+      tdA.appendChild(b2);
+      tr.appendChild(tdT);
+      tr.appendChild(tdCat);
+      tr.appendChild(tdSt);
+      tr.appendChild(tdBlk);
+      tr.appendChild(tdSta);
+      tr.appendChild(tdU);
+      tr.appendChild(tdA);
+      ltBody.appendChild(tr);
+    });
+
+    showLinkPanels(true);
+    if (out) out.textContent = JSON.stringify(data, null, 2);
+  }
+
+  async function getJson(path) {
+    setMsg('');
+    const r = await fetch(path, { credentials: 'same-origin', headers: headersJson() });
+    const text = await r.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+    if (!r.ok) {
+      setMsg(typeof data === 'object' && data.detail ? JSON.stringify(data.detail) : r.status + ' ' + text, 'err');
+      if (out) out.textContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : text;
+      return null;
+    }
+    return data;
+  }
+
+  async function loadSummary() {
+    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary');
+    if (data) renderLinksSummary(data);
+  }
+
+  document.getElementById('btn-summary').addEventListener('click', loadSummary);
+
+  document.getElementById('btn-add-service').addEventListener('click', async function () {
+    setMsg('');
+    const name = document.getElementById('new-svc-name').value.trim();
+    if (!name) {
+      setMsg('区分名を入力してください', 'err');
+      return;
+    }
+    const dur = parseInt(document.getElementById('new-svc-dur').value, 10);
+    const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/services', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: headersJson(),
+      body: JSON.stringify({
+        name: name,
+        duration_minutes: Number.isFinite(dur) && dur > 0 ? dur : 30,
+      }),
+    });
+    const j = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
+      return;
+    }
+    document.getElementById('new-svc-name').value = '';
+    setMsg('予約区分を追加しました', 'ok');
+    setTimeout(function () { setMsg(''); }, 2000);
+    await loadSummary();
+  });
+
+  document.getElementById('btn-create-link').addEventListener('click', async function () {
+    setMsg('');
+    const title = document.getElementById('new-link-title').value.trim() || '予約リンク';
+    const svcEl = document.getElementById('new-link-service');
+    const serviceId = svcEl ? parseInt(svcEl.value, 10) : NaN;
+    if (!Number.isFinite(serviceId)) {
+      setMsg('予約区分を選んでください。区分が無い場合は「設定」で追加してください。', 'err');
+      return;
+    }
+    const ids = collectCheckedStaffIds('#new-link-staff');
+    const priorityOverrides = collectStaffPriorityOverrides('#new-link-staff', ids);
+    const blockDays = parseInt(document.getElementById('new-link-block-days').value, 10);
+    const bufferMinutes = parseInt(document.getElementById('new-link-buffer-minutes').value, 10);
+    const maxAdvanceDays = parseInt(document.getElementById('new-link-max-advance-days').value, 10);
+    const bookableUntilDate = document.getElementById('new-link-bookable-until-date').value.trim();
+    const preBookingNotice = document.getElementById('new-link-pre-booking-notice').value.trim();
+    const postBookingMessage = document.getElementById('new-link-post-booking-message').value.trim();
+    try {
+      const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/links', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: headersJson(),
+        body: JSON.stringify({
+          title: title,
+          service_id: serviceId,
+          staff_ids: ids,
+          staff_priority_overrides: priorityOverrides,
+          buffer_minutes: Number.isFinite(bufferMinutes) ? Math.min(180, Math.max(0, bufferMinutes)) : 0,
+          max_advance_booking_days: Number.isFinite(maxAdvanceDays) ? Math.min(730, Math.max(0, maxAdvanceDays)) : 0,
+          bookable_until_date: bookableUntilDate || null,
+          pre_booking_notice: preBookingNotice || null,
+          post_booking_message: postBookingMessage || null,
+          block_next_days: Number.isFinite(blockDays) ? Math.min(366, Math.max(0, blockDays)) : 0,
+        }),
+      });
+      const j = await r.json().catch(function () {
+        return {};
+      });
+      if (!r.ok) {
+        setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
+        return;
+      }
+      document.getElementById('new-link-title').value = '';
+      document.getElementById('new-link-block-days').value = '0';
+      document.getElementById('new-link-buffer-minutes').value = '0';
+      document.getElementById('new-link-max-advance-days').value = '0';
+      document.getElementById('new-link-bookable-until-date').value = '';
+      document.getElementById('new-link-pre-booking-notice').value = '';
+      document.getElementById('new-link-post-booking-message').value = '';
+      await loadSummary();
+      alert('発行しました。\n' + (j.public_url || ''));
+    } catch (e) {
+      setMsg(String(e), 'err');
+      return;
+    }
+  });
+
+  document.getElementById('edit-campaign-cancel').addEventListener('click', function () {
+    document.getElementById('edit-campaign-dialog').close();
+  });
+
+  document.getElementById('edit-campaign-dialog').addEventListener('cancel', function (ev) {
+    ev.preventDefault();
+    document.getElementById('edit-campaign-dialog').close();
+  });
+
+  document.getElementById('edit-campaign-save').addEventListener('click', async function () {
+    setMsg('');
+    const idStr = document.getElementById('edit-campaign-id').value.trim();
+    const linkId = parseInt(idStr, 10);
+    if (!Number.isFinite(linkId)) return;
+    const title = document.getElementById('edit-campaign-title').value.trim();
+    const svcEl = document.getElementById('edit-campaign-service');
+    const serviceId = svcEl ? parseInt(svcEl.value, 10) : NaN;
+    if (!Number.isFinite(serviceId)) {
+      setMsg('予約区分を選んでください。', 'err');
+      return;
+    }
+    const ids = collectCheckedStaffIds('#edit-campaign-staff');
+    const priorityOverrides = collectStaffPriorityOverrides('#edit-campaign-staff', ids);
+    const blockDays = parseInt(document.getElementById('edit-campaign-block-days').value, 10);
+    const bufferMinutes = parseInt(document.getElementById('edit-campaign-buffer-minutes').value, 10);
+    const maxAdvanceDays = parseInt(document.getElementById('edit-campaign-max-advance-days').value, 10);
+    const bookableUntilDate = document.getElementById('edit-campaign-bookable-until-date').value.trim();
+    const preBookingNotice = document.getElementById('edit-campaign-pre-booking-notice').value.trim();
+    const postBookingMessage = document.getElementById('edit-campaign-post-booking-message').value.trim();
+    try {
+      await saveCampaignLink(linkId, {
+        title: title || undefined,
+        service_id: serviceId,
+        staff_ids: ids,
+        staff_priority_overrides: priorityOverrides,
+        buffer_minutes: Number.isFinite(bufferMinutes) ? Math.min(180, Math.max(0, bufferMinutes)) : 0,
+        max_advance_booking_days: Number.isFinite(maxAdvanceDays) ? Math.min(730, Math.max(0, maxAdvanceDays)) : 0,
+        bookable_until_date: bookableUntilDate || null,
+        pre_booking_notice: preBookingNotice || null,
+        post_booking_message: postBookingMessage || null,
+        active: document.getElementById('edit-campaign-active').checked,
+        block_next_days: Number.isFinite(blockDays) ? Math.min(366, Math.max(0, blockDays)) : 0,
+      }, '保存しました');
+      document.getElementById('edit-campaign-dialog').close();
+    } catch (e) {
+      setMsg(String(e), 'err');
+    }
+  });
+
+  document.getElementById('edit-campaign-delete').addEventListener('click', async function () {
+    setMsg('');
+    const idStr = document.getElementById('edit-campaign-id').value.trim();
+    const linkId = parseInt(idStr, 10);
+    if (!Number.isFinite(linkId)) return;
+    if (!window.confirm('この予約リンクを削除します。元に戻せません。よろしいですか？')) return;
+    const r = await fetch('/api/booking/admin/links/' + encodeURIComponent(String(linkId)), {
+      method: 'DELETE',
+      credentials: 'same-origin',
+      headers: headersJson(),
+    });
+    const j = await r.json().catch(function () {
+      return {};
+    });
+    if (!r.ok) {
+      setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
+      return;
+    }
+    document.getElementById('edit-campaign-dialog').close();
+    setMsg('削除しました', 'ok');
+    setTimeout(function () {
+      setMsg('');
+    }, 2000);
+    await loadSummary();
+  });
+
+  fetch('/api/auth/me', { credentials: 'same-origin' })
+    .then(function (r) {
+      return r.json();
+    })
+    .then(function (j) {
+      if (j.authenticated && j.user && j.user.default_org_slug) {
+        currentOrgSlug = j.user.default_org_slug;
+      }
+      if (j && j.authenticated) {
+        loadSummary().catch(function () {});
+      }
+    })
+    .catch(function () {});
+})();
+</script>
+{% endblock %}

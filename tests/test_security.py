@@ -1,0 +1,63 @@
+from __future__ import annotations
+
+from types import SimpleNamespace
+
+import pytest
+from fastapi import HTTPException
+
+from app.auth.rate_limit import check_login_rate_limit, clear_login_failures, record_login_failure
+from app.config import Settings
+
+
+def _dummy_request(ip: str = "127.0.0.1"):
+    return SimpleNamespace(client=SimpleNamespace(host=ip))
+
+
+def test_settings_trusted_hosts_include_public_base_host() -> None:
+    s = Settings(
+        public_base_url="https://reserve.example.com",
+        security_trusted_hosts="booking.example.com, reserve.example.com",
+    )
+    hosts = s.trusted_hosts()
+    assert "reserve.example.com" in hosts
+    assert "booking.example.com" in hosts
+    assert "localhost" in hosts
+
+
+def test_public_deployment_hides_demo_info() -> None:
+    s = Settings(public_base_url="https://reserve.example.com")
+    assert s.should_expose_demo_info() is False
+
+
+def test_platform_url_overrides_localhost_defaults() -> None:
+    s = Settings(
+        public_base_url="http://127.0.0.1:8000",
+        google_oauth_redirect_uri="http://127.0.0.1:8000/api/booking/oauth/google/callback",
+        render_external_url="https://booking-test.onrender.com",
+    )
+    assert s.public_base_url_value() == "https://booking-test.onrender.com"
+    assert (
+        s.google_oauth_redirect_uri_value()
+        == "https://booking-test.onrender.com/api/booking/oauth/google/callback"
+    )
+    assert "booking-test.onrender.com" in s.trusted_hosts()
+
+
+def test_login_rate_limit_blocks_after_repeated_failures() -> None:
+    request = _dummy_request("10.0.0.8")
+    username = "tester"
+    clear_login_failures(request, username)
+    for _ in range(2):
+        record_login_failure(request, username, window_sec=3600)
+    with pytest.raises(HTTPException) as exc:
+        check_login_rate_limit(request, username, max_attempts=2, window_sec=3600)
+    assert exc.value.status_code == 429
+    clear_login_failures(request, username)
+
+
+def test_security_headers_present(client) -> None:
+    r = client.get("/health")
+    assert r.status_code == 200
+    assert r.headers.get("x-content-type-options") == "nosniff"
+    assert r.headers.get("x-frame-options") == "DENY"
+    assert r.headers.get("content-security-policy")

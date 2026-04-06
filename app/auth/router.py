@@ -1,0 +1,407 @@
+from __future__ import annotations
+
+import hashlib
+import secrets
+from datetime import datetime, timedelta, timezone
+from typing import Annotated, Any
+
+from fastapi import APIRouter, Depends, Header, HTTPException, Request
+from sqlalchemy import delete, func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.auth.deps import get_current_app_user, require_session_admin_only
+from app.auth.models import AppUser, PasswordResetToken
+from app.auth.passwords import hash_password, verify_password
+from app.auth.rate_limit import (
+    check_login_rate_limit,
+    clear_login_failures,
+    record_login_failure,
+)
+from app.auth.schemas import (
+    AdminSetPasswordBody,
+    AdminUserCreate,
+    AdminUserOrgPatch,
+    ForgotPasswordBody,
+    LoginBody,
+    ResetPasswordBody,
+    UserPreferencesPatch,
+)
+from app.booking.db_models import BookingOrg
+from app.booking.email_booking import send_simple_mail
+from app.config import Settings, get_settings
+from app.db import get_session_factory
+
+router = APIRouter(tags=["auth"])
+
+
+async def _session_db() -> AsyncSession:
+    factory = get_session_factory()
+    async with factory() as session:
+        yield session
+
+
+AuthDb = Annotated[AsyncSession, Depends(_session_db)]
+
+
+async def _materialize_org_assignment(
+    db: AsyncSession,
+    org_slug_in: str | None,
+    org_name_in: str | None,
+) -> str | None:
+    """操作中の組織として使う slug を返す。紐付けなしは None。既存組織があれば表示名が渡されていれば更新。"""
+    if not org_slug_in:
+        if org_name_in and org_name_in.strip():
+            raise HTTPException(400, "組織 slug を入力してください。")
+        return None
+    slug = org_slug_in
+    name_stripped = (org_name_in or "").strip() or None
+    existing = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+    if existing:
+        if name_stripped is not None and name_stripped != existing.name:
+            existing.name = name_stripped
+        return slug
+    if not name_stripped:
+        raise HTTPException(
+            400,
+            "指定の組織 slug はまだありません。新規に作成する場合は「組織の表示名」も入力してください。",
+        )
+    new_org = BookingOrg(
+        name=name_stripped,
+        slug=slug,
+        routing_mode="round_robin",
+        cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": True},
+        availability_defaults_json={
+            "timezone": "Asia/Tokyo",
+            "start": "08:00",
+            "end": "22:00",
+            "slot_minutes": 30,
+            "buffer_minutes": 0,
+            "block_saturday": False,
+            "block_sunday": False,
+            "block_weekends": False,
+            "block_holidays": False,
+        },
+    )
+    db.add(new_org)
+    try:
+        await db.flush()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(400, "この組織 slug は既に使われています")
+    return slug
+
+
+@router.post("/api/auth/login")
+async def login(
+    request: Request,
+    body: LoginBody,
+    db: AuthDb,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    username = body.username.strip()
+    check_login_rate_limit(
+        request,
+        username,
+        max_attempts=max(1, int(settings.auth_rate_limit_max_attempts or 10)),
+        window_sec=max(60, int(settings.auth_rate_limit_window_sec or 900)),
+    )
+    u = await db.scalar(select(AppUser).where(AppUser.username == username))
+    if not u or not u.is_active:
+        record_login_failure(
+            request,
+            username,
+            window_sec=max(60, int(settings.auth_rate_limit_window_sec or 900)),
+        )
+        raise HTTPException(401, "ユーザーIDまたはパスワードが正しくありません")
+    if not verify_password(body.password, u.password_hash):
+        record_login_failure(
+            request,
+            username,
+            window_sec=max(60, int(settings.auth_rate_limit_window_sec or 900)),
+        )
+        raise HTTPException(401, "ユーザーIDまたはパスワードが正しくありません")
+    clear_login_failures(request, username)
+    request.session["user_id"] = u.id
+    return {
+        "ok": True,
+        "user": {
+            "id": u.id,
+            "username": u.username,
+            "role": u.role,
+            "display_name": u.display_name or "",
+            "default_org_slug": u.default_org_slug,
+        },
+    }
+
+
+@router.post("/api/auth/logout")
+async def logout(request: Request) -> dict:
+    request.session.clear()
+    return {"ok": True}
+
+
+@router.get("/api/auth/me")
+async def me(request: Request, db: AuthDb) -> dict:
+    u = await get_current_app_user(request, db)
+    if not u:
+        return {"authenticated": False}
+    # 未設定なら先頭の組織をこのアカウントに自動紐付け（手動選択なしで利用可）
+    if u.default_org_slug is None:
+        first = (await db.scalars(select(BookingOrg).order_by(BookingOrg.id).limit(1))).first()
+        if first is not None:
+            u.default_org_slug = first.slug
+            await db.commit()
+            await db.refresh(u)
+    default_org_name: str | None = None
+    if u.default_org_slug:
+        org_row = await db.scalar(select(BookingOrg).where(BookingOrg.slug == u.default_org_slug))
+        if org_row is not None:
+            default_org_name = (org_row.name or "").strip() or None
+    return {
+        "authenticated": True,
+        "user": {
+            "id": u.id,
+            "username": u.username,
+            "role": u.role,
+            "display_name": u.display_name or "",
+            "email": u.email,
+            "default_org_slug": u.default_org_slug,
+            "default_org_name": default_org_name,
+        },
+    }
+
+
+@router.patch("/api/auth/me/preferences")
+async def patch_me_preferences(
+    request: Request,
+    body: UserPreferencesPatch,
+    db: AuthDb,
+) -> dict:
+    u = await get_current_app_user(request, db)
+    if not u:
+        raise HTTPException(401, "ログインが必要です")
+    if body.default_org_slug is not None:
+        raw = (body.default_org_slug or "").strip()
+        if not raw:
+            u.default_org_slug = None
+        else:
+            slug = raw.lower()
+            org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+            if not org:
+                raise HTTPException(400, "指定の組織が見つかりません")
+            u.default_org_slug = slug
+    await db.commit()
+    await db.refresh(u)
+    return {"ok": True, "default_org_slug": u.default_org_slug}
+
+
+def _token_hash(raw: str) -> str:
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+@router.post("/api/auth/forgot-password")
+async def forgot_password(
+    body: ForgotPasswordBody,
+    db: AuthDb,
+    settings: Settings = Depends(get_settings),
+) -> dict:
+    u = await db.scalar(select(AppUser).where(AppUser.username == body.username.strip()))
+    if not u or not u.is_active:
+        return {"ok": True, "message": "該当する場合はメールを送信しました"}
+    em = (u.email or "").strip().lower()
+    if not em or em != str(body.email).strip().lower():
+        return {"ok": True, "message": "該当する場合はメールを送信しました"}
+    if not settings.smtp_host:
+        raise HTTPException(
+            503,
+            "メール送信が未設定です。管理者にパスワード再設定を依頼するか、SMTP を .env に設定してください。",
+        )
+    raw = secrets.token_urlsafe(32)
+    th = _token_hash(raw)
+    exp = datetime.now(timezone.utc) + timedelta(hours=2)
+    await db.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == u.id))
+    db.add(PasswordResetToken(user_id=u.id, token_hash=th, expires_at=exp))
+    await db.commit()
+    base = settings.public_base_url_value()
+    link = f"{base}/app/reset-password?token={raw}"
+    text = (
+        f"{u.username} 様\n\n"
+        "パスワード再設定のリクエストを受け付けました。次のリンクから新しいパスワードを設定してください（2時間有効）。\n\n"
+        f"{link}\n\n"
+        "心当たりがない場合はこのメールを無視してください。"
+    )
+    ok = await send_simple_mail(
+        settings,
+        [em],
+        "[予約管理] パスワード再設定",
+        text,
+        dry_run=settings.actions_dry_run,
+    )
+    if not ok and not settings.actions_dry_run:
+        raise HTTPException(500, "メール送信に失敗しました")
+    return {"ok": True, "message": "該当する場合はメールを送信しました"}
+
+
+@router.post("/api/auth/reset-password")
+async def reset_password_ep(body: ResetPasswordBody, db: AuthDb) -> dict:
+    th = _token_hash(body.token.strip())
+    now = datetime.now(timezone.utc)
+    row = await db.scalar(
+        select(PasswordResetToken).where(
+            PasswordResetToken.token_hash == th,
+            PasswordResetToken.used_at.is_(None),
+            PasswordResetToken.expires_at > now,
+        )
+    )
+    if not row:
+        raise HTTPException(400, "リンクが無効か期限切れです。再度お手続きください。")
+    user = await db.get(AppUser, row.user_id)
+    if not user or not user.is_active:
+        raise HTTPException(400, "アカウントが無効です")
+    user.password_hash = hash_password(body.new_password)
+    row.used_at = now
+    await db.commit()
+    return {"ok": True}
+
+
+@router.get("/api/auth/admin/users")
+async def admin_list_users(
+    request: Request,
+    db: AuthDb,
+    settings: Settings = Depends(get_settings),
+    x_admin_secret: str | None = Header(None),
+) -> dict:
+    await require_session_admin_only(request, settings, db, x_admin_secret)
+    rows = (await db.scalars(select(AppUser).order_by(AppUser.id))).all()
+    slugs = [s for s in (u.default_org_slug for u in rows) if s]
+    org_names: dict[str, str] = {}
+    if slugs:
+        org_rows = (await db.scalars(select(BookingOrg).where(BookingOrg.slug.in_(slugs)))).all()
+        for o in org_rows:
+            org_names[o.slug] = o.name
+    return {
+        "users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "role": u.role,
+                "is_active": u.is_active,
+                "email": u.email,
+                "display_name": u.display_name,
+                "default_org_slug": u.default_org_slug,
+                "org_name": org_names.get(u.default_org_slug) if u.default_org_slug else None,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+            }
+            for u in rows
+        ]
+    }
+
+
+@router.post("/api/auth/admin/users")
+async def admin_create_user(
+    request: Request,
+    body: AdminUserCreate,
+    db: AuthDb,
+    settings: Settings = Depends(get_settings),
+    x_admin_secret: str | None = Header(None),
+) -> dict:
+    await require_session_admin_only(request, settings, db, x_admin_secret)
+    un = body.username.strip()
+    if not un:
+        raise HTTPException(400, "ユーザーIDを入力してください")
+    exists = await db.scalar(select(AppUser.id).where(AppUser.username == un))
+    if exists:
+        raise HTTPException(400, "このユーザーIDは既に使われています")
+    role = (body.role or "user").strip().lower()
+    if role not in ("admin", "user"):
+        raise HTTPException(400, "role は admin または user です")
+    n = await db.scalar(select(func.count()).select_from(AppUser))
+    if (n or 0) == 0:
+        role = "admin"
+
+    default_org_slug = await _materialize_org_assignment(db, body.org_slug, body.org_name)
+
+    u = AppUser(
+        username=un,
+        password_hash=hash_password(body.password),
+        role=role,
+        email=(body.email or "").strip() or None,
+        display_name=(body.display_name or "").strip(),
+        default_org_slug=default_org_slug,
+    )
+    db.add(u)
+    await db.commit()
+    await db.refresh(u)
+    return {
+        "id": u.id,
+        "username": u.username,
+        "role": u.role,
+        "default_org_slug": u.default_org_slug,
+    }
+
+
+@router.patch("/api/auth/admin/users/{user_id}/org")
+async def admin_patch_user_org(
+    user_id: int,
+    request: Request,
+    body: AdminUserOrgPatch,
+    db: AuthDb,
+    settings: Settings = Depends(get_settings),
+    x_admin_secret: str | None = Header(None),
+) -> dict[str, Any]:
+    await require_session_admin_only(request, settings, db, x_admin_secret)
+    user = await db.get(AppUser, user_id)
+    if not user:
+        raise HTTPException(404, "user not found")
+    slug = await _materialize_org_assignment(db, body.org_slug, body.org_name)
+    user.default_org_slug = slug
+    await db.commit()
+    await db.refresh(user)
+    org_name_out: str | None = None
+    if slug:
+        org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+        org_name_out = org.name if org else None
+    return {"ok": True, "default_org_slug": user.default_org_slug, "org_name": org_name_out}
+
+
+@router.delete("/api/auth/admin/users/{user_id}")
+async def admin_delete_user(
+    user_id: int,
+    request: Request,
+    db: AuthDb,
+    settings: Settings = Depends(get_settings),
+    x_admin_secret: str | None = Header(None),
+) -> dict:
+    actor = await require_session_admin_only(request, settings, db, x_admin_secret)
+    if user_id == actor.id:
+        raise HTTPException(400, "自分自身は削除できません")
+    u = await db.get(AppUser, user_id)
+    if not u:
+        raise HTTPException(404, "user not found")
+    admin_cnt = await db.scalar(
+        select(func.count()).select_from(AppUser).where(AppUser.role == "admin", AppUser.is_active.is_(True))
+    )
+    if u.role == "admin" and admin_cnt is not None and int(admin_cnt) <= 1:
+        raise HTTPException(400, "最後の管理者は削除できません")
+    await db.execute(delete(AppUser).where(AppUser.id == user_id))
+    await db.commit()
+    return {"ok": True}
+
+
+@router.post("/api/auth/admin/users/{user_id}/password")
+async def admin_set_user_password(
+    user_id: int,
+    request: Request,
+    body: AdminSetPasswordBody,
+    db: AuthDb,
+    settings: Settings = Depends(get_settings),
+    x_admin_secret: str | None = Header(None),
+) -> dict:
+    await require_session_admin_only(request, settings, db, x_admin_secret)
+    u = await db.get(AppUser, user_id)
+    if not u:
+        raise HTTPException(404, "user not found")
+    u.password_hash = hash_password(body.new_password)
+    await db.commit()
+    return {"ok": True}

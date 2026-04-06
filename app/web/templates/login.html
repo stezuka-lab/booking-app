@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}ログイン{% endblock %}
+{% set nav = 'login' %}
+{% block content %}
+<div class="admin-console" style="max-width: 28rem; margin: 2rem auto">
+  <h1 class="page-title">ログイン</h1>
+  <p class="page-lead muted">ユーザーIDとパスワードでログインします。</p>
+  <div class="panel admin-section">
+    <div class="admin-field">
+      <label for="login-user">ユーザーID</label>
+      <input type="text" id="login-user" autocomplete="username" class="booking-dialog__input-wide" />
+    </div>
+    <div class="admin-field">
+      <label for="login-pass">パスワード</label>
+      <input type="password" id="login-pass" autocomplete="current-password" class="booking-dialog__input-wide" />
+    </div>
+    <p id="login-msg" class="admin-msg err" role="alert"></p>
+    <div class="admin-toolbar">
+      <button type="button" class="btn primary" id="btn-login">ログイン</button>
+      <a class="btn secondary" href="/app/forgot-password">パスワードを忘れた場合</a>
+    </div>
+  </div>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const next = {{ login_next | tojson }};
+  const msg = document.getElementById('login-msg');
+  document.getElementById('btn-login').addEventListener('click', async function () {
+    msg.textContent = '';
+    const u = document.getElementById('login-user').value.trim();
+    const p = document.getElementById('login-pass').value;
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: u, password: p }),
+    });
+    const j = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      msg.textContent = (j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || 'ログインに失敗しました';
+      return;
+    }
+    window.location.href = next || '/app';
+  });
+})();
+</script>
+{% endblock %}

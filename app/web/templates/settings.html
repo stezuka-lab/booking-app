@@ -1,0 +1,541 @@
+{% extends "base.html" %}
+{% block title %}設定{% endblock %}
+{% set nav = 'settings' %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="admin-console">
+  <h1 class="page-title">設定</h1>
+
+  <section class="panel admin-section">
+    <div class="admin-toolbar">
+      <button type="button" class="btn primary" id="btn-summary">設定を読み込む</button>
+      <a class="btn secondary" href="/app/calendar">カレンダー認証</a>
+      <a class="btn secondary" href="/app/campaigns">予約リンク</a>
+      {% if viewer_is_admin | default(false) %}
+      <a class="btn secondary" href="/app/accounts">アカウント・組織・接続</a>
+      {% endif %}
+    </div>
+  </section>
+
+  <section class="panel admin-section" id="summary-panel" hidden>
+    <h2 class="panel-title">概要</h2>
+    <div class="summary-cards" id="summary-cards"></div>
+  </section>
+
+  <section class="panel admin-section" id="calendar-auth-panel" hidden>
+    <h2 class="panel-title">カレンダー認証</h2>
+    <p class="muted panel-hint" id="calendar-auth-summary-hint"></p>
+    <div class="admin-toolbar">
+      <a class="btn primary" href="/app/calendar">カレンダー認証を開く</a>
+    </div>
+  </section>
+
+  <section class="panel admin-section" id="org-settings-panel" hidden>
+    <h2 class="panel-title">割当・確定</h2>
+    <div class="admin-row align-end">
+      <div class="admin-field">
+        <label class="field-label" for="org-routing-mode">ルーティング</label>
+        <select id="org-routing-mode">
+          <option value="round_robin">round_robin（均等）</option>
+          <option value="priority">priority（優先度順に割当）</option>
+          <option value="priority_fill">priority_fill（優先度順に枠が埋まる）</option>
+        </select>
+      </div>
+      <div class="admin-field admin-field-check">
+        <label class="check-line">
+          <input type="checkbox" id="org-auto-confirm" />
+          予約を自動確定
+        </label>
+      </div>
+      <div class="admin-field cal-actions">
+        <button type="button" class="btn primary" id="btn-save-org">保存</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="panel admin-section" id="org-email-panel" hidden>
+    <h2 class="panel-title">予約完了メール</h2>
+    <div class="admin-row">
+      <div class="admin-field admin-field-check">
+        <label class="check-line">
+          <input type="checkbox" id="email-send-customer" checked />
+          顧客へ予約確認メールを送る
+        </label>
+      </div>
+      <div class="admin-field admin-field-check">
+        <label class="check-line">
+          <input type="checkbox" id="email-send-staff" checked />
+          担当者へ通知メールを送る
+        </label>
+      </div>
+      <div class="admin-field cal-actions">
+        <button type="button" class="btn primary" id="btn-save-email">メール設定を保存</button>
+      </div>
+    </div>
+    <div class="admin-field grow">
+      <label for="email-intro">顧客向けメールの冒頭（任意・複数行可）</label>
+      <textarea id="email-intro" class="booking-dialog__input-wide" rows="3" placeholder="例: このたびはお申し込みありがとうございます。"></textarea>
+    </div>
+    <div class="admin-field grow">
+      <label for="email-footer">顧客向けメールの末尾（任意）</label>
+      <textarea id="email-footer" class="booking-dialog__input-wide" rows="3" placeholder="例: ご不明点はお電話でお問い合わせください。"></textarea>
+    </div>
+  </section>
+
+  <section class="panel admin-section" id="org-availability-panel" hidden>
+    <h2 class="panel-title">予約可能時間・休日・余白</h2>
+
+    <div class="admin-avail-section">
+      <h3 class="admin-avail-section-title">1. 受付できる時間帯</h3>
+      <div class="admin-avail-time-row">
+        <div class="admin-field">
+          <label class="field-label" for="org-avail-start">開始</label>
+          <input type="time" id="org-avail-start" step="300" class="admin-input-time" />
+        </div>
+        <span class="admin-avail-time-sep">〜</span>
+        <div class="admin-field">
+          <label class="field-label" for="org-avail-end">終了</label>
+          <input type="time" id="org-avail-end" step="300" class="admin-input-time" />
+        </div>
+      </div>
+    </div>
+
+    <div class="admin-avail-section">
+      <h3 class="admin-avail-section-title">2. 休業日（土日・祝日）</h3>
+      <div class="admin-row align-start wrap">
+        <div class="admin-field admin-field-check">
+          <label class="check-line">
+            <input type="checkbox" id="org-block-sat" />
+            土曜を予約不可にする
+          </label>
+        </div>
+        <div class="admin-field admin-field-check">
+          <label class="check-line">
+            <input type="checkbox" id="org-block-sun" />
+            日曜を予約不可にする
+          </label>
+        </div>
+        <div class="admin-field admin-field-check">
+          <label class="check-line">
+            <input type="checkbox" id="org-block-holidays" />
+            祝日を予約不可にする（日本の祝日）
+          </label>
+        </div>
+      </div>
+    </div>
+    <div class="admin-row align-start wrap">
+      <div class="admin-field grow cal-title-template-wrap">
+        <label class="field-label" for="org-cal-title-template">カレンダー予定の件名（テンプレート）</label>
+        <div class="cal-title-template-box">
+          <div class="cal-preset-row">
+            <span class="muted small">定型例:</span>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-1" data-tpl="{service} — {name}">区分 — お名前</button>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-2" data-tpl="{name}（{service}）">お名前（区分）</button>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-3" data-tpl="{company} {name} / {service}">会社 氏名 / 区分</button>
+          </div>
+          <div class="cal-title-chips" role="group" aria-label="プレースホルダを挿入">
+            <span class="cal-title-chip-label">挿入（タップで追加）</span>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{service}">区分名 {service}</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{name}">お名前 {name}</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{company}">会社名 {company}</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{phone}">電話 {phone}</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{customer_number}">顧客番号</button>
+            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token=" — ">—</button>
+            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="（">（</button>
+            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="）">）</button>
+          </div>
+          <input
+            type="text"
+            id="org-cal-title-template"
+            class="admin-input-wide cal-title-template-input"
+            placeholder="{service} — {name}（{company}）"
+            autocomplete="off"
+            spellcheck="false"
+          />
+          <p class="cal-title-preview-line" id="org-cal-title-preview-wrap" hidden>
+            <span class="muted small">例の見え方: </span><strong id="org-cal-title-preview">—</strong>
+          </p>
+        </div>
+        <p class="muted small" style="margin-top: 0.35rem">
+          <code>{service}</code> <code>{name}</code> <code>{company}</code> <code>{phone}</code> <code>{customer_number}</code>
+        </p>
+        <p class="muted small" style="margin-top: 0.35rem">
+          予約リンクごとの前後余白と先行予約上限は「予約リンク」画面で設定します。
+        </p>
+      </div>
+      <div class="admin-field cal-actions">
+        <button type="button" class="btn primary" id="btn-save-availability">予約可能時間・休日・件名を保存</button>
+      </div>
+    </div>
+  </section>
+
+  <p id="admin-msg" class="admin-msg" role="alert"></p>
+
+  {% if viewer_is_admin | default(false) %}
+  <details class="admin-details">
+    <summary>デバッグ JSON</summary>
+    <pre id="admin-out" class="admin-json">設定を読み込むと表示されます。</pre>
+  </details>
+  {% endif %}
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const VIEWER_IS_ADMIN = {{ viewer_is_admin | default(false) | tojson }};
+  const msg = document.getElementById('admin-msg');
+  const out = document.getElementById('admin-out');
+  /** API パスに使う確定 slug（入力欄を未保存のまま編集しても古い slug でリクエストする） */
+  var patchSlug = null;
+  var ORG_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+  function formatApiDetail(detail) {
+    if (detail == null || detail === '') return '';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map(function (e) {
+          if (e && typeof e === 'object') {
+            var parts = [];
+            if (e.msg) parts.push(String(e.msg));
+            if (e.input != null) parts.push('入力: ' + JSON.stringify(e.input));
+            return parts.join(' ');
+          }
+          return String(e);
+        })
+        .filter(Boolean)
+        .join(' ');
+    }
+    try {
+      return JSON.stringify(detail);
+    } catch (e) {
+      return String(detail);
+    }
+  }
+
+  function normalizeOrgSlugForApi(raw) {
+    return String(raw || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  function validateOrgSlugClient(s) {
+    if (!s) return 'slug を入力してください。';
+    if (!ORG_SLUG_RE.test(s)) {
+      return (
+        'slug は英小文字・数字・ハイフンのみです（例: admin-shop）。' +
+        '「管理者」などの日本語は「組織の表示名」に入力してください。'
+      );
+    }
+    return '';
+  }
+
+  function setMsg(text, kind) {
+    msg.textContent = text || '';
+    msg.className = 'admin-msg' + (kind ? ' ' + kind : '');
+  }
+
+  function slugInput() {
+    return patchSlug || 'demo-shop';
+  }
+
+  /** サーバー（/api/auth/me）の default_org_slug のみ使用。ブラウザ横断の slug は使わない */
+  async function applyMeOrgPreference() {
+    try {
+      const r = await fetch('/api/auth/me', { credentials: 'same-origin' });
+      const j = await r.json();
+      if (j.authenticated && j.user && j.user.default_org_slug) {
+        patchSlug = j.user.default_org_slug;
+      }
+    } catch (e) {}
+  }
+
+  function getPatchSlug() {
+    return patchSlug != null ? patchSlug : slugInput();
+  }
+
+  function headersJson() {
+    return { 'Content-Type': 'application/json' };
+  }
+
+  /** HH:MM(:SS) や H:MM を input[type=time] 用に正規化 */
+  function normalizeTimeForInput(raw, fallback) {
+    if (raw == null || String(raw).trim() === '') return fallback;
+    const m = String(raw).trim().match(/^(\d{1,2}):(\d{2})(?::(\d{2}))?$/);
+    if (!m) return fallback;
+    var h = parseInt(m[1], 10);
+    var min = parseInt(m[2], 10);
+    if (!Number.isFinite(h) || !Number.isFinite(min) || h > 23 || min > 59) return fallback;
+    function pad2(n) {
+      return n < 10 ? '0' + n : String(n);
+    }
+    return pad2(h) + ':' + pad2(min);
+  }
+
+  function showPanels(show) {
+    document.getElementById('summary-panel').hidden = !show;
+    document.getElementById('calendar-auth-panel').hidden = !show;
+    document.getElementById('org-settings-panel').hidden = !show;
+    document.getElementById('org-email-panel').hidden = !show;
+    document.getElementById('org-availability-panel').hidden = !show;
+  }
+
+  function escHtml(s) {
+    const d = document.createElement('div');
+    d.textContent = s || '';
+    return d.innerHTML;
+  }
+
+  function insertCalendarTitleToken(token) {
+    const el = document.getElementById('org-cal-title-template');
+    if (!el) return;
+    const start = el.selectionStart != null ? el.selectionStart : el.value.length;
+    const end = el.selectionEnd != null ? el.selectionEnd : el.value.length;
+    const v = el.value;
+    el.value = v.slice(0, start) + token + v.slice(end);
+    const pos = start + String(token).length;
+    el.focus();
+    if (el.setSelectionRange) {
+      el.setSelectionRange(pos, pos);
+    }
+    updateCalendarTitlePreview();
+  }
+
+  function updateCalendarTitlePreview() {
+    const el = document.getElementById('org-cal-title-template');
+    const wrap = document.getElementById('org-cal-title-preview-wrap');
+    const out = document.getElementById('org-cal-title-preview');
+    if (!el || !wrap || !out) return;
+    const tpl = (el.value || '').trim() || '{service} — {name}';
+    const sample = {
+      service: '30分相談',
+      name: '山田太郎',
+      company: '株式会社サンプル',
+      phone: '03-1234-5678',
+      note: '初回',
+    };
+    let preview = tpl.replace(/\{(\w+)\}/g, function (_, k) {
+      return sample[k] != null ? sample[k] : '';
+    });
+    preview = preview.replace(/\s+/g, ' ').trim();
+    out.textContent = preview || '—';
+    wrap.hidden = false;
+  }
+
+  function renderSummary(data) {
+    const org = data.org || {};
+    if (org.slug) {
+      patchSlug = org.slug;
+      var selP = document.getElementById('pref-org-select');
+      if (selP) selP.value = org.slug;
+    }
+    const cards = document.getElementById('summary-cards');
+    cards.innerHTML = '';
+    function card(title, body) {
+      const el = document.createElement('div');
+      el.className = 'summary-card';
+      el.innerHTML = '<h3>' + title + '</h3><p>' + body + '</p>';
+      cards.appendChild(el);
+    }
+    if (VIEWER_IS_ADMIN) {
+      card('組織', (org.name || '') + ' <code>' + (org.slug || '') + '</code>');
+    } else {
+      card('組織', org.name || '—');
+    }
+    card('公開ベース URL', '<code>' + (data.public_base_url || '') + '</code>');
+    card('担当', String((data.staff || []).length) + ' 名');
+    card('予約区分', String((data.services || []).length) + ' 件');
+    card('予約リンク', String((data.links || []).length) + ' 件');
+    card('カレンダー認証', data.google_oauth_ready ? '設定済み' : '未設定');
+    const authHint = document.getElementById('calendar-auth-summary-hint');
+    if (authHint) {
+      authHint.textContent = data.google_oauth_ready
+        ? '担当ごとの連携・解除や認証状態の確認は「カレンダー認証」画面で管理します。'
+        : 'Google カレンダーと連携するには「カレンダー認証」画面で設定してください。';
+    }
+
+    document.getElementById('org-routing-mode').value = org.routing_mode || 'round_robin';
+    document.getElementById('org-auto-confirm').checked = !!org.auto_confirm;
+
+    const em = org.email_settings_json || {};
+    document.getElementById('email-send-customer').checked = em.send_customer_confirmation !== false;
+    document.getElementById('email-send-staff').checked = em.send_staff_notification !== false;
+    document.getElementById('email-intro').value =
+      em.confirmation_intro_ja != null && em.confirmation_intro_ja !== undefined ? String(em.confirmation_intro_ja) : '';
+    document.getElementById('email-footer').value =
+      em.confirmation_footer_ja != null && em.confirmation_footer_ja !== undefined ? String(em.confirmation_footer_ja) : '';
+
+    const adv = org.availability_defaults_json || {};
+    if (adv.block_saturday !== undefined || adv.block_sunday !== undefined) {
+      document.getElementById('org-block-sat').checked = !!adv.block_saturday;
+      document.getElementById('org-block-sun').checked = !!adv.block_sunday;
+    } else {
+      const legacy = !!adv.block_weekends;
+      document.getElementById('org-block-sat').checked = legacy;
+      document.getElementById('org-block-sun').checked = legacy;
+    }
+    document.getElementById('org-block-holidays').checked = !!adv.block_holidays;
+    document.getElementById('org-avail-start').value = normalizeTimeForInput(adv.start, '08:00');
+    document.getElementById('org-avail-end').value = normalizeTimeForInput(adv.end, '22:00');
+    document.getElementById('org-cal-title-template').value =
+      adv.calendar_title_template != null && String(adv.calendar_title_template).trim() !== ''
+        ? String(adv.calendar_title_template)
+        : '{service} — {name}';
+    updateCalendarTitlePreview();
+
+    showPanels(true);
+    if (out) out.textContent = JSON.stringify(data, null, 2);
+  }
+
+  async function getJson(path, options) {
+    setMsg('');
+    var opts = options || {};
+    var headers = Object.assign({ 'Content-Type': 'application/json' }, opts.headers || {});
+    const r = await fetch(path, Object.assign({ credentials: 'same-origin' }, opts, { headers: headers }));
+    const text = await r.text();
+    let data;
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = text;
+    }
+    if (!r.ok) {
+      var errLine =
+        typeof data === 'object' && data && data.detail != null
+          ? formatApiDetail(data.detail)
+          : r.status + ' ' + text;
+      setMsg(errLine, 'err');
+      if (out) out.textContent = typeof data === 'object' ? JSON.stringify(data, null, 2) : text;
+      return null;
+    }
+    return data;
+  }
+
+  async function loadSummary() {
+    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary');
+    if (data) renderSummary(data);
+  }
+
+  document.getElementById('btn-save-email').addEventListener('click', async function () {
+    setMsg('');
+    const body = {
+      email_settings: {
+        send_customer_confirmation: document.getElementById('email-send-customer').checked,
+        send_staff_notification: document.getElementById('email-send-staff').checked,
+        confirmation_intro_ja: document.getElementById('email-intro').value,
+        confirmation_footer_ja: document.getElementById('email-footer').value,
+      },
+    };
+    const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()), {
+      method: 'PATCH',
+      headers: headersJson(),
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(function () {
+      return {};
+    });
+    if (!r.ok) {
+      setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
+      return;
+    }
+    setMsg('メール設定を保存しました', 'ok');
+    setTimeout(function () {
+      setMsg('');
+    }, 2000);
+    await loadSummary();
+  });
+
+  document.getElementById('btn-save-org').addEventListener('click', async function () {
+    setMsg('');
+    const body = {
+      routing_mode: document.getElementById('org-routing-mode').value,
+      auto_confirm: document.getElementById('org-auto-confirm').checked,
+    };
+    const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()), {
+      method: 'PATCH',
+      headers: headersJson(),
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
+      return;
+    }
+    setMsg('保存しました', 'ok');
+    setTimeout(function () { setMsg(''); }, 2000);
+    await loadSummary();
+  });
+
+  document.getElementById('btn-save-availability').addEventListener('click', async function () {
+    setMsg('');
+    const cur = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary');
+    if (!cur) return;
+    const prev = (cur.org && cur.org.availability_defaults_json) || {};
+    const tplRaw = document.getElementById('org-cal-title-template').value.trim();
+    const merged = Object.assign({}, prev, {
+      block_saturday: document.getElementById('org-block-sat').checked,
+      block_sunday: document.getElementById('org-block-sun').checked,
+      block_weekends: false,
+      block_holidays: document.getElementById('org-block-holidays').checked,
+      start: normalizeTimeForInput(document.getElementById('org-avail-start').value, '08:00'),
+      end: normalizeTimeForInput(document.getElementById('org-avail-end').value, '22:00'),
+      calendar_title_template: tplRaw || '{service} — {name}',
+    });
+    delete merged.buffer_minutes;
+    delete merged.max_advance_booking_days;
+    delete merged.slot_minutes;
+    const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()), {
+      method: 'PATCH',
+      headers: headersJson(),
+      body: JSON.stringify({ availability_defaults: merged }),
+    });
+    const j = await r.json().catch(function () { return {}; });
+    if (!r.ok) {
+      setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
+      return;
+    }
+    setMsg('予約可能時間・休日・カレンダー件名を保存しました', 'ok');
+    setTimeout(function () { setMsg(''); }, 2000);
+    await loadSummary();
+  });
+
+  document.getElementById('btn-summary').addEventListener('click', loadSummary);
+
+  document.querySelectorAll('.cal-title-insert-btn').forEach(function (b) {
+    b.addEventListener('click', function () {
+      insertCalendarTitleToken(b.getAttribute('data-token') || '');
+    });
+  });
+  ['cal-tpl-preset-1', 'cal-tpl-preset-2', 'cal-tpl-preset-3'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('click', function () {
+      var tpl = el.getAttribute('data-tpl');
+      var inp = document.getElementById('org-cal-title-template');
+      if (inp && tpl != null) {
+        inp.value = tpl;
+        updateCalendarTitlePreview();
+        inp.focus();
+      }
+    });
+  });
+  var calTitleInpInit = document.getElementById('org-cal-title-template');
+  if (calTitleInpInit) {
+    calTitleInpInit.addEventListener('input', updateCalendarTitlePreview);
+  }
+  updateCalendarTitlePreview();
+
+  function maybeAutoLoadSummary() {
+    applyMeOrgPreference()
+      .then(function () {
+        return loadSummary();
+      })
+      .catch(function () {});
+  }
+  maybeAutoLoadSummary();
+})();
+</script>
+{% endblock %}

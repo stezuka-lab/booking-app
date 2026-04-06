@@ -1,0 +1,403 @@
+{% extends "base.html" %}
+{% block title %}アカウント{% endblock %}
+{% set nav = 'accounts' %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="admin-console">
+  <h1 class="page-title">アカウント</h1>
+  {% if viewer_is_admin | default(false) %}
+  <p class="page-lead muted">
+    <strong>ユーザー</strong>の発行・一覧と、各行の<strong>組織</strong>（表示名・slug）の編集をまとめています。管理 API はログインセッションで認証されます。予約の店舗設定は <a href="/app/settings">設定</a> へ。
+  </p>
+
+  <section class="panel admin-section" id="accounts-panel">
+    <h2 class="panel-title">ユーザー・組織</h2>
+    <p class="muted panel-hint">
+      新規アカウントでは任意で組織を紐付け・新規作成できます。<strong>ユーザー一覧</strong>の各行で操作中の組織の表示名と slug をまとめて編集できます（slug は英小文字・数字・ハイフンのみ。両方空にすると紐付けを外します）。
+    </p>
+
+    <h3 class="panel-subtitle">新規アカウント</h3>
+    <p class="muted small" style="margin: 0 0 0.75rem">
+      <strong>組織 slug</strong>のみ … 既存の組織にそのユーザーを紐付けます。<strong>組織の表示名</strong>と<strong>組織 slug</strong>の両方 …
+      slug が未登録なら組織を新規作成し、そのユーザーの操作中の組織にします。
+    </p>
+    <div class="admin-row wrap">
+      <div class="admin-field">
+        <label for="new-username">ユーザーID</label>
+        <input type="text" id="new-username" autocomplete="off" />
+      </div>
+      <div class="admin-field">
+        <label for="new-password">初期パスワード（8文字以上）</label>
+        <input type="password" id="new-password" autocomplete="new-password" minlength="8" />
+      </div>
+      <div class="admin-field">
+        <label for="new-role">権限</label>
+        <select id="new-role">
+          <option value="user">user（一般）</option>
+          <option value="admin">admin（管理者）</option>
+        </select>
+      </div>
+      <div class="admin-field grow">
+        <label for="new-email">メール（任意・パスワード再設定用）</label>
+        <input type="email" id="new-email" placeholder="user@example.com" />
+      </div>
+      <div class="admin-field grow">
+        <label for="new-user-org-name">組織の表示名（任意）</label>
+        <input type="text" id="new-user-org-name" autocomplete="organization" placeholder="新規組織を作るときに必須" />
+      </div>
+      <div class="admin-field">
+        <label for="new-user-org-slug">組織 slug（任意）</label>
+        <input type="text" id="new-user-org-slug" autocomplete="off" spellcheck="false" placeholder="例: shibuya-shop" />
+      </div>
+    </div>
+    <button type="button" class="btn primary" id="btn-create-user">発行</button>
+
+    <h3 class="panel-subtitle">ユーザー一覧</h3>
+    <div class="accounts-api-toolbar">
+      <p class="muted small" style="margin: 0 0 0.5rem">管理 API はブラウザのログイン状態で呼び出されます。</p>
+      <div class="admin-toolbar">
+        <button type="button" class="btn secondary" id="btn-orgs">組織一覧（JSON）</button>
+        <a class="btn secondary" href="/app/settings">店舗設定を開く</a>
+      </div>
+      <pre id="acct-org-json" class="admin-json" style="margin-top: 0.75rem; max-height: 12rem; overflow: auto" hidden></pre>
+    </div>
+
+    <div class="table-wrap accounts-user-table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>ユーザーID</th>
+            <th>権限</th>
+            <th>メール</th>
+            <th>組織名</th>
+            <th>組織 slug</th>
+            <th>状態</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="users-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  {% else %}
+  <p class="page-lead muted">店舗の予約設定は <a href="/app/settings">設定</a> から開けます。</p>
+  <section class="panel admin-section">
+    <p class="muted" style="margin: 0">組織の作成・ユーザー管理は管理者のみ利用できます。</p>
+  </section>
+  {% endif %}
+
+  <p id="acct-msg" class="admin-msg" role="alert"></p>
+</div>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const msg = document.getElementById('acct-msg');
+
+  function setMsg(text, kind) {
+    msg.textContent = text || '';
+    msg.className = 'admin-msg' + (kind ? ' ' + kind : '');
+  }
+
+  {% if viewer_is_admin | default(false) %}
+  var ORG_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+  function formatApiDetail(detail) {
+    if (detail == null || detail === '') return '';
+    if (typeof detail === 'string') return detail;
+    if (Array.isArray(detail)) {
+      return detail
+        .map(function (e) {
+          if (e && typeof e === 'object') {
+            var parts = [];
+            if (e.msg) parts.push(String(e.msg));
+            if (e.input != null) parts.push('入力: ' + JSON.stringify(e.input));
+            return parts.join(' ');
+          }
+          return String(e);
+        })
+        .filter(Boolean)
+        .join(' ');
+    }
+    try {
+      return JSON.stringify(detail);
+    } catch (e) {
+      return String(detail);
+    }
+  }
+
+  function normalizeOrgSlugForApi(raw) {
+    return String(raw || '')
+      .trim()
+      .toLowerCase()
+      .replace(/[\s_]+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/^-|-$/g, '');
+  }
+
+  function validateOrgSlugClient(s) {
+    if (!s) return '';
+    if (!ORG_SLUG_RE.test(s)) {
+      return 'slug は英小文字・数字・ハイフンのみです。日本語は「組織名」へ。';
+    }
+    return '';
+  }
+
+  async function getOrgJson(path) {
+    setMsg('');
+    const r = await fetch(path, {
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    const text = await r.text();
+    var data;
+    try {
+      data = JSON.parse(text);
+    } catch (e) {
+      data = text;
+    }
+    if (!r.ok) {
+      setMsg(formatApiDetail(data && data.detail) || r.status + ' ' + text, 'err');
+      return null;
+    }
+    return data;
+  }
+
+  document.getElementById('btn-orgs').addEventListener('click', async function () {
+    const data = await getOrgJson('/api/booking/admin/orgs');
+    var pre = document.getElementById('acct-org-json');
+    if (data && pre) {
+      pre.hidden = false;
+      pre.textContent = JSON.stringify(data, null, 2);
+    }
+  });
+
+  const PW_MIN = 8;
+  function formatApiError(j) {
+    var d = j && j.detail;
+    if (d == null) return j && j.message ? String(j.message) : '';
+    if (typeof d === 'string') return d;
+    if (!Array.isArray(d)) {
+      try {
+        return JSON.stringify(d);
+      } catch (e) {
+        return String(d);
+      }
+    }
+    return d
+      .map(function (e) {
+        if (!e || typeof e !== 'object') return String(e);
+        var loc = (e.loc || []).join('.');
+        var type = e.type || '';
+        var msgEn = e.msg || '';
+        if (type === 'string_too_short' && (loc.indexOf('password') >= 0 || loc.indexOf('new_password') >= 0)) {
+          return 'パスワードは ' + PW_MIN + ' 文字以上にしてください。';
+        }
+        if (type === 'string_too_long') {
+          return '入力が長すぎます（' + (e.ctx && e.ctx.max_length ? e.ctx.max_length : '') + '）。';
+        }
+        return msgEn || type || loc;
+      })
+      .filter(Boolean)
+      .join(' ');
+  }
+
+  async function loadUsers() {
+    setMsg('');
+    const r = await fetch('/api/auth/admin/users', { credentials: 'same-origin' });
+    const j = await r.json().catch(function () {
+      return {};
+    });
+    if (!r.ok) {
+      setMsg(formatApiError(j) || r.statusText, 'err');
+      return;
+    }
+    const tb = document.getElementById('users-tbody');
+    tb.innerHTML = '';
+    (j.users || []).forEach(function (u) {
+      const tr = document.createElement('tr');
+
+      const td0 = document.createElement('td');
+      td0.textContent = String(u.id);
+      tr.appendChild(td0);
+
+      const td1 = document.createElement('td');
+      const c1 = document.createElement('code');
+      c1.textContent = u.username || '';
+      td1.appendChild(c1);
+      tr.appendChild(td1);
+
+      const td2 = document.createElement('td');
+      td2.textContent = u.role || '';
+      tr.appendChild(td2);
+
+      const td3 = document.createElement('td');
+      td3.textContent = u.email || '—';
+      tr.appendChild(td3);
+
+      const tdOrgName = document.createElement('td');
+      const inOrgName = document.createElement('input');
+      inOrgName.type = 'text';
+      inOrgName.className = 'admin-input-inline';
+      inOrgName.setAttribute('autocomplete', 'organization');
+      inOrgName.value = u.org_name || '';
+      tdOrgName.appendChild(inOrgName);
+      tr.appendChild(tdOrgName);
+
+      const tdOrgSlug = document.createElement('td');
+      const inOrgSlug = document.createElement('input');
+      inOrgSlug.type = 'text';
+      inOrgSlug.className = 'admin-input-inline';
+      inOrgSlug.setAttribute('spellcheck', 'false');
+      inOrgSlug.setAttribute('autocomplete', 'off');
+      inOrgSlug.value = u.default_org_slug || '';
+      tdOrgSlug.appendChild(inOrgSlug);
+      tr.appendChild(tdOrgSlug);
+
+      const td4 = document.createElement('td');
+      td4.textContent = u.is_active ? '有効' : '無効';
+      tr.appendChild(td4);
+
+      const td = document.createElement('td');
+      td.className = 'cal-td-actions accounts-user-actions';
+
+      const b0 = document.createElement('button');
+      b0.type = 'button';
+      b0.className = 'btn sm primary';
+      b0.textContent = '組織を保存';
+      b0.addEventListener('click', async function () {
+        setMsg('');
+        var nameV = inOrgName.value.trim();
+        var slugRaw = inOrgSlug.value.trim();
+        var slugV = slugRaw ? normalizeOrgSlugForApi(slugRaw) : '';
+        inOrgSlug.value = slugV;
+        var nameOut = nameV || null;
+        var slugOut = slugV || null;
+        if (nameOut && !slugOut) {
+          setMsg('組織名だけでは保存できません。組織 slug を入力するか、両方空にして紐付けを外してください。', 'err');
+          return;
+        }
+        if (slugOut) {
+          var sErr = validateOrgSlugClient(slugOut);
+          if (sErr) {
+            setMsg(sErr, 'err');
+            return;
+          }
+        }
+        const rOrg = await fetch('/api/auth/admin/users/' + u.id + '/org', {
+          method: 'PATCH',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ org_name: nameOut, org_slug: slugOut }),
+        });
+        const jOrg = await rOrg.json().catch(function () {
+          return {};
+        });
+        if (!rOrg.ok) {
+          setMsg(formatApiError(jOrg) || formatApiDetail(jOrg.detail) || rOrg.statusText, 'err');
+          return;
+        }
+        inOrgName.value = jOrg.org_name || '';
+        inOrgSlug.value = jOrg.default_org_slug || '';
+        setMsg('ユーザー「' + (u.username || '') + '」の組織を保存しました', 'ok');
+        setTimeout(function () {
+          setMsg('');
+        }, 2500);
+      });
+
+      const b1 = document.createElement('button');
+      b1.type = 'button';
+      b1.className = 'btn sm secondary';
+      b1.textContent = 'パスワード再設定';
+      b1.addEventListener('click', async function () {
+        const pw = window.prompt('新しいパスワード（8文字以上）を入力してください。');
+        if (!pw || pw.length < 8) return;
+        const r2 = await fetch('/api/auth/admin/users/' + u.id + '/password', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ new_password: pw }),
+        });
+        const j2 = await r2.json().catch(function () {
+          return {};
+        });
+        if (!r2.ok) {
+          alert(formatApiError(j2) || 'エラー');
+          return;
+        }
+        alert('パスワードを更新しました。利用者に安全な経路で伝えてください。');
+      });
+      const b2 = document.createElement('button');
+      b2.type = 'button';
+      b2.className = 'btn sm secondary';
+      b2.textContent = '削除';
+      b2.addEventListener('click', async function () {
+        if (!window.confirm('ユーザー「' + u.username + '」を削除しますか？')) return;
+        const r3 = await fetch('/api/auth/admin/users/' + u.id, { method: 'DELETE', credentials: 'same-origin' });
+        const j3 = await r3.json().catch(function () {
+          return {};
+        });
+        if (!r3.ok) {
+          alert(formatApiError(j3) || 'エラー');
+          return;
+        }
+        await loadUsers();
+      });
+      td.appendChild(b0);
+      td.appendChild(b1);
+      td.appendChild(b2);
+      tr.appendChild(td);
+      tb.appendChild(tr);
+    });
+  }
+
+  document.getElementById('btn-create-user').addEventListener('click', async function () {
+    setMsg('');
+    const pw = document.getElementById('new-password').value;
+    if (pw.length < PW_MIN) {
+      setMsg('初期パスワードは ' + PW_MIN + ' 文字以上にしてください。', 'err');
+      return;
+    }
+    const orgNameEl = document.getElementById('new-user-org-name');
+    const orgSlugEl = document.getElementById('new-user-org-slug');
+    const body = {
+      username: document.getElementById('new-username').value.trim(),
+      password: pw,
+      role: document.getElementById('new-role').value,
+      email: document.getElementById('new-email').value.trim() || null,
+      org_name: orgNameEl ? orgNameEl.value.trim() || null : null,
+      org_slug: orgSlugEl ? orgSlugEl.value.trim().toLowerCase() || null : null,
+    };
+    if (!body.username) {
+      setMsg('ユーザーIDを入力してください。', 'err');
+      return;
+    }
+    const r = await fetch('/api/auth/admin/users', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(function () {
+      return {};
+    });
+    if (!r.ok) {
+      setMsg(formatApiError(j) || r.statusText, 'err');
+      return;
+    }
+    var msgOk = 'アカウントを作成しました（ID: ' + j.username + '）';
+    if (j.default_org_slug) msgOk += ' — 操作中の組織: ' + j.default_org_slug;
+    setMsg(msgOk, 'ok');
+    document.getElementById('new-password').value = '';
+    if (orgNameEl) orgNameEl.value = '';
+    if (orgSlugEl) orgSlugEl.value = '';
+    await loadUsers();
+  });
+
+  loadUsers().catch(function () {});
+  {% endif %}
+})();
+</script>
+{% endblock %}

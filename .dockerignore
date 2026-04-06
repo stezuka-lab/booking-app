@@ -1,0 +1,16 @@
+.git
+.gitignore
+.venv
+venv
+__pycache__
+.pytest_cache
+*.pyc
+.env
+data/*.db
+reference
+*.md
+.github
+.vscode
+run_dev.bat
+docker-compose.yml
+Dockerfile

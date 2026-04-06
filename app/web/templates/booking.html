@@ -1,0 +1,1127 @@
+{% extends "base_public_booking.html" %}
+{% block title %}予約{% endblock %}
+{% block head_extra %}
+<script>
+  window.__LINK_TOKEN__ = {{ link_token | tojson }};
+</script>
+{% endblock %}
+{% block content %}
+<div class="booking-flow booking-flow-v2">
+  <div class="booking-hero-bar">
+    <div>
+      <span class="org-badge" id="link-label">オンライン予約</span>
+      <h1 class="page-title booking-hero-title" id="page-heading">予約</h1>
+      <p class="page-sub muted" id="org-title"></p>
+      <section class="booking-note-card booking-link-notice booking-link-notice-inline" id="booking-link-notice" hidden>
+        <strong>お知らせ</strong>
+        <p class="booking-multiline-note" id="booking-link-notice-text"></p>
+      </section>
+    </div>
+    <div id="ga4-slot"></div>
+  </div>
+
+  <p class="muted panel" id="booking-fixed-course-hint" hidden></p>
+
+  <section class="panel booking-cal-section">
+    <div class="gcal-toolbar booking-cal-toolbar">
+      <button type="button" class="btn gcal-today" id="booking-cal-today">本日</button>
+      <div class="gcal-nav">
+        <button type="button" class="btn secondary gcal-arrow" id="booking-cal-prev" aria-label="前の週">‹</button>
+        <button type="button" class="btn secondary gcal-arrow" id="booking-cal-next" aria-label="次の週">›</button>
+      </div>
+      <span class="gcal-title" id="booking-cal-range-label"></span>
+    </div>
+    <div class="gcal-wrap booking-cal-wrap" id="booking-cal-wrap">
+      <p id="slots-loading" class="loading-text">読み込み中…</p>
+      <div class="cal-grid gcal-grid" id="booking-cal-grid" hidden></div>
+    </div>
+    <p class="muted" id="slots-empty" hidden>空きがありません。</p>
+  </section>
+  <p id="page-msg" class="err booking-page-msg" role="alert"></p>
+</div>
+
+<dialog id="booking-dialog" class="booking-dialog" aria-labelledby="booking-dialog-title">
+  <div class="booking-dialog__panel">
+    <h2 id="booking-dialog-title" class="booking-dialog__title">予約内容</h2>
+    <p class="booking-dialog__datetime" id="modal-datetime-label"></p>
+
+    <div id="modal-extra-fields" class="booking-dialog__extra"></div>
+
+    <label class="field-label" for="modal-customer-number">顧客番号（AP/EP）</label>
+    <input id="modal-customer-number" type="text" autocomplete="off" placeholder="例: AP12345 / EP12345" class="booking-dialog__input-wide" />
+    <label class="field-label" for="modal-name">お名前 <span class="req">*</span></label>
+    <input id="modal-name" type="text" autocomplete="name" placeholder="山田 太郎" class="booking-dialog__input-wide" />
+    <label class="field-label" for="modal-email">メール <span class="req">*</span></label>
+    <input id="modal-email" type="email" autocomplete="email" placeholder="example@email.com" class="booking-dialog__input-wide" />
+    <label class="field-label" for="modal-company">会社名（任意・カレンダー表示用）</label>
+    <input id="modal-company" type="text" autocomplete="organization" class="booking-dialog__input-wide" />
+    <div id="modal-google-cal-row" class="booking-google-cal-row" hidden>
+      <p class="muted foot-hint">任意：Google カレンダーにも追加できます。</p>
+      <div class="booking-dialog__actions" style="margin-top: 0.5rem">
+        <button type="button" class="btn secondary" id="modal-google-cal-btn">Google カレンダーに追加する許可</button>
+        <span id="modal-google-cal-status" class="muted" style="margin-left: 0.5rem"></span>
+      </div>
+    </div>
+    <p class="muted foot-hint">確定後、確認メールをお送りします。</p>
+    <p id="modal-msg" class="err" role="alert"></p>
+    <div class="booking-dialog__actions">
+      <button type="button" class="btn secondary" id="modal-cancel">閉じる</button>
+      <button type="button" class="btn primary" id="modal-submit">予約を確定する</button>
+    </div>
+  </div>
+</dialog>
+
+<dialog id="booking-success-dialog" class="booking-dialog" aria-labelledby="booking-success-title">
+  <div class="booking-dialog__panel">
+    <h2 id="booking-success-title" class="booking-dialog__title">予約が完了しました</h2>
+    <p class="booking-dialog__datetime" id="success-link-title"></p>
+    <p class="muted" id="success-datetime"></p>
+    <p class="muted" id="success-staff" hidden></p>
+    <div id="success-message-row" class="booking-note-card" hidden>
+      <strong>ご案内</strong>
+      <p id="success-message-text" class="booking-multiline-note"></p>
+    </div>
+    <div id="success-zoom-row" hidden>
+      <label class="field-label">Zoom URL</label>
+      <a id="success-zoom-url" class="btn secondary" href="#" target="_blank" rel="noopener">Zoom を開く</a>
+      <p class="muted foot-hint">開始時刻になったらこの URL から参加してください。</p>
+    </div>
+    <div>
+      <label class="field-label">予約の確認・変更</label>
+      <a id="success-manage-url" class="btn secondary" href="#" target="_blank" rel="noopener">予約内容を確認する</a>
+    </div>
+    <div id="success-google-row" hidden>
+      <label class="field-label">Google カレンダー</label>
+      <a id="success-google-link" class="btn secondary" href="#" target="_blank" rel="noopener">Google カレンダーに追加</a>
+      <p id="success-customer-cal-note" class="muted foot-hint" hidden>ご本人の Google カレンダーにも追加済みです。</p>
+    </div>
+    <div class="booking-dialog__actions">
+      <button type="button" class="btn primary" id="success-close">閉じる</button>
+    </div>
+  </div>
+</dialog>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  const token = window.__LINK_TOKEN__;
+  const params = new URLSearchParams(window.location.search);
+  let formFieldDefs = [];
+  let metaAvailability = {};
+  let cursorDate = null;
+  let lastAvail = null;
+  let lastMeta = null;
+  let customerGoogleAccessToken = null;
+  let selectedBookingStartIso = null;
+  /** 直近の GET /availability と同じ FreeBusy 窓（予約 POST でサーバーに渡す） */
+  let lastAvailabilityRange = null;
+  let fixedServiceId = null;
+  let linkDisabled = false;
+  const HOUR_PX = 48;
+  const fmtSlot = new Intl.DateTimeFormat('ja-JP', {
+    weekday: 'short',
+    month: 'numeric',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    timeZone: 'Asia/Tokyo',
+  });
+  const fmtRangeLabel = new Intl.DateTimeFormat('ja-JP', { month: 'numeric', day: 'numeric' });
+
+  const dialogEl = document.getElementById('booking-dialog');
+  const successDialogEl = document.getElementById('booking-success-dialog');
+
+  function setLinkDisabledState(message) {
+    linkDisabled = true;
+    const detail = message || '現在この予約リンクでは予約を受け付けていません。';
+    const pageMsg = document.getElementById('page-msg');
+    const loading = document.getElementById('slots-loading');
+    const grid = document.getElementById('booking-cal-grid');
+    const empty = document.getElementById('slots-empty');
+    const fixedHint = document.getElementById('booking-fixed-course-hint');
+    if (pageMsg) pageMsg.textContent = detail;
+    if (loading) loading.hidden = true;
+    if (grid) grid.hidden = true;
+    if (empty) {
+      empty.hidden = false;
+      empty.textContent = detail;
+    }
+    if (fixedHint) {
+      fixedHint.hidden = false;
+      fixedHint.textContent = 'この予約リンクは現在無効です。';
+    }
+  }
+
+  function startOfLocalDay(d) {
+    return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  }
+
+  function parseHm(s) {
+    const p = String(s || '08:00').split(':');
+    return { h: parseInt(p[0], 10) || 8, m: parseInt(p[1], 10) || 0 };
+  }
+
+  function getGridHours() {
+    return { START_H: 8, END_H: 22 };
+  }
+
+  function dayBusinessBounds(dayDate) {
+    const sh = parseHm(metaAvailability.start || '08:00');
+    const eh = parseHm(metaAvailability.end || '22:00');
+    const d0 = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate(), 0, 0, 0, 0);
+    const start = new Date(d0);
+    start.setHours(sh.h, sh.m, 0, 0);
+    const end = new Date(d0);
+    end.setHours(eh.h, eh.m, 0, 0);
+    return { start: start, end: end };
+  }
+
+  function isoToDatetimeLocalValue(iso) {
+    const d = new Date(iso);
+    const pad = function (n) {
+      return String(n).padStart(2, '0');
+    };
+    return (
+      d.getFullYear() +
+      '-' +
+      pad(d.getMonth() + 1) +
+      '-' +
+      pad(d.getDate()) +
+      'T' +
+      pad(d.getHours()) +
+      ':' +
+      pad(d.getMinutes())
+    );
+  }
+
+  function datetimeLocalToIso(val) {
+    if (!val) return '';
+    const m = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?/.exec(String(val).trim());
+    if (!m) return '';
+    const d = new Date(
+      Number(m[1]),
+      Number(m[2]) - 1,
+      Number(m[3]),
+      Number(m[4]),
+      Number(m[5]),
+      m[6] != null ? Number(m[6]) : 0,
+      0
+    );
+    if (isNaN(d.getTime())) return '';
+    return d.toISOString();
+  }
+
+  function isSameDate(a, b) {
+    return (
+      a.getFullYear() === b.getFullYear() &&
+      a.getMonth() === b.getMonth() &&
+      a.getDate() === b.getDate()
+    );
+  }
+
+  function isoDateLocal(d) {
+    const y = d.getFullYear();
+    const m = String(d.getMonth() + 1).padStart(2, '0');
+    const day = String(d.getDate()).padStart(2, '0');
+    return y + '-' + m + '-' + day;
+  }
+
+  function isDateBlocked(day0) {
+    const bd = (lastAvail && lastAvail.blocked_dates) || [];
+    return bd.indexOf(isoDateLocal(day0)) !== -1;
+  }
+
+  function hoursFromDayStart(dt, day0) {
+    return (dt - day0) / 3600000;
+  }
+
+  function intervalsOverlap(s, e, b0, b1) {
+    return s < b1 && e > b0;
+  }
+
+  function mergePxRanges(ranges) {
+    if (!ranges.length) return [];
+    ranges.sort(function (a, b) {
+      return a.top - b.top;
+    });
+    const out = [{ top: ranges[0].top, bottom: ranges[0].bottom }];
+    for (let i = 1; i < ranges.length; i++) {
+      const r = ranges[i];
+      const last = out[out.length - 1];
+      if (r.top <= last.bottom) {
+        last.bottom = Math.max(last.bottom, r.bottom);
+      } else {
+        out.push({ top: r.top, bottom: r.bottom });
+      }
+    }
+    return out;
+  }
+
+  function busyDayToPxRanges(dayBusy, day0, day1, totalH, hp, START_H) {
+    const ranges = [];
+    (dayBusy || []).forEach(function (iv) {
+      const st = new Date(iv.start_utc);
+      const en = new Date(iv.end_utc);
+      if (en <= day0 || st >= day1) return;
+      const cs = st < day0 ? day0 : st;
+      const ce = en > day1 ? day1 : en;
+      let top = (hoursFromDayStart(cs, day0) - START_H) * hp;
+      let hgt = ((ce - cs) / 3600000) * hp;
+      if (top + hgt < 0 || top > totalH) return;
+      top = Math.max(0, top);
+      hgt = Math.min(hgt, totalH - top);
+      if (hgt <= 0) return;
+      ranges.push({ top: top, bottom: top + hgt });
+    });
+    return mergePxRanges(ranges);
+  }
+
+  function receptionSegmentsMinusBusy(recTop, recBottom, busyPxMerged) {
+    let segments = [{ top: recTop, bottom: recBottom }];
+    busyPxMerged.forEach(function (b) {
+      const next = [];
+      segments.forEach(function (s) {
+        if (b.bottom <= s.top || b.top >= s.bottom) {
+          next.push(s);
+          return;
+        }
+        if (b.top > s.top && b.top < s.bottom) {
+          next.push({ top: s.top, bottom: b.top });
+        }
+        if (b.bottom < s.bottom && b.bottom > s.top) {
+          next.push({ top: b.bottom, bottom: s.bottom });
+        }
+      });
+      segments = next.filter(function (x) {
+        return x.bottom - x.top > 1;
+      });
+    });
+    return segments;
+  }
+
+  /** API が返した slots のいずれかに近い開始時刻なら、その slot の start_utc（正）を返す。 */
+  function formatApiErrorDetail(j) {
+    const d = j && j.detail;
+    if (d && typeof d === 'object' && typeof d.message === 'string') {
+      let s = d.message;
+      if (d.hint_ja) s += ' ' + d.hint_ja;
+      return s;
+    }
+    if (typeof d === 'string') return d;
+    if (d !== undefined && d !== null) return JSON.stringify(d);
+    return '';
+  }
+
+  function findNearestSlotMeta(whenMs, maxDiffMs) {
+    const slots = (lastAvail && lastAvail.slots) || [];
+    if (!slots.length) return null;
+    let best = null;
+    let bestDiff = Infinity;
+    for (let i = 0; i < slots.length; i++) {
+      const st = new Date(slots[i].start_utc).getTime();
+      const d = Math.abs(st - whenMs);
+      if (d < bestDiff) {
+        bestDiff = d;
+        best = slots[i];
+      }
+    }
+    if (bestDiff > maxDiffMs || !best) return null;
+    return {
+      start_utc: best.start_utc,
+      staff_id: best.staff_id != null && best.staff_id !== '' ? best.staff_id : null,
+    };
+  }
+
+  function findNearestSlotStartUtc(whenMs, maxDiffMs) {
+    const meta = findNearestSlotMeta(whenMs, maxDiffMs);
+    return meta ? meta.start_utc : null;
+  }
+
+  /** 確定 POST 用: スナップ後の開始時刻に対応する枠の担当（GET /availability と同一） */
+  function staffIdForSlotStartIso(iso) {
+    const t = new Date(iso).getTime();
+    const slots = (lastAvail && lastAvail.slots) || [];
+    for (let i = 0; i < slots.length; i++) {
+      if (new Date(slots[i].start_utc).getTime() === t) {
+        const sid = slots[i].staff_id;
+        return sid != null && sid !== '' && Number.isFinite(Number(sid)) ? Number(sid) : null;
+      }
+    }
+    return null;
+  }
+
+  function renderExtraFields(fields) {
+    formFieldDefs = (fields || []).filter(function (f) {
+      const raw = ((f && (f.id || f.name || f.label)) || '').toString().toLowerCase();
+      return !(
+        raw.indexOf('customer_number') !== -1 ||
+        raw.indexOf('phone') !== -1 ||
+        raw.indexOf('tel') !== -1 ||
+        raw.indexOf('電話') !== -1 ||
+        raw.indexOf('備考') !== -1 ||
+        raw.indexOf('相談') !== -1 ||
+        raw.indexOf('note') !== -1 ||
+        raw.indexOf('message') !== -1 ||
+        raw.indexOf('inquiry') !== -1
+      );
+    });
+    const root = document.getElementById('modal-extra-fields');
+    if (!root) return;
+    root.innerHTML = '';
+    formFieldDefs.forEach(function (f) {
+      const id = f.id || f.name || Math.random().toString(36).slice(2);
+      const lab = document.createElement('label');
+      lab.className = 'field-label';
+      lab.setAttribute('for', 'xf-' + id);
+      lab.textContent = f.label || id;
+      root.appendChild(lab);
+      if (f.type === 'select') {
+        const sel = document.createElement('select');
+        sel.id = 'xf-' + id;
+        sel.className = 'booking-dialog__input-wide';
+        sel.dataset.fieldId = id;
+        (f.options || []).forEach(function (opt) {
+          const o = document.createElement('option');
+          o.value = opt;
+          o.textContent = opt;
+          sel.appendChild(o);
+        });
+        root.appendChild(sel);
+      } else if (f.type === 'textarea') {
+        const ta = document.createElement('textarea');
+        ta.id = 'xf-' + id;
+        ta.rows = 4;
+        ta.className = 'booking-dialog__input-wide';
+        ta.dataset.fieldId = id;
+        root.appendChild(ta);
+      } else {
+        const inp = document.createElement('input');
+        inp.id = 'xf-' + id;
+        inp.type = 'text';
+        inp.className = 'booking-dialog__input-wide';
+        inp.dataset.fieldId = id;
+        root.appendChild(inp);
+      }
+    });
+  }
+
+  function collectFormAnswers() {
+    const out = {};
+    const customerNumber = document.getElementById('modal-customer-number');
+    if (customerNumber && customerNumber.value.trim()) {
+      out.customer_number = customerNumber.value.trim();
+    }
+    formFieldDefs.forEach(function (f) {
+      const id = f.id || f.name;
+      const el = document.querySelector('#modal-extra-fields [data-field-id="' + id + '"]');
+      if (el) out[id] = el.value;
+    });
+    return out;
+  }
+
+  function highlightSlot(iso) {
+    const grid = document.getElementById('booking-cal-grid');
+    grid.querySelectorAll('.booking-slot-choice').forEach(function (el) {
+      el.classList.remove('selected');
+    });
+    grid.querySelectorAll('.booking-slot-choice').forEach(function (el) {
+      if (el.dataset.startUtc === iso) el.classList.add('selected');
+    });
+    grid.dataset.selectedStart = iso;
+  }
+
+  function openBookingModal(iso) {
+    highlightSlot(iso);
+    selectedBookingStartIso = iso;
+    customerGoogleAccessToken = null;
+    const gst = document.getElementById('modal-google-cal-status');
+    if (gst) gst.textContent = '';
+    document.getElementById('modal-datetime-label').textContent = fmtSlot.format(new Date(iso));
+    document.getElementById('modal-msg').textContent = '';
+    document.getElementById('modal-customer-number').value = '';
+    dialogEl.showModal();
+    document.getElementById('modal-customer-number').focus();
+  }
+
+  function openSuccessDialog(data, startIso) {
+    document.getElementById('success-link-title').textContent =
+      (data && data.link_title ? data.link_title : '予約') + ' の予約が完了しました';
+    document.getElementById('success-datetime').textContent =
+      '日時: ' + fmtSlot.format(new Date(startIso));
+    var staffEl = document.getElementById('success-staff');
+    if (data && data.staff_name) {
+      staffEl.hidden = false;
+      staffEl.textContent = '担当: ' + data.staff_name;
+    } else {
+      staffEl.hidden = true;
+      staffEl.textContent = '';
+    }
+    var zoomRow = document.getElementById('success-zoom-row');
+    var zoomLink = document.getElementById('success-zoom-url');
+    if (data && data.meeting_url) {
+      zoomRow.hidden = false;
+      zoomLink.href = data.meeting_url;
+    } else {
+      zoomRow.hidden = true;
+      zoomLink.href = '#';
+    }
+    var manageLink = document.getElementById('success-manage-url');
+    manageLink.href = data && data.manage_url ? data.manage_url : '#';
+    var googleRow = document.getElementById('success-google-row');
+    var googleLink = document.getElementById('success-google-link');
+    var calNote = document.getElementById('success-customer-cal-note');
+    if (data && data.google_calendar_add_url) {
+      googleRow.hidden = false;
+      googleLink.href = data.google_calendar_add_url;
+      calNote.hidden = !data.customer_calendar_added;
+    } else {
+      googleRow.hidden = !data.customer_calendar_added;
+      googleLink.href = '#';
+      calNote.hidden = !data.customer_calendar_added;
+    }
+    var successMsgRow = document.getElementById('success-message-row');
+    var successMsgText = document.getElementById('success-message-text');
+    if (data && data.post_booking_message) {
+      successMsgRow.hidden = false;
+      successMsgText.textContent = data.post_booking_message;
+    } else {
+      successMsgRow.hidden = true;
+      successMsgText.textContent = '';
+    }
+    successDialogEl.showModal();
+  }
+
+  function placeBusyInLayer(layer, day0, day1, busyList, totalH, hp, START_H) {
+    (busyList || []).forEach(function (iv) {
+      const st = new Date(iv.start_utc);
+      const en = new Date(iv.end_utc);
+      if (en <= day0 || st >= day1) return;
+      const cs = st < day0 ? day0 : st;
+      const ce = en > day1 ? day1 : en;
+      let top = (hoursFromDayStart(cs, day0) - START_H) * hp;
+      let hgt = ((ce - cs) / 3600000) * hp;
+      if (top + hgt < 0 || top > totalH) return;
+      top = Math.max(0, top);
+      hgt = Math.min(hgt, totalH - top);
+      /* 8px 固定だと短い予定が下に伸び、実際より隙間が消えたように見える（隣接予定で重なる） */
+      hgt = Math.max(hgt, 2);
+      const el = document.createElement('div');
+      el.className = 'booking-busy-block';
+      el.style.top = top + 'px';
+      el.style.height = hgt + 'px';
+      el.innerHTML = '<div class="cal-ev-title">予定あり</div>';
+      el.title = 'この時間帯は埋まっている可能性があります';
+      layer.appendChild(el);
+    });
+  }
+
+  function placeSlotsInLayer(layer, day0, day1, slots, totalH, hp, START_H) {
+    const durMin = (lastAvail && lastAvail.service_duration_minutes) || 30;
+    const pxPerHour = hp;
+    // 所要時間に応じた最小高さ（固定 28px だと 30 分枠 ≈16px になり「予約可能」ボタンが一切出ない）
+    const minFullPx = Math.max(6, (durMin / 60) * pxPerHour * 0.35);
+    (slots || []).forEach(function (s) {
+      const st = new Date(s.start_utc);
+      const en = new Date(s.end_utc);
+      if (en <= day0 || st >= day1) return;
+      const cs = st < day0 ? day0 : st;
+      const ce = en > day1 ? day1 : en;
+      let top = (hoursFromDayStart(cs, day0) - START_H) * hp;
+      let hgt = ((ce - cs) / 3600000) * hp;
+      if (top + hgt < 0 || top > totalH) return;
+      top = Math.max(0, top);
+      hgt = Math.min(hgt, totalH - top);
+      if (hgt < minFullPx) return;
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'cal-event booking-slot-choice';
+      if (durMin >= 60) btn.classList.add('is-long-slot');
+      if (durMin <= 30) btn.classList.add('is-short-slot');
+      btn.style.top = top + 'px';
+      btn.style.height = hgt + 'px';
+      btn.dataset.startUtc = s.start_utc;
+      if (s.staff_id != null && s.staff_id !== '') {
+        btn.dataset.staffId = String(s.staff_id);
+      }
+      const timeLine =
+        new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(cs) +
+        ' – ' +
+        new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(ce);
+      btn.setAttribute('aria-label', '空き枠 ' + timeLine);
+      if (durMin <= 30) {
+        btn.innerHTML =
+          '<span class="booking-slot-row">' +
+          '<span class="cal-ev-time">' + timeLine + '</span>' +
+          '<span class="booking-slot-badge">' + durMin + '分</span>' +
+          '</span>';
+      } else {
+        btn.innerHTML =
+          '<span class="cal-ev-time">' + timeLine + '</span>' +
+          '<span class="booking-slot-meta">' + durMin + '分</span>';
+      }
+      layer.appendChild(btn);
+    });
+  }
+
+  function trySelectFromClick(day0, offsetY, colEl) {
+    if (!lastAvail) return;
+    if (isDateBlocked(day0)) {
+      document.getElementById('page-msg').textContent =
+        'この日は予約を受け付けていません（店舗の休業日・土日祝の設定）';
+      return;
+    }
+    const START_H = getGridHours().START_H;
+    const END_H = getGridHours().END_H;
+    const hp = HOUR_PX;
+    const totalHMain = (END_H - START_H) * hp;
+    if (offsetY < 0 || offsetY > totalHMain) return;
+    const slotMin = lastAvail.slot_minutes || 30;
+    const durMin = lastAvail.service_duration_minutes || 30;
+    const fracH = START_H + offsetY / hp;
+    let totalMins = Math.round(fracH * 60);
+    totalMins = Math.floor(totalMins / slotMin) * slotMin;
+    const h = Math.floor(totalMins / 60);
+    const m = totalMins % 60;
+    const start = new Date(day0.getFullYear(), day0.getMonth(), day0.getDate(), h, m, 0, 0);
+    const end = new Date(start.getTime() + durMin * 60000);
+    const bounds = dayBusinessBounds(day0);
+    if (start < bounds.start || end > bounds.end) {
+      document.getElementById('page-msg').textContent = '受付時間外です。別の時間を選んでください。';
+      return;
+    }
+    const tolMs = Math.max(
+      slotMin * 60 * 1000,
+      Math.floor((durMin * 60000) / 2),
+      120000
+    );
+    const match = findNearestSlotMeta(start.getTime(), tolMs);
+    if (match) {
+      document.getElementById('page-msg').textContent = '';
+      openBookingModal(match.start_utc);
+      return;
+    }
+    const busy = lastAvail.busy_intervals || [];
+    for (let i = 0; i < busy.length; i++) {
+      const b0 = new Date(busy[i].start_utc);
+      const b1 = new Date(busy[i].end_utc);
+      if (intervalsOverlap(start, end, b0, b1)) {
+        document.getElementById('page-msg').textContent =
+          'この時間は既に予定が入っている可能性があります。別の枠を選んでください。';
+        return;
+      }
+    }
+    document.getElementById('page-msg').textContent = '緑の枠の時刻を選んでください。';
+  }
+
+  function renderWeekCalendar() {
+    const grid = document.getElementById('booking-cal-grid');
+    const loading = document.getElementById('slots-loading');
+    const empty = document.getElementById('slots-empty');
+    const wrap = document.getElementById('booking-cal-wrap');
+    const slots = (lastAvail && lastAvail.slots) || [];
+    const busyAll = (lastAvail && lastAvail.busy_intervals) || [];
+    loading.hidden = true;
+    grid.hidden = false;
+    grid.innerHTML = '';
+    grid.dataset.selectedStart = '';
+    grid.className = 'cal-grid gcal-grid gcal-grid-week';
+    wrap.className = 'gcal-wrap booking-cal-wrap';
+
+    const START_H = getGridHours().START_H;
+    const END_H = getGridHours().END_H;
+    const hp = HOUR_PX;
+    const totalHMain = (END_H - START_H) * hp;
+    const CLOSING_STRIP_PX = 36;
+    const endLabel = metaAvailability.end || '22:00';
+
+    const weekStart = startOfLocalDay(cursorDate);
+    const days = [];
+    for (let i = 0; i < 7; i++) {
+      const dd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i, 0, 0, 0, 0);
+      days.push(dd);
+    }
+    document.getElementById('booking-cal-range-label').textContent =
+      fmtRangeLabel.format(days[0]) + ' 〜 ' + fmtRangeLabel.format(days[6]);
+
+    const headW = document.createElement('div');
+    headW.className = 'gcal-head gcal-head-week';
+    headW.innerHTML = '<div class="gcal-corner"></div>';
+    days.forEach(function (d) {
+      const c = document.createElement('div');
+      c.className = 'gcal-head-daycell';
+      if (isSameDate(d, new Date())) c.classList.add('is-today');
+      const d0h = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+      if (isDateBlocked(d0h)) c.classList.add('booking-head-day-blocked');
+      c.innerHTML =
+        '<span class="gcal-dow">' +
+        new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(d) +
+        '</span><span class="gcal-dom">' +
+        d.getDate() +
+        '</span>';
+      headW.appendChild(c);
+    });
+    grid.appendChild(headW);
+
+    const bodyW = document.createElement('div');
+    bodyW.className = 'gcal-body gcal-body-week';
+
+    const railW = document.createElement('div');
+    railW.className = 'gcal-rail';
+    for (let h2 = START_H; h2 < END_H; h2++) {
+      const lab2 = document.createElement('div');
+      lab2.className = 'gcal-rail-hour';
+      lab2.style.height = hp + 'px';
+      lab2.textContent = (h2 === 0 ? '0' : String(h2)) + ':00';
+      railW.appendChild(lab2);
+    }
+    const railClose = document.createElement('div');
+    railClose.className = 'gcal-rail-closing';
+    railClose.style.minHeight = CLOSING_STRIP_PX + 'px';
+    const startLabel = metaAvailability.start || '08:00';
+    railClose.textContent = '受付 ' + startLabel + '〜' + endLabel;
+    railClose.title = '';
+    railW.appendChild(railClose);
+    bodyW.appendChild(railW);
+
+    days.forEach(function (dayDate) {
+      const day0 = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate());
+      const day1 = new Date(day0);
+      day1.setDate(day1.getDate() + 1);
+      const blocked = isDateBlocked(day0);
+
+      const col2 = document.createElement('div');
+      col2.className = 'gcal-col booking-cal-col-hit';
+      if (isSameDate(dayDate, new Date())) col2.classList.add('is-today');
+      if (blocked) col2.classList.add('booking-day-blocked');
+      col2.style.height = totalHMain + CLOSING_STRIP_PX + 'px';
+
+      for (let hx = START_H; hx < END_H; hx++) {
+        const slot2 = document.createElement('div');
+        slot2.className = 'gcal-slot';
+        slot2.style.height = hp + 'px';
+        const half2 = document.createElement('div');
+        half2.className = 'gcal-slot-half';
+        slot2.appendChild(half2);
+        col2.appendChild(slot2);
+      }
+
+      const layer2 = document.createElement('div');
+      layer2.className = 'cal-events-layer gcal-events-layer booking-cal-events-layer';
+      layer2.style.top = '0';
+      layer2.style.height = totalHMain + 'px';
+      layer2.style.bottom = 'auto';
+      const dayBusy = busyAll.filter(function (iv) {
+        const s = new Date(iv.start_utc);
+        const e = new Date(iv.end_utc);
+        return e > day0 && s < day1;
+      });
+      const daySlots = slots.filter(function (s) {
+        const t = new Date(s.start_utc);
+        return t >= day0 && t < day1;
+      });
+      (function placeReceptionBandsExcludingBusy() {
+        /* この曜日に API 予約枠が1件も無いときは帯を出さない（隙間≠予約可の誤認防止） */
+        if (!daySlots.length) {
+          return;
+        }
+        const sh = parseHm(metaAvailability.start || '08:00');
+        const eh = parseHm(metaAvailability.end || '22:00');
+        const startMin = sh.h * 60 + sh.m;
+        const endMin = eh.h * 60 + eh.m;
+        const durMin = (function () {
+          const d = lastAvail && lastAvail.service_duration_minutes;
+          const n = typeof d === 'number' ? d : parseInt(d, 10);
+          return Number.isFinite(n) && n > 0 ? n : 30;
+        })();
+        const lastStartMin = endMin - durMin;
+        if (lastStartMin < startMin) return;
+        const startFrac = sh.h + sh.m / 60 - START_H;
+        const endFracHighlight = lastStartMin / 60 - START_H;
+        if (endFracHighlight <= startFrac) return;
+        const recTop = Math.max(0, startFrac * hp);
+        const recBottom = Math.min(endFracHighlight * hp, totalHMain);
+        if (recBottom - recTop <= 4) return;
+        const busyPx = busyDayToPxRanges(dayBusy, day0, day1, totalHMain, hp, START_H);
+        const segments = receptionSegmentsMinusBusy(recTop, recBottom, busyPx);
+        segments.forEach(function (seg) {
+          const h = seg.bottom - seg.top;
+          if (h <= 4) return;
+          const band = document.createElement('div');
+          band.className = 'booking-cal-avail-band';
+          band.setAttribute('aria-hidden', 'true');
+          band.title = '';
+          band.style.top = seg.top + 'px';
+          band.style.height = h + 'px';
+          layer2.appendChild(band);
+        });
+      })();
+      placeBusyInLayer(layer2, day0, day1, dayBusy, totalHMain, hp, START_H);
+      placeSlotsInLayer(layer2, day0, day1, daySlots, totalHMain, hp, START_H);
+      layer2.addEventListener(
+        'click',
+        function (ev) {
+          const btn = ev.target.closest('.booking-slot-choice');
+          if (!btn || !btn.dataset.startUtc) return;
+          ev.preventDefault();
+          ev.stopPropagation();
+          openBookingModal(btn.dataset.startUtc);
+        },
+        true
+      );
+      if (blocked) {
+        const ov = document.createElement('div');
+        ov.className = 'booking-day-blocked-overlay';
+        ov.setAttribute('role', 'presentation');
+        ov.innerHTML = '<span class="booking-day-blocked-label">予約不可</span>';
+        layer2.appendChild(ov);
+      }
+      layer2.addEventListener('click', function (ev) {
+        if (blocked) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          document.getElementById('page-msg').textContent =
+            'この日は予約を受け付けていません（店舗の休業日・土日祝の設定）';
+          return;
+        }
+        if (ev.target.closest('.booking-slot-choice')) return;
+        if (ev.target.closest('.booking-busy-block')) return;
+        const rect = col2.getBoundingClientRect();
+        const y = ev.clientY - rect.top;
+        trySelectFromClick(day0, y, col2);
+      });
+      col2.appendChild(layer2);
+      const foot = document.createElement('div');
+      foot.className = 'booking-cal-footer-spacer';
+      foot.style.height = CLOSING_STRIP_PX + 'px';
+      foot.setAttribute('aria-hidden', 'true');
+      col2.appendChild(foot);
+      bodyW.appendChild(col2);
+    });
+    grid.appendChild(bodyW);
+
+    const nothing = !slots.length && !busyAll.length;
+    empty.hidden = !nothing;
+    grid.hidden = nothing;
+    if (!slots.length && busyAll.length) {
+      empty.hidden = false;
+      empty.textContent = 'この週に予約枠がありません。別の週を試してください。';
+    }
+  }
+
+  function renderCalendar() {
+    renderWeekCalendar();
+  }
+
+  async function loadMeta() {
+    const r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/meta');
+    if (!r.ok) {
+      let detail = '現在この予約リンクでは予約を受け付けていません。';
+      try {
+        const t = await r.text();
+        const j = t ? JSON.parse(t) : {};
+        if (j.detail) {
+          detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+        }
+      } catch (e) {
+        /* keep default */
+      }
+      if (r.status === 403) {
+        setLinkDisabledState(detail);
+        return;
+      }
+      throw new Error(detail + (r.status ? '（HTTP ' + r.status + '）' : ''));
+    }
+    const m = await r.json();
+    lastMeta = m;
+    const ggc = m.go_google_calendar;
+    const grow = document.getElementById('modal-google-cal-row');
+    if (grow) {
+      grow.hidden = !(ggc && ggc.enabled && ggc.client_id);
+    }
+    document.getElementById('org-title').textContent = m.org.name;
+    metaAvailability = m.availability_defaults || {};
+    cursorDate = startOfLocalDay(new Date());
+    const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
+    document.getElementById('link-label').textContent = lt;
+    document.getElementById('page-heading').textContent = lt;
+    const noticeWrap = document.getElementById('booking-link-notice');
+    const noticeText = document.getElementById('booking-link-notice-text');
+    const preBookingNotice = m.link && m.link.pre_booking_notice ? m.link.pre_booking_notice : '';
+    if (noticeWrap && noticeText) {
+      noticeWrap.hidden = !preBookingNotice;
+      noticeText.textContent = preBookingNotice;
+    }
+    const ga = m.ga4_measurement_id;
+    if (ga) {
+      const s = document.createElement('script');
+      s.async = true;
+      s.src = 'https://www.googletagmanager.com/gtag/js?id=' + encodeURIComponent(ga);
+      document.head.appendChild(s);
+      window.dataLayer = window.dataLayer || [];
+      function gtag() {
+        dataLayer.push(arguments);
+      }
+      gtag('js', new Date());
+      gtag('config', ga);
+    }
+    fixedServiceId =
+      (m.fixed_service && m.fixed_service.id) ||
+      (m.link && m.link.service_id != null ? m.link.service_id : null);
+    window.__BOOKING_LINK_SERVICE_ID__ = m.link && m.link.service_id != null ? m.link.service_id : null;
+    const tools = document.getElementById('booking-service-tools');
+    const fixHint = document.getElementById('booking-fixed-course-hint');
+    if (tools) tools.hidden = true;
+    if (fixHint) {
+      fixHint.hidden = false;
+      if (m.fixed_service) {
+        fixHint.textContent = m.fixed_service.name + '（' + m.fixed_service.duration_minutes + '分）';
+      } else {
+        const firstService = (m.services || [])[0];
+        if (firstService) {
+          fixedServiceId = firstService.id;
+          fixHint.textContent = firstService.name + '（' + firstService.duration_minutes + '分）';
+        } else {
+          fixHint.textContent = '';
+          fixHint.hidden = true;
+        }
+      }
+    }
+    renderExtraFields(m.form_fields || []);
+    await loadSlots();
+  }
+
+  async function loadSlots() {
+    const loading = document.getElementById('slots-loading');
+    const grid = document.getElementById('booking-cal-grid');
+    const empty = document.getElementById('slots-empty');
+    loading.hidden = false;
+    grid.hidden = true;
+    empty.hidden = true;
+    loading.textContent = '読み込み中…';
+
+    if (linkDisabled) {
+      setLinkDisabledState('現在この予約リンクでは予約を受け付けていません。');
+      return;
+    }
+    let svcId = fixedServiceId;
+    if (!Number.isFinite(svcId) && window.__BOOKING_LINK_SERVICE_ID__ != null) {
+      svcId = window.__BOOKING_LINK_SERVICE_ID__;
+    }
+    if (!cursorDate) cursorDate = startOfLocalDay(new Date());
+    const from = startOfLocalDay(cursorDate);
+    const to = new Date(from);
+    to.setDate(to.getDate() + 7);
+    to.setMilliseconds(-1);
+
+    const q = new URLSearchParams({ from_ts: from.toISOString(), to_ts: to.toISOString() });
+    if (Number.isFinite(svcId)) q.set('service_id', String(svcId));
+    const r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/availability?' + q);
+    const rawText = await r.text();
+    let j = {};
+    try {
+      j = rawText ? JSON.parse(rawText) : {};
+    } catch (e) {
+      j = {};
+    }
+    if (!r.ok) {
+      loading.hidden = false;
+      let detail =
+        (j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || '';
+      if (!detail && rawText && rawText.length < 300) {
+        detail = rawText;
+      }
+      if (r.status === 403) {
+        setLinkDisabledState(detail || '現在この予約リンクでは予約を受け付けていません。');
+        return;
+      }
+      loading.textContent =
+        (detail || '空き枠を読み込めませんでした') + (r.status ? '（HTTP ' + r.status + '）' : '');
+      grid.hidden = true;
+      empty.hidden = true;
+      return;
+    }
+    loading.hidden = true;
+    lastAvail = j;
+    lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
+    renderCalendar();
+  }
+
+  document.getElementById('booking-cal-prev').addEventListener('click', function () {
+    const d = startOfLocalDay(cursorDate || new Date());
+    d.setDate(d.getDate() - 7);
+    cursorDate = d;
+    loadSlots();
+  });
+  document.getElementById('booking-cal-next').addEventListener('click', function () {
+    const d = startOfLocalDay(cursorDate || new Date());
+    d.setDate(d.getDate() + 7);
+    cursorDate = d;
+    loadSlots();
+  });
+  document.getElementById('booking-cal-today').addEventListener('click', function () {
+    cursorDate = startOfLocalDay(new Date());
+    loadSlots();
+  });
+
+  document.getElementById('modal-cancel').addEventListener('click', function () {
+    dialogEl.close();
+  });
+
+  document.getElementById('modal-submit').addEventListener('click', async function () {
+    const msg = document.getElementById('modal-msg');
+    msg.textContent = '';
+    const startIsoRaw = selectedBookingStartIso;
+    if (!startIsoRaw) {
+      msg.textContent = '予約枠を選び直してください';
+      return;
+    }
+    const slotMin = (lastAvail && lastAvail.slot_minutes) || 30;
+    const durSnap = (lastAvail && lastAvail.service_duration_minutes) || 30;
+    const maxSnap = Math.max(90000, Math.floor((slotMin * 60000) / 2), Math.floor((durSnap * 60000) / 2));
+    const slotIso = findNearestSlotStartUtc(new Date(startIsoRaw).getTime(), maxSnap);
+    if (!slotIso) {
+      msg.textContent = 'カレンダーの緑の枠と同じ開始時刻にしてください。';
+      return;
+    }
+    const startIso = slotIso;
+    selectedBookingStartIso = startIso;
+    const startD = new Date(startIso);
+    const day0 = startOfLocalDay(startD);
+    const bounds = dayBusinessBounds(day0);
+    const durMin = lastAvail ? lastAvail.service_duration_minutes || 30 : 30;
+    const endD = new Date(startD.getTime() + durMin * 60000);
+    if (startD < bounds.start || endD > bounds.end) {
+      msg.textContent = '受付時間外の日時です。受付時間内に調整してください。';
+      return;
+    }
+    if (!document.getElementById('modal-name').value.trim() || !document.getElementById('modal-email').value.trim()) {
+      msg.textContent = 'お名前とメールを入力してください';
+      return;
+    }
+    const body = {
+      link_token: token,
+      start_utc: startIso,
+      customer_name: document.getElementById('modal-name').value.trim(),
+      customer_email: document.getElementById('modal-email').value.trim(),
+      company_name: document.getElementById('modal-company').value.trim() || null,
+      form_answers: collectFormAnswers(),
+      utm_source: params.get('utm_source'),
+      utm_medium: params.get('utm_medium'),
+      utm_campaign: params.get('utm_campaign'),
+      referrer: document.referrer || null,
+    };
+    if (fixedServiceId != null && fixedServiceId !== '') {
+      body.service_id = fixedServiceId;
+    }
+    const staffForSlot = staffIdForSlotStartIso(startIso);
+    if (staffForSlot != null) {
+      body.staff_id = staffForSlot;
+    }
+    if (lastAvailabilityRange) {
+      body.availability_from_ts = lastAvailabilityRange.from;
+      body.availability_to_ts = lastAvailabilityRange.to;
+    }
+    if (customerGoogleAccessToken) {
+      body.customer_google_access_token = customerGoogleAccessToken;
+    }
+    const r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/book', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    const j = await r.json().catch(function () {
+      return {};
+    });
+    if (!r.ok) {
+      let detail = formatApiErrorDetail(j);
+      if (!detail) detail = r.statusText || 'エラーが発生しました';
+      if (detail === 'no staff available' || detail.indexOf('no staff available') !== -1) {
+        detail = 'この時間はすでに埋まっているか、担当が割り当てられませんでした。別の緑の枠を選び直してください。';
+      } else if (detail === 'slot not available' || detail.indexOf('slot not available') !== -1) {
+        detail = 'この時間は予約できません。別の枠をお選びください。';
+      }
+      msg.textContent = detail;
+      return;
+    }
+    dialogEl.close();
+    openSuccessDialog(j, startIso);
+  });
+
+  function loadGsiScript(onload) {
+    if (window.google && window.google.accounts && window.google.accounts.oauth2) {
+      onload();
+      return;
+    }
+    const existing = document.querySelector('script[data-booking-gsi]');
+    if (existing) {
+      existing.addEventListener('load', onload);
+      return;
+    }
+    const s = document.createElement('script');
+    s.src = 'https://accounts.google.com/gsi/client';
+    s.async = true;
+    s.defer = true;
+    s.setAttribute('data-booking-gsi', '1');
+    s.onload = onload;
+    document.head.appendChild(s);
+  }
+
+  document.getElementById('modal-google-cal-btn').addEventListener('click', function () {
+    const msg = document.getElementById('modal-msg');
+    msg.textContent = '';
+    const ggc = lastMeta && lastMeta.go_google_calendar;
+    const cid = ggc && ggc.client_id;
+    if (!cid) {
+      msg.textContent = 'Google 連携がサーバーで有効になっていません。';
+      return;
+    }
+    loadGsiScript(function () {
+      if (!window.google || !google.accounts || !google.accounts.oauth2) {
+        msg.textContent = 'Google の読み込みに失敗しました。ページを再読み込みしてください。';
+        return;
+      }
+      const gsiHint =
+        lastMeta && lastMeta.go_google_calendar && lastMeta.go_google_calendar.gsi_setup_note_ja
+          ? lastMeta.go_google_calendar.gsi_setup_note_ja
+          : '';
+      const client = google.accounts.oauth2.initTokenClient({
+        client_id: cid,
+        scope: 'https://www.googleapis.com/auth/calendar.events',
+        callback: function (resp) {
+          if (resp.error) {
+            msg.textContent =
+              (resp.error === 'popup_failed' ? 'ポップアップを許可してください。' : resp.error) +
+              (gsiHint ? '\n' + gsiHint : '');
+            return;
+          }
+          customerGoogleAccessToken = resp.access_token;
+          const st = document.getElementById('modal-google-cal-status');
+          if (st) st.textContent = '許可済み';
+        },
+        error_callback: function (err) {
+          msg.textContent =
+            (err && (err.message || err.type) ? String(err.message || err.type) : '認可に失敗しました') +
+            (gsiHint ? '\n' + gsiHint : '');
+        },
+      });
+      client.requestAccessToken();
+    });
+  });
+
+  dialogEl.addEventListener('click', function (ev) {
+    if (ev.target === dialogEl) dialogEl.close();
+  });
+  successDialogEl.addEventListener('click', function (ev) {
+    if (ev.target === successDialogEl) successDialogEl.close();
+  });
+  document.getElementById('success-close').addEventListener('click', function () {
+    successDialogEl.close();
+  });
+
+  loadMeta().catch(function (e) {
+    document.getElementById('page-msg').textContent = String(e);
+    document.getElementById('slots-loading').textContent = '読み込みに失敗しました';
+  });
+})();
+</script>
+{% endblock %}

@@ -1,0 +1,14 @@
+# 使い方: docker compose up --build
+# ブラウザ: http://127.0.0.1:8000/health
+# 追加の環境変数は .env を用意するか、下の environment を編集
+services:
+  web:
+    build: .
+    ports:
+      - "8000:8000"
+    environment:
+      DATABASE_URL: sqlite+aiosqlite:///./data/app.db
+      PUBLIC_BASE_URL: http://127.0.0.1:8000
+      BOOKING_SEED_DEMO: "true"
+    volumes:
+      - ./data:/app/data

@@ -1,0 +1,2133 @@
+:root {
+  --bg: #f1f5f9;
+  --surface: #fff;
+  --text: #0f172a;
+  --muted: #64748b;
+  --primary: #2563eb;
+  --primary-hover: #1d4ed8;
+  --border: #e2e8f0;
+  --radius: 12px;
+  --shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  --shadow-md: 0 4px 14px rgba(15, 23, 42, 0.08);
+  --header-bg: linear-gradient(135deg, #1e3a5f 0%, #0f172a 100%);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  font-family: "Segoe UI Variable", "Segoe UI", "Hiragino Sans", "Yu Gothic UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+}
+
+.app-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 0.75rem;
+  padding: 0.85rem 1.35rem;
+  background: var(--header-bg);
+  color: #f8fafc;
+  box-shadow: 0 1px 0 rgba(255, 255, 255, 0.06);
+}
+
+.app-brand {
+  font-weight: 700;
+  font-size: 1.15rem;
+  letter-spacing: -0.02em;
+  color: inherit;
+  text-decoration: none;
+}
+
+.app-brand:hover {
+  opacity: 0.9;
+}
+
+.app-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  align-items: center;
+}
+
+.app-nav a {
+  color: #94a3b8;
+  text-decoration: none;
+  padding: 0.35rem 0.65rem;
+  border-radius: 8px;
+  font-size: 0.9rem;
+}
+
+.app-nav a:hover,
+.app-nav a.active {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.12);
+}
+
+.app-org-chip {
+  display: inline-flex;
+  align-items: center;
+  padding: 0.35rem 0.65rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  color: #e2e8f0;
+  background: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  white-space: nowrap;
+}
+
+.app-main {
+  flex: 1;
+  max-width: 720px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 1.5rem 1rem 3rem;
+}
+
+.app-footer {
+  padding: 0.75rem 1rem;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--muted);
+  border-top: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.hero-home {
+  margin: -0.5rem -1rem 2rem;
+  padding: 2.25rem 1.25rem 2.5rem;
+  background: linear-gradient(160deg, #e0e7ff 0%, #f8fafc 48%, #fff 100%);
+  border-radius: 0 0 var(--radius) var(--radius);
+  border: 1px solid var(--border);
+  border-top: none;
+  box-shadow: var(--shadow-md);
+}
+
+.hero-home-inner {
+  max-width: 40rem;
+}
+
+.hero-home h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.85rem;
+  font-weight: 700;
+  letter-spacing: -0.03em;
+  color: var(--text);
+}
+
+.hero-home-lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.02rem;
+  line-height: 1.55;
+}
+
+.feature-grid {
+  display: grid;
+  gap: 1.1rem;
+}
+
+@media (min-width: 720px) {
+  .feature-grid {
+    grid-template-columns: repeat(3, 1fr);
+  }
+}
+
+.feature-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.35rem 1.2rem;
+  box-shadow: var(--shadow);
+  transition: box-shadow 0.2s, border-color 0.2s;
+}
+
+.feature-card:hover {
+  box-shadow: var(--shadow-md);
+  border-color: #cbd5e1;
+}
+
+.feature-card h2 {
+  margin: 0.5rem 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.feature-card p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.94rem;
+  min-height: 2.8rem;
+}
+
+.feature-card .small {
+  font-size: 0.82rem;
+  min-height: auto;
+}
+
+.feature-card-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  margin-bottom: 0.25rem;
+}
+
+.feature-card-icon--book {
+  background: linear-gradient(135deg, #3b82f6, #1d4ed8);
+  box-shadow: 0 4px 12px rgba(37, 99, 235, 0.35);
+}
+
+.feature-card-icon--cal {
+  background: linear-gradient(135deg, #10b981, #047857);
+  box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);
+}
+
+.feature-card-icon--adm {
+  background: linear-gradient(135deg, #8b5cf6, #6d28d9);
+  box-shadow: 0 4px 12px rgba(139, 92, 246, 0.3);
+}
+
+.hero {
+  margin-bottom: 2rem;
+}
+
+.hero h1 {
+  margin: 0 0 0.5rem;
+  font-size: 1.75rem;
+}
+
+.lead {
+  margin: 0;
+  color: var(--muted);
+  font-size: 1.05rem;
+}
+
+.cards {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 640px) {
+  .cards {
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  }
+}
+
+.card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.card h2 {
+  margin: 0 0 0.5rem;
+  font-size: 1.1rem;
+}
+
+.card p {
+  margin: 0 0 1rem;
+  color: var(--muted);
+  font-size: 0.95rem;
+}
+
+.btn {
+  display: inline-block;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  font-weight: 600;
+  text-decoration: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.95rem;
+  margin-right: 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.btn.primary {
+  background: var(--primary);
+  color: #fff;
+}
+
+.btn.primary:hover {
+  background: var(--primary-hover);
+}
+
+.btn.secondary {
+  background: #e2e8f0;
+  color: var(--text);
+}
+
+.btn.secondary:hover {
+  background: #cbd5e1;
+}
+
+.btn.ghost {
+  background: transparent;
+  border: 1px solid var(--border);
+  color: var(--text);
+}
+
+.page-title {
+  margin: 0 0 1rem;
+  font-size: 1.5rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.9rem;
+}
+
+.err {
+  color: #b91c1c;
+  font-size: 0.9rem;
+}
+
+label {
+  display: block;
+  margin-top: 0.75rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+input,
+select,
+button:not(.btn),
+textarea {
+  width: 100%;
+  max-width: 100%;
+  padding: 0.5rem 0.65rem;
+  margin-top: 0.25rem;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font: inherit;
+}
+
+ul.slots {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+}
+
+ul.slots li {
+  margin: 0.35rem 0;
+}
+
+ul.slots button {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--border);
+}
+
+ul.slots button:hover {
+  border-color: var(--primary);
+}
+
+.admin-panel label {
+  margin-top: 1rem;
+}
+
+.admin-actions {
+  margin-top: 1rem;
+}
+
+.admin-json {
+  margin-top: 1rem;
+  padding: 1rem;
+  background: #0f172a;
+  color: #e2e8f0;
+  border-radius: var(--radius);
+  overflow: auto;
+  font-size: 0.8rem;
+  max-height: 60vh;
+}
+
+code {
+  font-size: 0.85em;
+  background: #f1f5f9;
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+
+/* スマホ: 時間枠ボタンを押しやすく */
+@media (max-width: 640px) {
+  ul.slots button,
+  .slot-btn {
+    min-height: 44px;
+    padding: 0.65rem 0.75rem;
+  }
+  .btn {
+    min-height: 44px;
+  }
+}
+
+.app-main.wide {
+  max-width: 1180px;
+}
+
+.page-lead {
+  margin: 0 0 1.5rem;
+  font-size: 0.98rem;
+  color: var(--muted);
+  max-width: 52rem;
+}
+
+.cal-banner {
+  padding: 0.75rem 1rem;
+  border-radius: var(--radius);
+  margin-bottom: 1rem;
+  font-size: 0.95rem;
+}
+
+.cal-banner.ok {
+  background: #ecfdf5;
+  color: #065f46;
+  border: 1px solid #a7f3d0;
+}
+
+.cal-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1.25rem 1.15rem;
+  margin-bottom: 1.25rem;
+  box-shadow: var(--shadow);
+}
+
+.cal-h2 {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.cal-hint {
+  margin: 0 0 1rem;
+  font-size: 0.9rem;
+}
+
+.cal-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.cal-field {
+  flex: 1;
+  min-width: 200px;
+}
+
+.cal-field input {
+  width: 100%;
+  margin-top: 0.35rem;
+}
+
+.cal-actions {
+  flex: 0 0 auto;
+}
+
+.cal-week-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  margin-bottom: 0.75rem;
+}
+
+.cal-week-label {
+  margin-left: auto;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.cal-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.65rem;
+  margin-bottom: 0.75rem;
+  font-size: 0.85rem;
+}
+
+.cal-leg-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.cal-leg-swatch {
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+}
+
+.cal-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #fafbfc;
+}
+
+.cal-grid {
+  min-width: 720px;
+}
+
+.cal-head {
+  display: grid;
+  grid-template-columns: 48px repeat(7, 1fr);
+  background: #f1f5f9;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.82rem;
+  font-weight: 600;
+}
+
+.cal-corner {
+  border-right: 1px solid var(--border);
+}
+
+.cal-head-day {
+  padding: 0.5rem 0.35rem;
+  text-align: center;
+  border-right: 1px solid var(--border);
+}
+
+.cal-head-day:last-child {
+  border-right: none;
+}
+
+.cal-body {
+  display: grid;
+  grid-template-columns: 48px repeat(7, 1fr);
+  position: relative;
+}
+
+.cal-rail {
+  border-right: 1px solid var(--border);
+  background: var(--surface);
+}
+
+.cal-rail-hour {
+  font-size: 0.72rem;
+  color: var(--muted);
+  padding-right: 4px;
+  text-align: right;
+  border-bottom: 1px solid #f1f5f9;
+  box-sizing: border-box;
+}
+
+.cal-col {
+  position: relative;
+  border-right: 1px solid var(--border);
+  background: linear-gradient(to bottom, #fff 0%, #fff 100%);
+}
+
+.cal-col:last-child {
+  border-right: none;
+}
+
+.cal-slot {
+  border-bottom: 1px solid #f1f5f9;
+  box-sizing: border-box;
+}
+
+.cal-events-layer {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  pointer-events: none;
+}
+
+.cal-event {
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 0.72rem;
+  line-height: 1.25;
+  overflow: hidden;
+  pointer-events: auto;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.08);
+}
+
+.cal-event.pending {
+  opacity: 0.92;
+  background-image: repeating-linear-gradient(
+    -45deg,
+    transparent,
+    transparent 4px,
+    rgba(255, 255, 255, 0.35) 4px,
+    rgba(255, 255, 255, 0.35) 8px
+  );
+}
+
+.cal-ev-time {
+  font-weight: 700;
+  font-size: 0.68rem;
+  opacity: 0.85;
+}
+
+.cal-ev-title {
+  font-weight: 600;
+}
+
+.cal-ev-meta {
+  font-size: 0.65rem;
+  opacity: 0.8;
+  margin-top: 2px;
+}
+
+.cal-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.88rem;
+}
+
+.cal-table th,
+.cal-table td {
+  text-align: left;
+  padding: 0.5rem 0.45rem;
+  border-bottom: 1px solid var(--border);
+}
+
+.cal-table th {
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.cal-pill {
+  display: inline-block;
+  font-size: 0.72rem;
+  padding: 0.15rem 0.45rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  color: var(--muted);
+}
+
+.cal-pill.ok {
+  background: #ecfdf5;
+  color: #047857;
+}
+
+.cal-staff-auth-help {
+  padding: 0.85rem 1rem;
+  border-radius: 8px;
+  border: 1px solid #e2e8f0;
+  background: #f8fafc;
+  font-size: 0.9rem;
+  line-height: 1.55;
+  color: var(--text);
+}
+
+.cal-staff-auth-help--err {
+  border-color: #fecaca;
+  background: #fef2f2;
+}
+
+.cal-auth-err {
+  color: #b91c1c;
+}
+
+.btn.sm {
+  padding: 0.3rem 0.55rem;
+  font-size: 0.82rem;
+}
+
+.footer-sep {
+  margin: 0 0.35rem;
+  opacity: 0.6;
+}
+
+.footer-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
+}
+
+.footer-hint code {
+  font-size: 0.75rem;
+}
+
+.admin-msg {
+  min-height: 1.25em;
+  font-size: 0.9rem;
+}
+
+.admin-msg.err {
+  color: #b91c1c;
+}
+
+.admin-msg.ok {
+  color: #047857;
+}
+
+.oauth-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.5rem;
+  margin: 0 0 0.75rem;
+}
+
+.oauth-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: 0.78rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  border: 1px solid #dadce0;
+  background: #f8f9fa;
+  color: #3c4043;
+}
+
+.oauth-chip.ok {
+  background: #e6f4ea;
+  border-color: #34a853;
+  color: #137333;
+}
+
+.oauth-chip.bad {
+  background: #fce8e6;
+  border-color: #ea4335;
+  color: #c5221f;
+}
+
+.oauth-chip.id-preview {
+  max-width: 100%;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  border-style: dashed;
+}
+
+.oauth-setup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.65rem 0 0.25rem;
+}
+
+.oauth-setup-actions .btn {
+  margin-bottom: 0;
+}
+
+.oauth-setup-lead {
+  margin-top: 0.35rem;
+}
+
+/* —— 予約画面 v2: カレンダー＋モーダル —— */
+.booking-flow-v2 .booking-hero-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 1.15rem;
+  padding: 1.35rem 1.4rem;
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 24px;
+  background:
+    radial-gradient(circle at top right, rgba(37, 99, 235, 0.18), transparent 26%),
+    linear-gradient(135deg, rgba(255, 255, 255, 0.94), rgba(248, 250, 252, 0.98));
+  box-shadow: 0 20px 45px rgba(15, 23, 42, 0.08);
+  position: relative;
+  overflow: hidden;
+}
+
+.booking-flow-v2 .booking-hero-bar::after {
+  content: "";
+  position: absolute;
+  width: 180px;
+  height: 180px;
+  right: -48px;
+  top: -72px;
+  border-radius: 999px;
+  background: radial-gradient(circle, rgba(14, 165, 233, 0.14), transparent 70%);
+  pointer-events: none;
+}
+
+.booking-hero-title {
+  margin: 0.3rem 0 0;
+  font-size: clamp(1.55rem, 2vw, 2rem);
+  font-weight: 700;
+  letter-spacing: -0.04em;
+}
+
+.booking-top-tools {
+  margin-bottom: 1rem;
+  padding: 0.9rem 1rem;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.75rem 1rem;
+  border-radius: 18px;
+}
+
+/* [hidden] は display:flex より弱いため、コース行を確実に非表示 */
+.booking-top-tools[hidden] {
+  display: none !important;
+}
+
+.booking-tool-label {
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.booking-service-select {
+  min-width: 12rem;
+  max-width: 100%;
+  font-size: 0.95rem;
+  padding: 0.35rem 0.5rem;
+}
+
+.booking-page-msg {
+  margin: 0.75rem 0 0;
+  padding: 0.9rem 1rem;
+  border-radius: 14px;
+  background: rgba(239, 68, 68, 0.08);
+  border: 1px solid rgba(239, 68, 68, 0.16);
+}
+
+.booking-dialog {
+  border: none;
+  border-radius: 22px;
+  padding: 0;
+  max-width: calc(100vw - 2rem);
+  width: min(460px, 100%);
+  box-shadow: 0 24px 80px rgba(15, 23, 42, 0.24);
+}
+
+.booking-dialog::backdrop {
+  background: rgba(15, 23, 42, 0.56);
+  backdrop-filter: blur(4px);
+}
+
+.booking-dialog__panel {
+  padding: 1.35rem 1.45rem 1.55rem;
+  max-height: min(85vh, 720px);
+  overflow-y: auto;
+}
+
+.booking-dialog__title {
+  margin: 0 0 0.5rem;
+  font-size: 1.2rem;
+  letter-spacing: -0.02em;
+}
+
+.booking-dialog__datetime {
+  margin: 0 0 0.75rem;
+  font-weight: 600;
+  color: var(--text);
+  font-size: 1rem;
+}
+
+.booking-dialog__hint {
+  margin: 0.35rem 0 0.85rem;
+  font-size: 0.82rem;
+}
+
+.booking-dialog__input-wide {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-bottom: 0.25rem;
+  border-radius: 14px;
+  border: 1px solid #d8dee8;
+  background: #fbfdff;
+  min-height: 2.85rem;
+}
+
+.booking-dialog__extra {
+  margin-bottom: 0.5rem;
+}
+
+.booking-dialog__extra .field-label:first-child {
+  margin-top: 0.25rem;
+}
+
+.booking-dialog__actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  margin-top: 1rem;
+  padding: 0.75rem 0.25rem 0 0;
+  border-top: 1px solid var(--border);
+  box-sizing: border-box;
+}
+
+.booking-cal-section {
+  grid-column: 1 / -1;
+  border-radius: 22px;
+}
+
+.booking-layout-stack {
+  grid-template-columns: 1fr !important;
+  max-width: 1100px;
+  margin: 0 auto;
+}
+
+.booking-cal-toolbar {
+  margin-bottom: 0.65rem;
+  align-items: center;
+}
+
+/* 予約画面はページ全体スクロールで最終行まで見えるように（内側だけの短い枠で切れない） */
+.booking-cal-wrap {
+  max-height: none;
+  min-height: 320px;
+  overflow: visible;
+  overflow-x: auto;
+  -webkit-overflow-scrolling: touch;
+  border-radius: 18px;
+  border: 1px solid #e2e8f0;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
+  padding: 0.35rem;
+}
+
+.booking-cal-wrap .gcal-body-week,
+.booking-cal-wrap .gcal-body-day {
+  padding-bottom: 0.5rem;
+}
+
+.booking-cal-wrap .gcal-grid-week {
+  min-width: 0;
+  width: 100%;
+}
+
+.booking-cal-wrap .gcal-head-week {
+  grid-template-columns: 48px repeat(7, minmax(0, 1fr));
+}
+
+.booking-cal-wrap .gcal-body-week {
+  grid-template-columns: 48px repeat(7, minmax(0, 1fr));
+}
+
+.gcal-rail-closing {
+  font-size: 0.72rem;
+  color: #137333;
+  padding: 6px 6px 8px 0;
+  text-align: right;
+  border-top: 1px solid #ceead6;
+  background: linear-gradient(180deg, rgba(232, 245, 233, 0.95), #fff);
+  box-sizing: border-box;
+  line-height: 1.25;
+  font-weight: 700;
+}
+
+/* 「予約可能」ボタンではない。表示用 busy との差分の目安（緑にすると予約可と誤認されるため中立色） */
+.booking-cal-events-layer .booking-cal-avail-band {
+  position: absolute;
+  left: 0;
+  right: 0;
+  pointer-events: none;
+  z-index: 0;
+  border-radius: 4px;
+  background: linear-gradient(
+    180deg,
+    rgba(232, 240, 254, 0.65),
+    rgba(210, 227, 252, 0.4)
+  );
+  box-shadow: inset 0 0 0 1px rgba(66, 133, 244, 0.18);
+}
+
+.booking-cal-footer-spacer {
+  border-top: 1px solid #e8eaed;
+  box-sizing: border-box;
+  flex-shrink: 0;
+}
+
+.gcal-col.booking-cal-col-hit .gcal-slot {
+  pointer-events: none;
+}
+
+.booking-cal-wrap .cal-events-layer.booking-cal-events-layer,
+.booking-cal-wrap .gcal-events-layer {
+  /* 後段の .gcal-events-layer { pointer-events: none } より優先し、子の緑枠にクリックを届ける */
+  pointer-events: auto !important;
+}
+
+.booking-cal-col-hit:hover {
+  box-shadow: inset 0 0 0 2px rgba(37, 99, 235, 0.2);
+}
+
+.booking-cal-wrap.booking-cal-wrap-day {
+  max-height: none;
+}
+
+.booking-cal-view-toggle {
+  display: inline-flex;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-right: 0.5rem;
+}
+
+.booking-cal-view-toggle button {
+  border: none;
+  background: #fff;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.88rem;
+  cursor: pointer;
+  color: #3c4043;
+}
+
+.booking-cal-view-toggle button.active {
+  background: #e8f0fe;
+  color: #1967d2;
+  font-weight: 600;
+}
+
+.booking-busy-block {
+  position: absolute;
+  left: 1px;
+  right: 1px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  background: repeating-linear-gradient(
+    -45deg,
+    #f1f3f4,
+    #f1f3f4 4px,
+    #e8eaed 4px,
+    #e8eaed 8px
+  );
+  border: 1px solid #dadce0;
+  border-radius: 4px;
+  opacity: 0.92;
+  pointer-events: auto;
+  /* 予約枠より背面。データのずれで重なった場合は予約可能枠をクリック可能にする */
+  z-index: 3;
+  box-sizing: border-box;
+}
+
+.booking-busy-block .cal-ev-title {
+  font-size: 0.62rem;
+  line-height: 1.15;
+  color: #5f6368;
+  padding: 1px 3px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.booking-cal-col-hit {
+  cursor: crosshair;
+}
+
+.booking-cal-col-hit:active {
+  box-shadow: inset 0 0 0 2px rgba(26, 115, 232, 0.45);
+}
+
+.gcal-col.booking-day-blocked {
+  cursor: not-allowed;
+  background: #f8fafc;
+}
+
+.gcal-col.booking-day-blocked:active {
+  box-shadow: none;
+}
+
+.booking-cal-events-layer .booking-day-blocked-overlay {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 0;
+  bottom: 0;
+  z-index: 4;
+  background: rgba(248, 250, 252, 0.88);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: auto;
+  border-radius: 4px;
+}
+
+.booking-day-blocked-label {
+  font-size: 0.78rem;
+  font-weight: 700;
+  color: #64748b;
+  padding: 0.35rem 0.65rem;
+  border: 1px dashed #94a3b8;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.95);
+}
+
+.gcal-head-daycell.booking-head-day-blocked {
+  color: #94a3b8;
+  background: #f1f5f9;
+}
+
+.booking-cal-events-layer .booking-slot-choice.cal-event {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  font: inherit;
+  font-weight: 600;
+  border: 1px solid rgba(27, 94, 32, 0.16);
+  background: linear-gradient(180deg, #ecfdf3, #d8f6df);
+  color: #0f3b1c;
+  border-left: 4px solid #1f7a3d;
+  box-shadow: 0 6px 16px rgba(31, 122, 61, 0.14);
+  padding: 0.22rem 0.35rem;
+  overflow: hidden;
+  pointer-events: auto;
+  z-index: 8;
+  touch-action: manipulation;
+  box-sizing: border-box;
+  gap: 0.12rem;
+  border-radius: 12px;
+}
+
+.booking-cal-events-layer .booking-slot-choice .cal-ev-time {
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  opacity: 1;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
+}
+
+.booking-cal-events-layer .booking-slot-choice .booking-slot-meta {
+  font-size: 0.63rem;
+  font-weight: 600;
+  line-height: 1.15;
+  opacity: 0.82;
+  white-space: nowrap;
+}
+
+.booking-cal-events-layer .booking-slot-choice .booking-slot-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.35rem;
+  width: 100%;
+}
+
+.booking-cal-events-layer .booking-slot-choice .booking-slot-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 2.2rem;
+  padding: 0.08rem 0.38rem;
+  border-radius: 999px;
+  font-size: 0.6rem;
+  font-weight: 700;
+  line-height: 1;
+  color: #166534;
+  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid rgba(22, 101, 52, 0.14);
+}
+
+.booking-cal-events-layer .booking-slot-choice.is-short-slot {
+  padding: 0.12rem 0.45rem;
+  border-radius: 999px;
+  gap: 0;
+}
+
+.booking-cal-events-layer .booking-slot-choice.is-short-slot .cal-ev-time {
+  font-size: 0.76rem;
+  line-height: 1.1;
+}
+
+.booking-cal-events-layer .booking-slot-choice.is-short-slot .booking-slot-meta {
+  display: none;
+}
+
+.booking-cal-events-layer .booking-slot-choice.is-long-slot {
+  padding: 0.35rem 0.45rem;
+  gap: 0.2rem;
+}
+
+.booking-cal-events-layer .booking-slot-choice.is-long-slot .cal-ev-time {
+  font-size: 0.78rem;
+}
+
+.booking-cal-events-layer .booking-slot-choice.is-long-slot .booking-slot-meta {
+  font-size: 0.68rem;
+}
+
+.booking-cal-events-layer .booking-slot-choice:hover {
+  background: linear-gradient(180deg, #dff7e8, #c7efd2);
+  z-index: 10;
+  transform: translateY(-1px);
+}
+
+.booking-cal-events-layer .booking-slot-choice.selected {
+  background: linear-gradient(180deg, #1d4ed8, #1e40af);
+  color: #fff;
+  border-left-color: #93c5fd;
+  box-shadow: 0 10px 24px rgba(30, 64, 175, 0.3);
+  z-index: 11;
+}
+
+.booking-cal-events-layer .booking-slot-choice.selected .cal-ev-time {
+  color: #fff;
+}
+
+.booking-cal-events-layer .booking-slot-choice.selected .booking-slot-meta {
+  color: rgba(255, 255, 255, 0.92);
+}
+
+.booking-cal-events-layer .booking-slot-choice.selected .booking-slot-badge {
+  color: #dbeafe;
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(219, 234, 254, 0.32);
+}
+
+.booking-selected-hint {
+  margin: 0.65rem 0 0;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.booking-flow {
+  width: 100%;
+}
+
+.public-booking-body {
+  background:
+    radial-gradient(circle at top left, rgba(14, 165, 233, 0.1), transparent 22%),
+    radial-gradient(circle at bottom right, rgba(37, 99, 235, 0.08), transparent 18%),
+    linear-gradient(180deg, #f3f7fb, #eef3f8 48%, #f8fafc);
+}
+
+.public-booking-main {
+  position: relative;
+  padding-top: 2rem;
+  padding-bottom: 3.5rem;
+}
+
+.panel-hero {
+  margin-bottom: 1.5rem;
+}
+
+.org-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  color: #1d4ed8;
+  margin-bottom: 0.4rem;
+  text-transform: uppercase;
+  padding: 0.35rem 0.7rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(29, 78, 216, 0.12);
+}
+
+.page-sub {
+  margin: 0.25rem 0 0;
+  font-size: 1rem;
+  color: #475569;
+  max-width: 42rem;
+}
+
+.booking-layout {
+  display: grid;
+  gap: 1rem;
+}
+
+@media (min-width: 900px) {
+  .booking-layout {
+    grid-template-columns: 1fr 1fr;
+  }
+  .panel-wide {
+    grid-column: 1 / -1;
+  }
+}
+
+.panel {
+  background: var(--surface);
+  border: 1px solid rgba(148, 163, 184, 0.18);
+  border-radius: 22px;
+  padding: 1.2rem 1.25rem;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.06);
+}
+
+.panel-title {
+  margin: 0 0 0.75rem;
+  font-size: 1.05rem;
+}
+
+.panel-hint {
+  margin: 0 0 0.75rem;
+  font-size: 0.88rem;
+}
+
+.booking-summary-list {
+  display: grid;
+  gap: 0.7rem;
+}
+
+.booking-summary-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.45rem 0.8rem;
+  padding: 0.85rem 0.95rem;
+  border-radius: 16px;
+  background: linear-gradient(180deg, #fbfdff, #f8fafc);
+  border: 1px solid rgba(148, 163, 184, 0.16);
+}
+
+.booking-summary-label {
+  min-width: 5.5rem;
+  font-size: 0.82rem;
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  color: #64748b;
+  text-transform: uppercase;
+}
+
+.booking-summary-value {
+  flex: 1 1 14rem;
+  font-size: 0.96rem;
+  color: #0f172a;
+  word-break: break-word;
+}
+
+.booking-note-card {
+  margin-top: 0.9rem;
+  padding: 0.95rem 1rem;
+  border-radius: 16px;
+  background: linear-gradient(180deg, rgba(239, 246, 255, 0.92), rgba(248, 250, 252, 0.96));
+  border: 1px solid rgba(96, 165, 250, 0.18);
+}
+
+.booking-note-card strong {
+  display: block;
+  margin-bottom: 0.25rem;
+  font-size: 0.9rem;
+}
+
+.booking-link-notice {
+  margin-bottom: 1rem;
+}
+
+.booking-link-notice-inline {
+  margin-top: 0.85rem;
+  margin-bottom: 0;
+  max-width: 42rem;
+  background: rgba(255, 255, 255, 0.82);
+  box-shadow: 0 10px 24px rgba(15, 23, 42, 0.05);
+}
+
+.booking-multiline-note {
+  margin: 0;
+  white-space: pre-line;
+  line-height: 1.7;
+  color: #334155;
+}
+
+/* アカウント等: 1 パネル内の区切り見出し */
+.panel-subtitle {
+  margin: 1.15rem 0 0.65rem;
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--text);
+  padding-bottom: 0.35rem;
+  border-bottom: 1px solid var(--border);
+}
+.panel-subtitle:first-of-type {
+  margin-top: 0;
+}
+
+.panel-eyebrow {
+  margin: 0 0 0.5rem;
+  font-size: 0.88rem;
+  font-weight: 600;
+  color: var(--muted);
+}
+.accounts-api-toolbar {
+  margin-bottom: 0.75rem;
+}
+.accounts-user-table-wrap {
+  margin-top: 0.5rem;
+}
+.admin-table input.admin-input-inline {
+  width: 100%;
+  min-width: 7rem;
+  max-width: 14rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 0.88rem;
+}
+.accounts-user-actions {
+  white-space: normal;
+  text-align: right;
+}
+.accounts-user-actions .btn {
+  margin: 0.15rem 0 0.15rem 0.35rem;
+}
+
+.field-label {
+  display: block;
+  margin-top: 0.75rem;
+  font-weight: 600;
+  font-size: 0.9rem;
+}
+
+.field-label .req {
+  color: #b91c1c;
+}
+
+.foot-hint {
+  margin: 1rem 0 0.75rem;
+  font-size: 0.85rem;
+}
+
+.loading-text {
+  margin: 0.5rem 0 0;
+  color: var(--muted);
+  font-size: 0.92rem;
+}
+
+.slots-grid {
+  list-style: none;
+  padding: 0;
+  margin: 0.5rem 0 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 0.5rem;
+}
+
+.slot-btn {
+  width: 100%;
+  text-align: left;
+  cursor: pointer;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.5rem 0.65rem;
+  font: inherit;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.slot-btn:hover {
+  border-color: var(--primary);
+}
+
+.slot-btn.selected {
+  border-color: var(--primary);
+  box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.25);
+  background: #eff6ff;
+}
+
+.btn-submit {
+  margin-top: 1rem;
+}
+
+.admin-console .admin-section {
+  margin-bottom: 1.25rem;
+}
+
+/* 設定ページ: 組織 slug ブロックへの目印 */
+.settings-slug-callout {
+  margin: 0 0 1.1rem;
+  padding: 0.85rem 1rem;
+  border-left: 4px solid var(--primary);
+  background: rgba(37, 99, 235, 0.08);
+  border-radius: var(--radius);
+  font-size: 0.93rem;
+  line-height: 1.5;
+}
+
+.oauth-setup-admin .admin-uri-box,
+.oauth-setup-admin.cal-uri-box {
+  margin-top: 0.5rem;
+}
+
+.admin-details {
+  margin-top: 1.5rem;
+  font-size: 0.9rem;
+  color: var(--muted);
+}
+
+.admin-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.5rem;
+}
+
+.admin-details .admin-json {
+  margin-top: 0.5rem;
+}
+
+.admin-row.align-end {
+  align-items: flex-end;
+}
+
+.admin-field-check {
+  display: flex;
+  align-items: flex-end;
+  padding-bottom: 0.35rem;
+}
+
+.admin-row.align-start {
+  align-items: flex-start;
+}
+
+.admin-row.wrap {
+  align-items: flex-start;
+}
+
+.admin-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 1rem;
+  align-items: flex-end;
+}
+
+.admin-input-sm {
+  width: 6.5rem;
+  max-width: 100%;
+}
+
+.admin-staff-inp {
+  width: min(100%, 12rem);
+  max-width: 14rem;
+  font-size: 0.85rem;
+  margin-right: 0.35rem;
+  vertical-align: middle;
+}
+
+.admin-td-gprof {
+  font-size: 0.85rem;
+  min-width: 8rem;
+}
+
+.admin-gprof-name {
+  font-weight: 600;
+}
+
+.admin-gprof-email {
+  font-size: 0.78rem;
+}
+
+.admin-field {
+  flex: 1;
+  min-width: 200px;
+}
+
+.admin-field.grow {
+  flex: 2;
+}
+
+.admin-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin-top: 1rem;
+  align-items: center;
+}
+
+.summary-cards {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+}
+
+.summary-card {
+  background: #f8fafc;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 0.85rem 1rem;
+}
+
+.summary-card h3 {
+  margin: 0 0 0.35rem;
+  font-size: 0.78rem;
+  font-weight: 600;
+  color: var(--muted);
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+}
+
+.summary-card p {
+  margin: 0;
+  font-size: 0.92rem;
+  word-break: break-word;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.admin-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 0.9rem;
+}
+
+.admin-table th,
+.admin-table td {
+  text-align: left;
+  padding: 0.5rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+
+.admin-table th {
+  color: var(--muted);
+  font-size: 0.78rem;
+  font-weight: 600;
+}
+
+.url-cell {
+  font-size: 0.78rem;
+  word-break: break-all;
+}
+
+.staff-checks {
+  border: none;
+  padding: 0;
+  margin: 0.75rem 0 1rem;
+}
+
+.staff-checks legend {
+  padding: 0;
+}
+
+.check-line {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  margin: 0.35rem 0;
+  font-weight: normal;
+  cursor: pointer;
+}
+
+.check-line input {
+  width: auto;
+  margin: 0;
+}
+
+.admin-row-muted {
+  opacity: 0.65;
+}
+
+.admin-avail-section {
+  margin: 1.1rem 0 1.25rem;
+  padding: 1rem 1rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.65);
+}
+
+.admin-avail-section-title {
+  margin: 0 0 0.35rem;
+  font-size: 0.95rem;
+  font-weight: 700;
+  color: var(--text);
+}
+
+.admin-avail-section-lead {
+  margin: 0 0 0.75rem;
+  line-height: 1.45;
+}
+
+.admin-avail-time-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 0.5rem 0.75rem;
+}
+
+.admin-avail-time-sep {
+  font-weight: 700;
+  color: var(--muted);
+  padding-bottom: 0.35rem;
+}
+
+.admin-input-time {
+  min-width: 7rem;
+  min-height: 2.35rem;
+  padding: 0.35rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  font: inherit;
+}
+
+/* 公開予約URLのみ表示（ヘッダー・フッターなし） */
+.public-booking-body {
+  margin: 0;
+  min-height: 100vh;
+  background: var(--bg, #f1f5f9);
+}
+
+.public-booking-main {
+  max-width: 56rem;
+  margin: 0 auto;
+  padding: 1rem 1rem 2rem;
+  box-sizing: border-box;
+}
+
+@media (min-width: 640px) {
+  .public-booking-main {
+    padding: 1.25rem 1.5rem 2.5rem;
+  }
+}
+
+.cal-title-template-box {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 0.85rem 1rem;
+  background: rgba(248, 250, 252, 0.85);
+  margin-top: 0.35rem;
+}
+
+.cal-title-hint-top {
+  margin: 0 0 0.5rem;
+}
+
+.cal-preset-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.cal-title-chips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.35rem 0.45rem;
+  margin: 0.35rem 0 0.65rem;
+}
+
+.cal-title-chip-label {
+  width: 100%;
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: 0;
+}
+
+.cal-title-template-input {
+  max-width: 100%;
+}
+
+.cal-title-preview-line {
+  font-size: 0.88rem;
+  margin: 0.55rem 0 0;
+  padding: 0.45rem 0.65rem;
+  background: #fff;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  line-height: 1.4;
+}
+
+/* --- Google カレンダー風・予約カレンダー拡張 --- */
+.cal-banner.err {
+  background: #fef2f2;
+  color: #991b1b;
+  border: 1px solid #fecaca;
+}
+
+.gcal-page-title {
+  letter-spacing: -0.02em;
+}
+
+.gcal-card {
+  border-radius: 8px;
+  border-color: #dadce0;
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.12);
+}
+
+.cal-setup-steps {
+  margin: 0.5rem 0 1rem;
+  padding-left: 1.25rem;
+  font-size: 0.92rem;
+  color: var(--text);
+}
+
+.cal-setup-steps li {
+  margin: 0.35rem 0;
+}
+
+.cal-oauth-details {
+  margin: 0.75rem 0 0.25rem;
+  font-size: 0.92rem;
+  color: var(--muted);
+}
+
+.cal-oauth-details summary {
+  cursor: pointer;
+  font-weight: 600;
+  color: var(--text);
+  list-style-position: outside;
+}
+
+.cal-oauth-details[open] summary {
+  margin-bottom: 0.35rem;
+}
+
+.cal-oauth-details .cal-setup-steps {
+  margin-top: 0.35rem;
+}
+
+.cal-uri-box {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.65rem 0.85rem;
+  background: #f8f9fa;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  margin-bottom: 0.75rem;
+}
+
+.cal-uri-box code {
+  flex: 1;
+  min-width: 200px;
+  word-break: break-all;
+  font-size: 0.82rem;
+}
+
+.btn-sm {
+  padding: 0.35rem 0.65rem;
+  font-size: 0.85rem;
+}
+
+.gcal-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin-bottom: 0.85rem;
+}
+
+.gcal-view-toggle {
+  display: inline-flex;
+  border: 1px solid #dadce0;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.gcal-seg {
+  border: none;
+  background: #fff;
+  padding: 0.4rem 0.9rem;
+  font-weight: 600;
+  font-size: 0.88rem;
+  cursor: pointer;
+  color: #5f6368;
+}
+
+.gcal-seg:hover {
+  background: #f1f3f4;
+}
+
+.gcal-seg.active {
+  background: #e8f0fe;
+  color: #1967d2;
+}
+
+.gcal-today {
+  border: 1px solid #dadce0;
+  background: #fff;
+  color: #1967d2;
+  font-weight: 600;
+}
+
+.gcal-nav {
+  display: inline-flex;
+  gap: 0.25rem;
+}
+
+.gcal-arrow {
+  min-width: 2.25rem;
+  padding: 0.35rem 0.5rem;
+  font-size: 1.25rem;
+  line-height: 1;
+}
+
+.gcal-title {
+  margin-left: auto;
+  font-weight: 500;
+  font-size: 1.05rem;
+  color: #3c4043;
+}
+
+.gcal-legend {
+  border-bottom: 1px solid #e8eaed;
+  padding-bottom: 0.65rem;
+}
+
+.gcal-wrap {
+  border: 1px solid #dadce0;
+  border-radius: 8px;
+  background: #fff;
+  max-height: min(85vh, 960px);
+  overflow: auto;
+}
+
+.gcal-wrap-day {
+  max-height: min(88vh, 1200px);
+}
+
+.gcal-grid {
+  min-width: 0;
+}
+
+.gcal-grid-week {
+  min-width: 720px;
+}
+
+.gcal-grid-day {
+  min-width: 320px;
+}
+
+.gcal-head {
+  display: grid;
+  align-items: stretch;
+  border-bottom: 1px solid #dadce0;
+  background: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 2;
+}
+
+.gcal-head-week {
+  grid-template-columns: 56px repeat(7, minmax(72px, 1fr));
+}
+
+.gcal-head-day {
+  grid-template-columns: 56px 1fr;
+}
+
+.gcal-corner {
+  border-right: 1px solid #dadce0;
+  min-height: 52px;
+  background: #fff;
+}
+
+.gcal-head-main {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  padding: 0.5rem;
+  border-left: 1px solid #dadce0;
+}
+
+.gcal-head-dow {
+  font-size: 0.75rem;
+  color: #70757a;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.gcal-head-dom {
+  font-size: 1.75rem;
+  font-weight: 400;
+  color: #3c4043;
+  line-height: 1.2;
+}
+
+.gcal-head-daycell {
+  text-align: center;
+  padding: 0.45rem 0.25rem;
+  border-right: 1px solid #dadce0;
+}
+
+.gcal-head-daycell:last-child {
+  border-right: none;
+}
+
+.gcal-dow {
+  display: block;
+  font-size: 0.72rem;
+  color: #70757a;
+  font-weight: 500;
+}
+
+.gcal-dom {
+  display: block;
+  font-size: 1.25rem;
+  font-weight: 400;
+  color: #3c4043;
+  margin-top: 0.15rem;
+}
+
+.gcal-head-daycell.is-today .gcal-dom {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 2rem;
+  height: 2rem;
+  margin-left: auto;
+  margin-right: auto;
+  margin-top: 0.2rem;
+  background: #1a73e8;
+  color: #fff;
+  border-radius: 50%;
+}
+
+.gcal-body {
+  display: grid;
+  position: relative;
+}
+
+.gcal-body-week {
+  grid-template-columns: 56px repeat(7, minmax(72px, 1fr));
+}
+
+.gcal-body-day {
+  grid-template-columns: 56px 1fr;
+}
+
+.gcal-rail {
+  border-right: 1px solid #dadce0;
+  background: #fff;
+}
+
+.gcal-rail-hour {
+  font-size: 0.7rem;
+  color: #70757a;
+  padding-right: 6px;
+  text-align: right;
+  border-bottom: 1px solid #e8eaed;
+  box-sizing: border-box;
+  line-height: 1;
+  padding-top: 2px;
+}
+
+.gcal-col {
+  position: relative;
+  border-right: 1px solid #e8eaed;
+  background: #fff;
+}
+
+.gcal-col.is-today {
+  background: rgba(26, 115, 232, 0.04);
+}
+
+.gcal-col:last-child {
+  border-right: none;
+}
+
+.gcal-slot {
+  border-bottom: 1px solid #e8eaed;
+  box-sizing: border-box;
+  position: relative;
+}
+
+.gcal-slot-half {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 50%;
+  border-top: 1px dashed #f1f3f4;
+  pointer-events: none;
+}
+
+.gcal-events-layer {
+  pointer-events: none;
+}
+
+.gcal-event {
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 0.74rem;
+  line-height: 1.3;
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.18);
+}
+
+.gcal-now-line {
+  position: absolute;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: #ea4335;
+  z-index: 3;
+  pointer-events: none;
+}
+
+.gcal-now-line::before {
+  content: "";
+  position: absolute;
+  left: -4px;
+  top: -4px;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: #ea4335;
+}
+
+.gcal-google-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  background: #fff !important;
+  color: #3c4043 !important;
+  border: 1px solid #dadce0 !important;
+  font-weight: 600;
+  border-radius: 4px;
+  box-shadow: 0 1px 2px rgba(60, 64, 67, 0.18);
+  margin-right: 0.35rem;
+}
+
+.gcal-google-btn:hover:not(:disabled) {
+  background: #f8f9fa !important;
+  box-shadow: 0 1px 3px rgba(60, 64, 67, 0.28);
+}
+
+.gcal-g-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 2px;
+  background: conic-gradient(
+    #4285f4 0deg 90deg,
+    #ea4335 90deg 180deg,
+    #fbbc04 180deg 270deg,
+    #34a853 270deg 360deg
+  );
+  flex-shrink: 0;
+}
+
+.cal-td-actions {
+  white-space: nowrap;
+}
+
+.cal-td-actions .btn {
+  margin-bottom: 0;
+  margin-right: 0.25rem;
+}
+
+.gcal-staff-table {
+  margin-top: 0.5rem;
+}
+
+.cal-schedule-card {
+  margin-bottom: 2rem;
+}
+
+@media (max-width: 640px) {
+  .gcal-title {
+    width: 100%;
+    margin-left: 0;
+  }
+}

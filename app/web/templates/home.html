@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}ホーム{% endblock %}
+{% set nav = 'home' %}
+{% block content %}
+<section class="hero-home">
+  <div class="hero-home-inner">
+    <h1>予約管理</h1>
+    <p class="hero-home-lead">ログイン済みです。メニューから各機能を開けます。</p>
+  </div>
+</section>
+
+<section class="feature-grid">
+  <article class="feature-card">
+    <div class="feature-card-icon feature-card-icon--adm" aria-hidden="true"></div>
+    <h2>設定</h2>
+    <p>受付時間・予約区分・担当・Google／Zoom。ブラウザだけで編集（DBはアプリ経由）。</p>
+    <a class="btn primary" href="/app/settings">開く</a>
+  </article>
+  <article class="feature-card">
+    <div class="feature-card-icon feature-card-icon--book" aria-hidden="true"></div>
+    <h2>予約リンク</h2>
+    <p>予約リンクごとに予約区分・担当を決め、専用 URL を発行します。</p>
+    <a class="btn secondary" href="/app/campaigns">開く</a>
+  </article>
+  <article class="feature-card">
+    <div class="feature-card-icon feature-card-icon--cal" aria-hidden="true"></div>
+    <h2>カレンダー認証</h2>
+    <p>Google カレンダー連携や認証状態の確認。</p>
+    <a class="btn secondary" href="/app/calendar">開く</a>
+  </article>
+</section>
+{% endblock %}

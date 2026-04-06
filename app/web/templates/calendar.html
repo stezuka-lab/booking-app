@@ -1,0 +1,430 @@
+{% extends "base.html" %}
+{% block title %}カレンダー認証{% endblock %}
+{% set nav = 'calendar' %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<h1 class="page-title gcal-page-title">カレンダー認証</h1>
+<p class="muted page-lead">Google カレンダーとの連携を管理します。</p>
+
+<div id="oauth-banner" class="cal-banner ok" hidden></div>
+<div id="oauth-banner-err" class="cal-banner err" hidden></div>
+
+<section class="cal-card gcal-card">
+  <div class="cal-row">
+    <label class="cal-field">組織名
+      <p class="muted" id="cal-slug-display" style="margin: 0.35rem 0 0">—</p>
+    </label>
+  </div>
+  <p id="cal-msg" class="err"></p>
+</section>
+
+<section class="cal-card gcal-card cal-setup" id="oauth-setup-panel" hidden>
+  <h2 class="cal-h2">カレンダー認証（未設定）</h2>
+  <div id="oauth-checklist" class="oauth-checklist" aria-label="設定状況"></div>
+  <p class="muted cal-hint oauth-setup-lead">不足がある項目は <code>.env</code> に追記してサーバーを再起動してください。リダイレクト URI は Console と<strong>完全一致</strong>である必要があります。</p>
+  <div class="cal-uri-box">
+    <code id="oauth-redirect-uri-display">—</code>
+    <button type="button" class="btn secondary btn-sm" id="btn-copy-redirect">URI をコピー</button>
+  </div>
+  <div class="oauth-setup-actions">
+    <button type="button" class="btn secondary btn-sm" id="btn-copy-env-snippet">.env 用テキストをコピー</button>
+    <a class="btn secondary btn-sm" id="oauth-console-link" href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener">認証情報を開く</a>
+  </div>
+  <details class="cal-oauth-details">
+    <summary>クライアントの作成手順（初回）</summary>
+    <ol class="cal-setup-steps">
+      <li>上の「認証情報を開く」から OAuth 2.0 クライアント ID を作成し、種類は<strong>ウェブアプリケーション</strong>にします。</li>
+      <li>OAuth 同意画面でテストユーザーを追加します（カレンダー権限は「カレンダーを連携」時に要求されます）。</li>
+    </ol>
+  </details>
+</section>
+
+<section class="cal-card gcal-card">
+  <h2 class="cal-h2">担当ごとのカレンダー認証</h2>
+  <p class="muted cal-hint"><strong>カレンダーを連携</strong>で認可します。空き判定に外部予定が反映されます。</p>
+  <p class="muted cal-hint">担当ごとの <strong>Zoom URL</strong> を保存すると、その担当に予約が入ったときに予約完了画面・確認メール・Google カレンダー予定へ自動で案内を表示します。</p>
+  <p id="cal-google-hint" class="muted"></p>
+  <div class="admin-row align-start wrap" style="margin: 0.85rem 0">
+    <div class="admin-field grow">
+      <button type="button" class="btn primary" id="btn-add-staff-calendar">担当を追加してカレンダーを連携</button>
+    </div>
+  </div>
+  <div id="cal-staff-table"></div>
+</section>
+{% endblock %}
+{% block scripts %}
+<script>
+(function () {
+  var msgEl = document.getElementById('cal-msg');
+  var slugDisplayEl = document.getElementById('cal-slug-display');
+  var currentOrgSlug = 'demo-shop';
+
+  function applyMeSlug() {
+    return fetch('/api/auth/me', { credentials: 'same-origin' })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (j) {
+        if (j.authenticated && j.user && j.user.default_org_slug) {
+          currentOrgSlug = j.user.default_org_slug;
+          if (slugDisplayEl) slugDisplayEl.textContent = currentOrgSlug;
+        } else if (slugDisplayEl) {
+          slugDisplayEl.textContent = currentOrgSlug;
+        }
+      })
+      .catch(function () {});
+  }
+
+  function slug() {
+    return currentOrgSlug;
+  }
+  function headers() {
+    return {};
+  }
+
+  function setAddStaffButtonEnabled(enabled) {
+    var btn = document.getElementById('btn-add-staff-calendar');
+    if (btn) btn.disabled = !enabled;
+  }
+
+  function esc(s) {
+    var d = document.createElement('div');
+    d.textContent = s;
+    return d.innerHTML;
+  }
+
+  function showOAuthStatus(st) {
+    var panel = document.getElementById('oauth-setup-panel');
+    var uriEl = document.getElementById('oauth-redirect-uri-display');
+    var checklist = document.getElementById('oauth-checklist');
+    var consoleLink = document.getElementById('oauth-console-link');
+    if (!st || st.google_oauth_ready) {
+      panel.hidden = true;
+      return;
+    }
+    panel.hidden = false;
+    var disp = st.display_redirect_uri || st.suggested_redirect_uri || st.redirect_uri || '—';
+    uriEl.textContent = disp;
+    if (consoleLink && st.console_credentials_url) consoleLink.href = st.console_credentials_url;
+    window.__oauthEnvSnippet = st.env_snippet || '';
+    var idOk = !!(st.client_id || '').trim();
+    var secOk = !!st.has_client_secret;
+    var redOk = !!(st.redirect_uri || '').trim();
+    checklist.innerHTML =
+      '<span class="oauth-chip ' + (idOk ? 'ok' : 'bad') + '">Client ID</span>' +
+      '<span class="oauth-chip ' + (secOk ? 'ok' : 'bad') + '">Client Secret</span>' +
+      '<span class="oauth-chip ' + (redOk ? 'ok' : 'bad') + '">Redirect URI</span>' +
+      (st.client_id ? '<span class="oauth-chip id-preview" title="Client ID">' + esc(st.client_id) + '</span>' : '');
+  }
+
+  function fetchOAuthStatus() {
+    return fetch('/api/booking/oauth/google/status')
+      .then(function (r) { return r.json(); })
+      .then(showOAuthStatus)
+      .catch(function () { document.getElementById('oauth-setup-panel').hidden = true; });
+  }
+
+  document.getElementById('btn-copy-redirect').addEventListener('click', function () {
+    var t = document.getElementById('oauth-redirect-uri-display').textContent;
+    if (t && t !== '—' && navigator.clipboard) navigator.clipboard.writeText(t);
+  });
+  document.getElementById('btn-copy-env-snippet').addEventListener('click', function () {
+    var t = window.__oauthEnvSnippet;
+    if (t && navigator.clipboard) navigator.clipboard.writeText(t);
+  });
+
+  /** 管理者 API に失敗したときも「なぜボタンがないか」を表示する */
+  function renderStaffTableAuthError(kind) {
+    var box = document.getElementById('cal-staff-table');
+    var hint = document.getElementById('cal-google-hint');
+    setAddStaffButtonEnabled(false);
+    if (kind === 'unauth') {
+      hint.innerHTML =
+        '<strong class="cal-auth-err">ログインが必要です。</strong> ログインし直してください。';
+      box.innerHTML =
+        '<div class="cal-staff-auth-help cal-staff-auth-help--err">' +
+        '<p>セッションで認証できませんでした。</p>' +
+        '</div>';
+      return;
+    }
+    if (kind === 'forbidden') {
+      hint.innerHTML =
+        '<strong class="cal-auth-err">この組織を表示する権限がありません。</strong> 操作中の組織がアカウントに設定されているか確認してください。';
+      box.innerHTML =
+        '<div class="cal-staff-auth-help cal-staff-auth-help--err">' +
+        '<p>権限を確認するか、管理者に連絡してください。</p>' +
+        '</div>';
+      return;
+    }
+    if (kind === 'disabled') {
+      hint.innerHTML =
+        '<strong class="cal-auth-err">サーバーで管理者 API が無効です。</strong> サーバーの <code>.env</code> に <code>BOOKING_ADMIN_SECRET</code> を設定し、サーバーを再起動してください。';
+      box.innerHTML =
+        '<div class="cal-staff-auth-help cal-staff-auth-help--err">' +
+        '<p>管理者 API がオフのため、連携ボタンは使えません。</p>' +
+        '</div>';
+      return;
+    }
+    hint.textContent = '一覧の取得に失敗しました。ログイン状態と操作中の組織を確認してください。';
+    box.innerHTML =
+      '<div class="cal-staff-auth-help cal-staff-auth-help--err"><p>担当一覧を表示できませんでした。</p></div>';
+  }
+
+  function renderStaffTable(data) {
+    var box = document.getElementById('cal-staff-table');
+    var hint = document.getElementById('cal-google-hint');
+    if (!data || !data.staff) {
+      box.innerHTML = '';
+      setAddStaffButtonEnabled(false);
+      return;
+    }
+    setAddStaffButtonEnabled(!!data.google_oauth_ready);
+    if (!data.google_oauth_ready) {
+      hint.innerHTML = '認証未設定: 上の「カレンダー認証の設定」か <code>.env</code> の <code>GOOGLE_OAUTH_*</code> を確認してください。';
+    } else {
+      hint.textContent = '連携済みの担当は空き時間に Google の予定が反映されます。';
+    }
+    var rows = data.staff.map(function (s) {
+      var st = s.has_google
+        ? '<span class="cal-pill ok">連携済</span>'
+        : '<span class="cal-pill">未連携</span>';
+      var zoomVal = esc(s.zoom_meeting_url || '');
+      var gprof = '—';
+      if (s.google_profile_name || s.google_profile_email) {
+        gprof =
+          '<span class="cal-google-prof-name">' +
+          esc(s.google_profile_name || '') +
+          '</span><br><span class="muted cal-google-prof-email">' +
+          esc(s.google_profile_email || '') +
+          '</span>';
+      } else if (s.has_google) {
+        gprof = '<span class="muted">（同意後に表示）</span>';
+      }
+      var dis = data.google_oauth_ready ? '' : ' disabled';
+      var disconnect = s.has_google && data.google_oauth_ready
+        ? '<button type="button" class="btn sm ghost cal-disconnect" data-id="' + s.id + '">連携解除</button>'
+        : '';
+      return (
+        '<tr><td class="cal-td-name">' + esc(s.name) + '</td><td>' + esc(s.email || '') + '</td><td class="cal-td-gprof">' + gprof + '</td><td>' +
+        '<input type="url" class="admin-staff-inp cal-zoom-input" data-id="' + s.id + '" value="' + zoomVal + '" placeholder="https://zoom.us/j/..." />' +
+        '<div class="muted small" style="margin-top:0.35rem">この担当に予約が入ったときの案内 URL</div>' +
+        '</td><td>' + st + '</td><td class="cal-td-actions">' +
+        '<button type="button" class="btn sm secondary cal-save-zoom" data-id="' + s.id + '">Zoom URL を保存</button>' +
+        '<button type="button" class="btn gcal-google-btn cal-oauth"' + dis + ' data-id="' + s.id + '">' +
+        '<span class="gcal-g-icon" aria-hidden="true"></span> カレンダーを連携</button>' +
+        disconnect + '</td></tr>'
+      );
+    }).join('');
+    box.innerHTML =
+      '<table class="cal-table gcal-staff-table"><thead><tr><th>名前</th><th>登録メール</th><th>Google アカウント</th><th>Zoom URL</th><th>状態</th><th>操作</th></tr></thead><tbody>' +
+      rows +
+      '</tbody></table>';
+
+    Array.prototype.forEach.call(box.querySelectorAll('.cal-save-zoom'), function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        var input = box.querySelector('.cal-zoom-input[data-id="' + id + '"]');
+        var zoomUrl = input ? String(input.value || '').trim() : '';
+        msgEl.textContent = '';
+        btn.disabled = true;
+        fetch('/api/booking/admin/staff/' + id, {
+          method: 'PATCH',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+          body: JSON.stringify({ zoom_meeting_url: zoomUrl || null }),
+        })
+          .then(function (r) {
+            return r.json().then(function (j) {
+              return { r: r, j: j };
+            });
+          })
+          .then(function (x) {
+            btn.disabled = false;
+            if (!x.r.ok) {
+              msgEl.textContent =
+                typeof x.j.detail === 'object' ? JSON.stringify(x.j.detail) : x.j.detail || x.r.statusText;
+              return;
+            }
+            msgEl.textContent = zoomUrl ? 'Zoom URL を保存しました。' : 'Zoom URL を解除しました。';
+            loadAll();
+          })
+          .catch(function (e) {
+            btn.disabled = false;
+            msgEl.textContent = String(e);
+          });
+      });
+    });
+
+    Array.prototype.forEach.call(box.querySelectorAll('.cal-oauth'), function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        msgEl.textContent = '';
+        btn.disabled = true;
+        fetch('/api/booking/admin/oauth-google-link', {
+          method: 'POST',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+          body: JSON.stringify({ staff_id: id }),
+        })
+          .then(function (r) {
+            return r.json().then(function (j) {
+              return { r: r, j: j };
+            });
+          })
+          .then(function (x) {
+            btn.disabled = false;
+            if (!x.r.ok) {
+              msgEl.textContent =
+                typeof x.j.detail === 'object' ? JSON.stringify(x.j.detail) : x.j.detail || x.r.statusText;
+              return;
+            }
+            window.location.href = x.j.url;
+          })
+          .catch(function (e) {
+            btn.disabled = false;
+            msgEl.textContent = String(e);
+          });
+      });
+    });
+
+    Array.prototype.forEach.call(box.querySelectorAll('.cal-disconnect'), function (btn) {
+      btn.addEventListener('click', function () {
+        var id = parseInt(btn.getAttribute('data-id'), 10);
+        if (!confirm('この担当の Google 連携を解除しますか？')) return;
+        msgEl.textContent = '';
+        fetch('/api/booking/admin/staff/' + id, {
+          method: 'PATCH',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+          body: JSON.stringify({ clear_google_oauth: true }),
+        })
+          .then(function (r) {
+            return r.json().then(function (j) {
+              return { r: r, j: j };
+            });
+          })
+          .then(function (x) {
+            if (!x.r.ok) {
+              msgEl.textContent = x.j.detail || x.r.statusText;
+              return;
+            }
+            loadAll();
+          })
+          .catch(function (e) {
+            msgEl.textContent = String(e);
+          });
+      });
+    });
+  }
+
+  function loadAll() {
+    msgEl.textContent = '';
+    fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary', {
+      credentials: 'same-origin',
+      headers: headers(),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { r: r, j: j };
+        });
+      })
+      .then(function (x) {
+        if (!x.r.ok) {
+          var detail =
+            typeof x.j.detail === 'object' ? JSON.stringify(x.j.detail) : x.j.detail || x.r.statusText;
+          msgEl.textContent = detail;
+          if (x.r.status === 401) {
+            renderStaffTableAuthError('unauth');
+          } else if (x.r.status === 403) {
+            renderStaffTableAuthError('forbidden');
+          } else if (x.r.status === 503 && String(detail).indexOf('BOOKING_ADMIN_SECRET') !== -1) {
+            renderStaffTableAuthError('disabled');
+          } else {
+            renderStaffTableAuthError('other');
+          }
+          return;
+        }
+        renderStaffTable(x.j);
+      })
+      .catch(function (e) {
+        msgEl.textContent = String(e);
+        setAddStaffButtonEnabled(false);
+        renderStaffTableAuthError('other');
+      });
+  }
+
+  document.getElementById('btn-add-staff-calendar').addEventListener('click', function () {
+    msgEl.textContent = '';
+    setAddStaffButtonEnabled(false);
+    fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/staff', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+      body: JSON.stringify({ name: '', email: '' }),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { r: r, j: j };
+        });
+      })
+      .then(function (x) {
+        if (!x.r.ok || !x.j.id) {
+          setAddStaffButtonEnabled(true);
+          msgEl.textContent =
+            typeof x.j.detail === 'object' ? JSON.stringify(x.j.detail) : x.j.detail || x.r.statusText;
+          return;
+        }
+        return fetch('/api/booking/admin/oauth-google-link', {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
+          body: JSON.stringify({ staff_id: x.j.id }),
+        })
+          .then(function (r2) {
+            return r2.json().then(function (j2) {
+              return { r: r2, j: j2 };
+            });
+          })
+          .then(function (y) {
+            setAddStaffButtonEnabled(true);
+            if (!y.r.ok || !y.j.url) {
+              msgEl.textContent =
+                typeof y.j.detail === 'object' ? JSON.stringify(y.j.detail) : y.j.detail || y.r.statusText;
+              loadAll();
+              return;
+            }
+            window.location.href = y.j.url;
+          });
+      })
+      .catch(function (e) {
+        setAddStaffButtonEnabled(true);
+        msgEl.textContent = String(e);
+      });
+  });
+
+  var q = window.location.search;
+  var qp = new URLSearchParams(q);
+  if (qp.get('google_oauth') === 'ok') {
+    var b = document.getElementById('oauth-banner');
+    b.hidden = false;
+    b.textContent = 'カレンダー認証が完了しました（担当 ID: ' + (qp.get('staff_id') || '') + '）。';
+    window.history.replaceState({}, '', '/app/calendar');
+  }
+  if (qp.get('google_oauth') === 'err') {
+    var be = document.getElementById('oauth-banner-err');
+    be.hidden = false;
+    be.textContent =
+      '連携に失敗しました: ' +
+      (qp.get('reason') || '') +
+      (qp.get('detail') ? ' — ' + decodeURIComponent(qp.get('detail') || '') : '') +
+      '。もう一度「カレンダーを連携」を試すか、Google Cloud のリダイレクト URI を確認してください。';
+    window.history.replaceState({}, '', '/app/calendar');
+  }
+
+  applyMeSlug()
+    .then(function () {
+      return fetchOAuthStatus();
+    })
+    .then(function () {
+      loadAll();
+    });
+})();
+</script>
+{% endblock %}

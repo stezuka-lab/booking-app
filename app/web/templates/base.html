@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#1e3a5f" />
+  <title>{% block title %}予約{% endblock %} · Booking</title>
+  <link rel="stylesheet" href="/assets/web/app.css" />
+  {% block head_extra %}{% endblock %}
+</head>
+<body>
+  <header class="app-header">
+    <a class="app-brand" href="/app">Booking</a>
+    <nav class="app-nav">
+      <span class="nav-auth-only app-org-chip" id="app-org-chip" hidden></span>
+      <a href="/app" class="{% if nav == 'home' %}active{% endif %}">ホーム</a>
+      <a href="/app/login" class="nav-guest-only {% if nav == 'login' %}active{% endif %}">ログイン</a>
+      <a href="/app/settings" class="nav-auth-only {% if nav == 'settings' %}active{% endif %}" hidden>設定</a>
+      <a href="/app/campaigns" class="nav-auth-only {% if nav == 'links' %}active{% endif %}" hidden>予約リンク</a>
+      <a href="/app/calendar" class="nav-auth-only {% if nav == 'calendar' %}active{% endif %}" hidden>カレンダー認証</a>
+      <a href="/app/accounts" class="nav-admin-only {% if nav == 'accounts' %}active{% endif %}" hidden>アカウント</a>
+      <span class="auth-nav" id="auth-nav-slot"></span>
+      <a href="/docs" target="_blank" rel="noopener" class="nav-admin-only" hidden>API</a>
+    </nav>
+  </header>
+  <main class="app-main {% block main_class %}{% endblock %}">
+    {% block content %}{% endblock %}
+  </main>
+  <footer class="app-footer">
+    <span>v{{ version }}</span>
+  </footer>
+  {% block scripts %}{% endblock %}
+  <script>
+  (function () {
+    var orig = window.fetch;
+    window.fetch = function (input, init) {
+      init = init || {};
+      if (init.credentials == null) init.credentials = 'same-origin';
+      return orig.call(this, input, init);
+    };
+  })();
+  </script>
+  <script>
+  (function () {
+    var el = document.getElementById('auth-nav-slot');
+    if (!el) return;
+    fetch('/api/auth/me', { credentials: 'same-origin' })
+      .then(function (r) {
+        return r.json();
+      })
+      .then(function (j) {
+        document.querySelectorAll('.nav-guest-only').forEach(function (n) {
+          n.hidden = !!j.authenticated;
+        });
+        document.querySelectorAll('.nav-auth-only').forEach(function (n) {
+          n.hidden = !j.authenticated;
+        });
+        var isAdmin = j.authenticated && j.user && j.user.role === 'admin';
+        document.querySelectorAll('.nav-admin-only').forEach(function (n) {
+          n.hidden = !isAdmin;
+        });
+        if (j.authenticated) {
+          var orgChip = document.getElementById('app-org-chip');
+          if (orgChip) {
+            var orgName = j.user && j.user.default_org_name ? String(j.user.default_org_name) : '';
+            orgChip.textContent = orgName || '';
+            orgChip.hidden = !orgName;
+          }
+          el.innerHTML = '<a href="#" class="auth-nav-link" id="auth-logout-link">ログアウト</a>';
+          var a = document.getElementById('auth-logout-link');
+          if (a) {
+            a.addEventListener('click', function (ev) {
+              ev.preventDefault();
+              fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).then(function () {
+                try {
+                  localStorage.removeItem('booking_admin_secret');
+                  localStorage.removeItem('booking_admin_slug');
+                  localStorage.removeItem('booking_admin_secret_v1');
+                } catch (e) {}
+                window.location.href = '/app/login';
+              });
+            });
+          }
+        } else {
+          var orgChipOff = document.getElementById('app-org-chip');
+          if (orgChipOff) {
+            orgChipOff.textContent = '';
+            orgChipOff.hidden = true;
+          }
+          el.innerHTML = '';
+        }
+      })
+      .catch(function () {});
+  })();
+  </script>
+</body>
+</html>
