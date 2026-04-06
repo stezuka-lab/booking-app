@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from typing import Any
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from sqlalchemy import Text, text
 from sqlalchemy.schema import CreateTable
@@ -24,13 +25,40 @@ import app.booking.db_models  # noqa: E402, F401
 _engine = None
 
 
+def _normalize_database_url(raw_url: str) -> tuple[str, dict[str, Any]]:
+    connect_args: dict[str, Any] = {}
+    url = (raw_url or "").strip()
+    if not url.startswith("postgresql+asyncpg://"):
+        return url, connect_args
+    parts = urlsplit(url)
+    pairs = parse_qsl(parts.query, keep_blank_values=True)
+    kept: list[tuple[str, str]] = []
+    sslmode = ""
+    for key, value in pairs:
+        key_l = key.strip().lower()
+        if key_l == "sslmode":
+            sslmode = (value or "").strip().lower()
+            continue
+        if key_l == "channel_binding":
+            continue
+        kept.append((key, value))
+    if sslmode in {"require", "prefer", "verify-ca", "verify-full"}:
+        connect_args["ssl"] = True
+    normalized = urlunsplit(
+        (parts.scheme, parts.netloc, parts.path, urlencode(kept), parts.fragment)
+    )
+    return normalized, connect_args
+
+
 def _get_engine():
     global _engine
     if _engine is None:
         settings = get_settings()
+        database_url, connect_args = _normalize_database_url(settings.database_url)
         _engine = create_async_engine(
-            settings.database_url,
+            database_url,
             echo=False,
+            connect_args=connect_args,
         )
     return _engine
 
