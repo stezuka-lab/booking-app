@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import asyncio
+import json
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -26,8 +27,39 @@ BOOKING_SLOT_STEP_MINUTES = 30
 AVAILABILITY_RANGE_END_SLACK = timedelta(seconds=2)
 
 
+def json_object_or_empty(value: Any) -> dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return {}
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, dict) else {}
+        except Exception:
+            return {}
+    return {}
+
+
+def json_list_or_empty(value: Any) -> list[Any]:
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        try:
+            parsed = json.loads(text)
+            return parsed if isinstance(parsed, list) else []
+        except Exception:
+            return []
+    return []
+
+
 def availability_zone(defaults: dict) -> ZoneInfo:
     """availability_defaults の timezone（未設定は Asia/Tokyo）。"""
+    defaults = json_object_or_empty(defaults)
     name = (defaults.get("timezone") or "Asia/Tokyo").strip() or "Asia/Tokyo"
     try:
         return ZoneInfo(name)
@@ -37,7 +69,7 @@ def availability_zone(defaults: dict) -> ZoneInfo:
 
 def org_local_date_for_utc_instant(instant: datetime, org: BookingOrg) -> date:
     """予約開始時刻を組織タイムゾーンの暦日に変換（土日祝ブロック判定用）。"""
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     loc_tz = availability_zone(defaults)
     t = instant if instant.tzinfo else instant.replace(tzinfo=timezone.utc)
     return t.astimezone(loc_tz).date()
@@ -48,7 +80,7 @@ def org_calendar_day_bounds_utc(
     org: BookingOrg,
 ) -> tuple[datetime, datetime]:
     """予約時刻を含むカレンダー日（組織タイムゾーン）の [00:00, 翌00:00) を UTC で返す。FreeBusy 窓用。"""
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     loc_tz = availability_zone(defaults)
     t = instant if instant.tzinfo else instant.replace(tzinfo=timezone.utc)
     local = t.astimezone(loc_tz)
@@ -81,7 +113,7 @@ def org_buffer_minutes(org: BookingOrg, settings: Settings) -> int:
 
     0 のときは区間の重なりのみで判定（隙間が枠の長さ以上あれば予約可）。0 より大きいときのみギャップ条件を適用。
     """
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     raw = defaults.get("buffer_minutes")
     if raw is not None and raw != "":
         try:
@@ -115,7 +147,7 @@ def link_max_advance_booking_days(
             return max(0, int(raw))
         except (TypeError, ValueError):
             pass
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     try:
         return max(0, int(defaults.get("max_advance_booking_days") or 0))
     except (TypeError, ValueError):
@@ -243,7 +275,7 @@ def blocked_iso_dates_in_range(
     range_end: datetime,
 ) -> list[str]:
     """指定期間に重なる暦日のうち、店舗設定で予約不可の日付（YYYY-MM-DD、組織 TZ）。"""
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     loc_tz = availability_zone(defaults)
     rs = range_start if range_start.tzinfo else range_start.replace(tzinfo=timezone.utc)
     re = range_end if range_end.tzinfo else range_end.replace(tzinfo=timezone.utc)
@@ -264,7 +296,7 @@ def link_lead_blocked_dates(org: BookingOrg, link: PublicBookingLink) -> set[dat
     n = max(0, min(366, int(getattr(link, "block_next_days", 0) or 0)))
     if n == 0:
         return set()
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     loc_tz = availability_zone(defaults)
     today = datetime.now(loc_tz).date()
     return {today + timedelta(days=i) for i in range(n)}
@@ -279,7 +311,7 @@ def blocked_iso_dates_in_range_for_link(
     """店舗の土日祝ブロックに加え、リンクの直近 N 日ブロックをマージ（YYYY-MM-DD、組織 TZ）。"""
     base = blocked_iso_dates_in_range(org, range_start, range_end)
     extra = link_lead_blocked_dates(org, link)
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     loc_tz = availability_zone(defaults)
     rs = range_start if range_start.tzinfo else range_start.replace(tzinfo=timezone.utc)
     re = range_end if range_end.tzinfo else range_end.replace(tzinfo=timezone.utc)
@@ -612,7 +644,7 @@ async def available_slots_for_link(
     max_advance_days_override: int | None = None,
     bookable_until_date_override: date | None = None,
 ) -> tuple[list[dict], int]:
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     if service:
         dur_minutes = max(1, int(service.duration_minutes))
     else:

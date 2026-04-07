@@ -62,6 +62,8 @@ from app.booking.routing_service import (
     org_buffer_minutes,
     org_calendar_day_bounds_utc,
     org_local_date_for_utc_instant,
+    json_list_or_empty,
+    json_object_or_empty,
     link_max_advance_booking_days,
     pick_staff_for_slot,
     scheduling_hints_json,
@@ -408,7 +410,7 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
             BookingFormDefinition.active.is_(True),
         )
     )
-    staff_ids = list(link.staff_ids_json or [])
+    staff_ids = list(json_list_or_empty(link.staff_ids_json))
     link_priority_overrides = _normalize_link_priority_overrides(
         getattr(link, "staff_priority_overrides_json", None),
         staff_ids,
@@ -430,7 +432,7 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
         "org": {"name": org.name, "slug": org.slug, "routing_mode": org.routing_mode, "auto_confirm": org.auto_confirm},
         "services": [{"id": s.id, "name": s.name, "duration_minutes": s.duration_minutes} for s in services],
         "fixed_service": fixed_service,
-        "form_fields": form.fields_json if form else [],
+        "form_fields": json_list_or_empty(form.fields_json) if form else [],
         "ga4_measurement_id": org.ga4_measurement_id,
         "link": {
             "title": link.title,
@@ -444,7 +446,7 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
             "pre_booking_notice": getattr(link, "pre_booking_notice", None) or "",
             "post_booking_message": getattr(link, "post_booking_message", None) or "",
         },
-        "availability_defaults": org.availability_defaults_json or {},
+        "availability_defaults": json_object_or_empty(org.availability_defaults_json),
         "go_google_calendar": {
             "client_id": (settings.google_oauth_client_id or "").strip(),
             "enabled": bool((settings.google_oauth_client_id or "").strip()),
@@ -478,7 +480,7 @@ async def link_availability(
     service = await db.get(BookingService, effective_sid) if effective_sid else None
     if effective_sid and (not service or service.org_id != org.id):
         raise HTTPException(400, "invalid service")
-    staff_ids = list(link.staff_ids_json or [])
+    staff_ids = list(json_list_or_empty(link.staff_ids_json))
     link_priority_overrides = _normalize_link_priority_overrides(
         getattr(link, "staff_priority_overrides_json", None),
         staff_ids,
@@ -513,7 +515,7 @@ async def link_availability(
     buf_min = link_buf_min
     # 枠の可否は available_slots_for_link 内の staff_is_free のみで決める。
     # ここで busy と再照合すると、交差 busy や表現の差で取れる枠が落ちる（複数担当時に特に危険）。
-    defaults = org.availability_defaults_json or {}
+    defaults = json_object_or_empty(org.availability_defaults_json)
     if service:
         duration_min = max(1, int(service.duration_minutes))
     else:
@@ -577,7 +579,7 @@ async def _create_booking_from_body(
         raise HTTPException(400, "invalid service")
     if link.service_id is not None and body.service_id is not None and body.service_id != link.service_id:
         raise HTTPException(400, "service does not match this link")
-    staff_ids = list(link.staff_ids_json or [])
+    staff_ids = list(json_list_or_empty(link.staff_ids_json))
     link_priority_overrides = _normalize_link_priority_overrides(
         getattr(link, "staff_priority_overrides_json", None),
         staff_ids,
@@ -587,7 +589,7 @@ async def _create_booking_from_body(
         start = start.replace(tzinfo=timezone.utc)
     end = start + timedelta(minutes=service.duration_minutes)
 
-    defaults_avail = org.availability_defaults_json or {}
+    defaults_avail = json_object_or_empty(org.availability_defaults_json)
     local_booking_date = org_local_date_for_utc_instant(start, org)
     max_adv_days = link_max_advance_booking_days(link, org)
     link_cutoff_date = link_bookable_until_date(link)
