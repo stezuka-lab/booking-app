@@ -267,6 +267,37 @@ async def _validate_staff_ids_for_org(
             raise HTTPException(400, f"staff {sid} not in this organization")
 
 
+async def _resolve_valid_link_staff_ids(
+    session: AsyncSession,
+    org_id: int,
+    raw_staff_ids: list[Any],
+) -> list[int]:
+    ids: list[int] = []
+    seen: set[int] = set()
+    for raw in raw_staff_ids:
+        try:
+            sid = int(raw)
+        except (TypeError, ValueError):
+            continue
+        if sid in seen:
+            continue
+        seen.add(sid)
+        ids.append(sid)
+    if not ids:
+        return []
+    rows = (
+        await session.scalars(
+            select(StaffMember.id).where(
+                StaffMember.org_id == org_id,
+                StaffMember.active.is_(True),
+                StaffMember.id.in_(ids),
+            )
+        )
+    ).all()
+    valid = {int(x) for x in rows}
+    return [sid for sid in ids if sid in valid]
+
+
 def _normalize_link_priority_overrides(
     raw: Any,
     allowed_staff_ids: list[int] | None = None,
@@ -410,7 +441,7 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
             BookingFormDefinition.active.is_(True),
         )
     )
-    staff_ids = list(json_list_or_empty(link.staff_ids_json))
+    staff_ids = await _resolve_valid_link_staff_ids(db, org.id, json_list_or_empty(link.staff_ids_json))
     link_priority_overrides = _normalize_link_priority_overrides(
         getattr(link, "staff_priority_overrides_json", None),
         staff_ids,
@@ -490,7 +521,11 @@ async def link_availability(
         else availability_defaults_positive_int(defaults, "duration", BOOKING_SLOT_STEP_MINUTES)
     )
     try:
-        staff_ids = list(json_list_or_empty(link.staff_ids_json))
+        staff_ids = await _resolve_valid_link_staff_ids(
+            db,
+            org.id,
+            json_list_or_empty(link.staff_ids_json),
+        )
         link_priority_overrides = _normalize_link_priority_overrides(
             getattr(link, "staff_priority_overrides_json", None),
             staff_ids,
@@ -601,7 +636,11 @@ async def _create_booking_from_body(
         raise HTTPException(400, "invalid service")
     if link.service_id is not None and body.service_id is not None and body.service_id != link.service_id:
         raise HTTPException(400, "service does not match this link")
-    staff_ids = list(json_list_or_empty(link.staff_ids_json))
+    staff_ids = await _resolve_valid_link_staff_ids(
+        db,
+        org.id,
+        json_list_or_empty(link.staff_ids_json),
+    )
     link_priority_overrides = _normalize_link_priority_overrides(
         getattr(link, "staff_priority_overrides_json", None),
         staff_ids,
@@ -1358,6 +1397,47 @@ async def admin_org_summary(
         counts["forms"] = len(forms) if include_forms else int(
             await db.scalar(select(func.count()).select_from(BookingFormDefinition).where(BookingFormDefinition.org_id == org.id)) or 0
         )
+    links_payload: list[dict[str, Any]] = []
+    for l in links:
+        valid_staff_ids = await _resolve_valid_link_staff_ids(
+            db,
+            org.id,
+            json_list_or_empty(l.staff_ids_json),
+        )
+        links_payload.append(
+            {
+                "id": l.id,
+                "token": l.token,
+                "title": l.title,
+                "service_id": l.service_id,
+                "service_name": next(
+                    (s.name for s in services if s.id == l.service_id),
+                    None,
+                )
+                if l.service_id
+                else None,
+                "staff_ids": valid_staff_ids,
+                "staff_priority_overrides": _normalize_link_priority_overrides(
+                    getattr(l, "staff_priority_overrides_json", None),
+                    valid_staff_ids,
+                ),
+                "buffer_minutes": _normalize_optional_non_negative_int(
+                    getattr(l, "buffer_minutes", None),
+                    max_value=180,
+                ),
+                "max_advance_booking_days": _normalize_optional_non_negative_int(
+                    getattr(l, "max_advance_booking_days", None),
+                    max_value=730,
+                ),
+                "bookable_until_date": getattr(l, "bookable_until_date", None) or "",
+                "pre_booking_notice": getattr(l, "pre_booking_notice", None) or "",
+                "post_booking_message": getattr(l, "post_booking_message", None) or "",
+                "active": getattr(l, "active", True),
+                "block_next_days": int(getattr(l, "block_next_days", 0) or 0),
+                "public_url": f"{base}/app/booking/{l.token}",
+                "public_path": f"/app/booking/{l.token}",
+            }
+        )
     return {
         "public_base_url": base,
         "org": {
@@ -1388,41 +1468,7 @@ async def admin_org_summary(
             for s in staff
         ],
         "services": [{"id": s.id, "name": s.name, "duration_minutes": s.duration_minutes, "active": s.active} for s in services],
-        "links": [
-            {
-                "id": l.id,
-                "token": l.token,
-                "title": l.title,
-                "service_id": l.service_id,
-                "service_name": next(
-                    (s.name for s in services if s.id == l.service_id),
-                    None,
-                )
-                if l.service_id
-                else None,
-                "staff_ids": list(l.staff_ids_json or []),
-                "staff_priority_overrides": _normalize_link_priority_overrides(
-                    getattr(l, "staff_priority_overrides_json", None),
-                    list(l.staff_ids_json or []),
-                ),
-                "buffer_minutes": _normalize_optional_non_negative_int(
-                    getattr(l, "buffer_minutes", None),
-                    max_value=180,
-                ),
-                "max_advance_booking_days": _normalize_optional_non_negative_int(
-                    getattr(l, "max_advance_booking_days", None),
-                    max_value=730,
-                ),
-                "bookable_until_date": getattr(l, "bookable_until_date", None) or "",
-                "pre_booking_notice": getattr(l, "pre_booking_notice", None) or "",
-                "post_booking_message": getattr(l, "post_booking_message", None) or "",
-                "active": getattr(l, "active", True),
-                "block_next_days": int(getattr(l, "block_next_days", 0) or 0),
-                "public_url": f"{base}/app/booking/{l.token}",
-                "public_path": f"/app/booking/{l.token}",
-            }
-            for l in links
-        ],
+        "links": links_payload,
         "google_oauth_ready": settings.is_google_oauth_configured(),
         "counts": counts,
         "forms": [{"id": f.id, "name": f.name, "active": f.active} for f in forms],
@@ -1676,7 +1722,7 @@ async def admin_delete_staff(
         await db.scalars(select(PublicBookingLink).where(PublicBookingLink.org_id == s.org_id))
     ).all()
     for link in links:
-        raw = list(link.staff_ids_json or [])
+        raw = list(json_list_or_empty(link.staff_ids_json))
         if staff_id in raw:
             link.staff_ids_json = [x for x in raw if x != staff_id]
         pri_map = _normalize_link_priority_overrides(
@@ -1913,7 +1959,7 @@ async def admin_patch_link(
         if not svc or svc.org_id != org.id:
             raise HTTPException(400, "invalid service_id for this organization")
         link.service_id = body.service_id
-    staff_ids_for_priority = list(link.staff_ids_json or [])
+    staff_ids_for_priority = list(json_list_or_empty(link.staff_ids_json))
     if body.staff_ids is not None:
         staff_ids_for_priority = list(body.staff_ids)
         await _validate_staff_ids_for_org(db, org.id, staff_ids_for_priority)
@@ -1959,16 +2005,21 @@ async def admin_patch_link(
     )
     await db.commit()
     base = settings.public_base_url_value()
+    valid_staff_ids = await _resolve_valid_link_staff_ids(
+        db,
+        org.id,
+        json_list_or_empty(link.staff_ids_json),
+    )
     return {
         "ok": True,
         "id": link.id,
         "token": link.token,
         "title": link.title,
         "service_id": link.service_id,
-        "staff_ids": list(link.staff_ids_json or []),
+        "staff_ids": valid_staff_ids,
         "staff_priority_overrides": _normalize_link_priority_overrides(
             getattr(link, "staff_priority_overrides_json", None),
-            list(link.staff_ids_json or []),
+            valid_staff_ids,
         ),
         "buffer_minutes": _normalize_optional_non_negative_int(
             getattr(link, "buffer_minutes", None),
