@@ -353,11 +353,16 @@
     }
     root.innerHTML = '';
     parts.forEach(function (part, idx) {
+      const labelText = part.isToken ? tokenLabel(part.raw) : part.raw.trim();
+      const isSymbol = !part.isToken && (labelText === '—' || labelText === '（' || labelText === '）');
       const chip = document.createElement('span');
-      chip.className = 'cal-title-builder-chip' + (part.isToken ? ' is-token' : ' is-text');
+      chip.className =
+        'cal-title-builder-chip' +
+        (part.isToken ? ' is-token' : ' is-text') +
+        (isSymbol ? ' is-symbol' : '');
       const label = document.createElement('span');
       label.className = 'cal-title-builder-label';
-      label.textContent = part.isToken ? tokenLabel(part.raw) : part.raw.trim();
+      label.textContent = labelText;
       chip.appendChild(label);
       const remove = document.createElement('button');
       remove.type = 'button';

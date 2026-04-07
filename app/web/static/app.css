@@ -2219,10 +2219,21 @@ body {
   border-color: #e6ddd0;
 }
 
+.cal-title-builder-chip.is-symbol {
+  gap: 0.18rem;
+  padding: 0.18rem 0.26rem 0.18rem 0.44rem;
+  background: #fbfaf7;
+  border-color: #eadfce;
+}
+
 .cal-title-builder-label {
   font-size: 0.88rem;
   line-height: 1;
   white-space: nowrap;
+}
+
+.cal-title-builder-chip.is-symbol .cal-title-builder-label {
+  font-size: 0.82rem;
 }
 
 .cal-title-builder-remove {
@@ -2230,11 +2241,11 @@ body {
   border: 1px solid rgba(111, 118, 133, 0.16);
   background: rgba(255, 255, 255, 0.78);
   color: #68707f;
-  width: 0.92rem;
-  height: 0.92rem;
+  width: 0.8rem;
+  height: 0.8rem;
   border-radius: 999px;
-  font-size: 0.66rem;
-  line-height: 0.82rem;
+  font-size: 0.58rem;
+  line-height: 0.72rem;
   cursor: pointer;
   padding: 0;
   display: inline-flex;
