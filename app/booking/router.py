@@ -138,6 +138,108 @@ def _customer_profile_display_name(profile: CustomerProfile | None, settings: Se
     return (decrypt_secret(getattr(profile, "display_name", None), settings) or "").strip()
 
 
+def _booking_calendar_description(
+    booking: Booking,
+    staff: StaffMember,
+    settings: Settings,
+    *,
+    booking_link_title: str,
+    manage_url: str,
+    post_booking_message: str = "",
+) -> tuple[list[str], str]:
+    customer_name = _booking_customer_name(booking, settings)
+    customer_email = _booking_customer_email(booking, settings)
+    cust_no = ""
+    if isinstance(booking.form_answers_json, dict):
+        cust_no = str(booking.form_answers_json.get("customer_number") or "").strip()
+    meeting_url = _booking_meeting_url(booking, settings)
+    lines: list[str] = []
+    if meeting_url:
+        lines.append(f"Zoom URL: {meeting_url}")
+    if (post_booking_message or "").strip():
+        lines.append(f"ご案内: {(post_booking_message or '').strip()}")
+    lines.append(f"予約リンク: {booking_link_title}")
+    lines.append(f"予約者: {customer_name}")
+    lines.append(f"メール: {customer_email}")
+    if cust_no:
+        lines.append(f"顧客番号: {cust_no}")
+    if (booking.company_name or "").strip():
+        lines.append(f"会社名: {(booking.company_name or '').strip()}")
+    lines.append(f"担当: {(staff.name or '').strip()}")
+    lines.append(f"変更・キャンセル: {manage_url}")
+    return lines, meeting_url
+
+
+async def _sync_booking_to_staff_calendar(
+    session: AsyncSession,
+    settings: Settings,
+    booking: Booking,
+    staff: StaffMember,
+    org: BookingOrg,
+    *,
+    service_name: str,
+    booking_link_title: str,
+    post_booking_message: str = "",
+) -> bool:
+    summary = format_calendar_event_title(org, service_name, booking)
+    meet = booking.meeting_provider == "meet"
+    manage_url = f"{settings.public_base_url_value()}/app/manage/{booking.manage_token}"
+    meeting_url = _booking_meeting_url(booking, settings)
+    if booking.meeting_provider == "zoom" and not meeting_url:
+        sz = _staff_zoom_meeting_url(staff, settings)
+        if sz:
+            meeting_url = sz
+        elif settings.zoom_default_meeting_url:
+            meeting_url = settings.zoom_default_meeting_url
+    if booking.meeting_provider == "teams" and not meeting_url and settings.teams_default_meeting_url:
+        meeting_url = settings.teams_default_meeting_url
+    booking.meeting_url = encrypt_secret(meeting_url, settings) if meeting_url else None
+    lines, meeting_url = _booking_calendar_description(
+        booking,
+        staff,
+        settings,
+        booking_link_title=booking_link_title,
+        manage_url=manage_url,
+        post_booking_message=post_booking_message,
+    )
+    if (booking.google_event_id or "").strip():
+        await delete_event_for_booking(
+            _staff_google_refresh_token(staff, settings),
+            staff.google_calendar_id,
+            booking.google_event_id,
+            settings,
+        )
+        booking.google_event_id = None
+    ev, cal_err = await create_event_for_booking_detailed(
+        _staff_google_refresh_token(staff, settings),
+        staff.google_calendar_id,
+        summary,
+        booking.start_utc.isoformat(),
+        booking.end_utc.isoformat(),
+        settings,
+        with_meet=meet,
+        attendees_emails=None,
+        description="\n".join(lines),
+        location=meeting_url or None,
+    )
+    if ev:
+        booking.google_event_id = ev.get("id")
+        booking.google_calendar_synced_at = datetime.now(timezone.utc)
+        booking.google_calendar_sync_error = None
+        if meet:
+            hang = (ev.get("conferenceData") or {}).get("entryPoints") or []
+            for ep in hang:
+                if ep.get("entryPointType") == "video" and ep.get("uri"):
+                    booking.meeting_url = encrypt_secret(ep["uri"], settings)
+                    break
+        await session.flush()
+        return True
+    booking.google_calendar_synced_at = None
+    booking.google_calendar_sync_error = cal_err or "Googleカレンダー登録に失敗しました"
+    await session.flush()
+    return False
+
+
 async def get_db() -> AsyncSession:
     factory = get_session_factory()
     async with factory() as session:
@@ -777,71 +879,29 @@ async def _finalize_confirmed_booking(
     customer_google_access_token: str | None = None,
 ) -> bool:
     """カレンダー反映・会議 URL・メール・CRM。顧客の Google カレンダー追加に成功したら True。"""
-    summary = format_calendar_event_title(org, service_name, b)
     customer_name = _booking_customer_name(b, settings)
     customer_email = _booking_customer_email(b, settings)
-    meet = b.meeting_provider == "meet"
     manage_url = f"{settings.public_base_url_value()}/app/manage/{b.manage_token}"
-    meeting_url = _booking_meeting_url(b, settings)
-    if b.meeting_provider == "zoom" and not meeting_url:
-        sz = _staff_zoom_meeting_url(staff, settings)
-        if sz:
-            meeting_url = sz
-        elif settings.zoom_default_meeting_url:
-            meeting_url = settings.zoom_default_meeting_url
-    if b.meeting_provider == "teams" and not meeting_url and settings.teams_default_meeting_url:
-        meeting_url = settings.teams_default_meeting_url
-    b.meeting_url = encrypt_secret(meeting_url, settings) if meeting_url else None
-
-    cust_no = ""
-    if isinstance(b.form_answers_json, dict):
-        cust_no = str(b.form_answers_json.get("customer_number") or "").strip()
-    cal_desc_lines: list[str] = []
-    if meeting_url:
-        cal_desc_lines.append(f"Zoom URL: {meeting_url}")
-    if (post_booking_message or "").strip():
-        cal_desc_lines.append(f"ご案内: {(post_booking_message or '').strip()}")
-    cal_desc_lines.append(f"予約リンク: {booking_link_title}")
-    cal_desc_lines.append(f"予約者: {customer_name}")
-    cal_desc_lines.append(f"メール: {customer_email}")
-    if cust_no:
-        cal_desc_lines.append(f"顧客番号: {cust_no}")
-    if (b.company_name or "").strip():
-        cal_desc_lines.append(f"会社名: {(b.company_name or '').strip()}")
-    cal_desc_lines.append(f"担当: {(staff.name or '').strip()}")
-    cal_desc_lines.append(f"変更・キャンセル: {manage_url}")
-    ev, cal_err = await create_event_for_booking_detailed(
-        _staff_google_refresh_token(staff, settings),
-        staff.google_calendar_id,
-        summary,
-        b.start_utc.isoformat(),
-        b.end_utc.isoformat(),
+    await _sync_booking_to_staff_calendar(
+        session,
         settings,
-        with_meet=meet,
-        attendees_emails=None,
-        description="\n".join(cal_desc_lines),
-        location=meeting_url or None,
+        b,
+        staff,
+        org,
+        service_name=service_name,
+        booking_link_title=booking_link_title,
+        post_booking_message=post_booking_message,
     )
-    if ev:
-        b.google_event_id = ev.get("id")
-        b.google_calendar_synced_at = datetime.now(timezone.utc)
-        b.google_calendar_sync_error = None
-        if meet:
-            hang = (ev.get("conferenceData") or {}).get("entryPoints") or []
-            for ep in hang:
-                if ep.get("entryPointType") == "video" and ep.get("uri"):
-                    meeting_url = ep["uri"]
-                    b.meeting_url = encrypt_secret(meeting_url, settings)
-                    break
-    else:
-        b.google_calendar_synced_at = None
-        b.google_calendar_sync_error = cal_err or "Googleカレンダー登録に失敗しました"
+    meeting_url = _booking_meeting_url(b, settings)
     await _upsert_customer(session, org.id, customer_email, customer_name, b.start_utc, settings)
     await session.flush()
 
     customer_cal_ok = False
     cust_tok = (customer_google_access_token or "").strip()
     if cust_tok:
+        cust_no = ""
+        if isinstance(b.form_answers_json, dict):
+            cust_no = str(b.form_answers_json.get("customer_number") or "").strip()
         desc_lines: list[str] = []
         if meeting_url:
             desc_lines.append(f"Zoom URL: {meeting_url}")
@@ -1974,6 +2034,57 @@ async def admin_reject_booking(
     )
     await db.commit()
     return {"ok": True, "status": b.status}
+
+
+@router.post("/api/booking/admin/bookings/{booking_id}/resync-calendar")
+async def admin_resync_booking_calendar(
+    request: Request,
+    booking_id: int,
+    db: DbSession,
+    settings: SettingsDep,
+    x_admin_secret: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    b = await db.scalar(select(Booking).where(Booking.id == booking_id))
+    if not b:
+        raise HTTPException(404, "booking not found")
+    org = await db.get(BookingOrg, b.org_id)
+    if not org:
+        raise HTTPException(400, "invalid booking")
+    await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=org.slug)
+    if b.status != "confirmed":
+        raise HTTPException(400, "confirmed booking only")
+    staff = await db.get(StaffMember, b.staff_id) if b.staff_id is not None else None
+    if not staff:
+        raise HTTPException(400, "担当が見つかりません")
+    svc = await db.get(BookingService, b.service_id) if b.service_id else None
+    ok = await _sync_booking_to_staff_calendar(
+        db,
+        settings,
+        b,
+        staff,
+        org,
+        service_name=(svc.name if svc else "予約"),
+        booking_link_title=(b.booking_link_title_snapshot or (svc.name if svc else "予約")),
+    )
+    await write_audit_log(
+        db,
+        request,
+        action="booking.booking_calendar_resynced",
+        org_slug=org.slug,
+        target_type="booking",
+        target_id=b.id,
+        detail={"ok": ok, "staff_id": b.staff_id, "google_event_id": b.google_event_id},
+    )
+    await db.commit()
+    return {
+        "ok": ok,
+        "booking_id": b.id,
+        "google_event_id": b.google_event_id,
+        "google_calendar_synced_at": (
+            b.google_calendar_synced_at.isoformat() if b.google_calendar_synced_at else None
+        ),
+        "google_calendar_sync_error": b.google_calendar_sync_error,
+    }
 
 
 @router.get("/api/booking/oauth/google/status")

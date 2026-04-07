@@ -9,6 +9,7 @@ from app.booking.router import (
     _delete_staff_calendar_event_if_present,
     _finalize_confirmed_booking,
     _public_booking_response,
+    _sync_booking_to_staff_calendar,
 )
 from app.booking.email_booking import build_booking_confirmation_email_body
 from app.config import get_settings
@@ -383,3 +384,112 @@ def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatc
     assert "予約者: Encrypted Customer" in str(captured["description"])
     assert "メール: encrypted@example.com" in str(captured["description"])
     assert captured["line_customer_name"] == "Encrypted Customer"
+
+
+def test_sync_booking_to_staff_calendar_recreates_event(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    captured: dict[str, object] = {}
+
+    class DummySession:
+        async def flush(self) -> None:
+            return None
+
+    async def fake_delete_event_for_booking(*args, **kwargs):
+        captured["deleted_event_id"] = args[2]
+        return None
+
+    async def fake_create_event_for_booking_detailed(*args, **kwargs):
+        captured["description"] = kwargs.get("description")
+        return {"id": "evt-resync"}, None
+
+    monkeypatch.setattr(booking_router, "delete_event_for_booking", fake_delete_event_for_booking)
+    monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
+
+    org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
+    staff = StaffMember(
+        org_id=1,
+        name="担当A",
+        email="staff-a@example.com",
+        google_refresh_token="refresh-token",
+        zoom_meeting_url=encrypt_secret("https://zoom.example/staff-a", settings),
+    )
+    booking = Booking(
+        org_id=1,
+        staff_id=1,
+        service_id=1,
+        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        meeting_provider="zoom",
+        google_event_id="evt-old",
+        manage_token="manage-token",
+    )
+
+    ok = asyncio.run(
+        _sync_booking_to_staff_calendar(
+            DummySession(),
+            settings,
+            booking,
+            staff,
+            org,
+            service_name="初回相談",
+            booking_link_title="初回予約リンク",
+        )
+    )
+
+    assert ok is True
+    assert captured["deleted_event_id"] == "evt-old"
+    assert booking.google_event_id == "evt-resync"
+    assert booking.google_calendar_sync_error is None
+    assert booking.google_calendar_synced_at is not None
+
+
+def test_sync_booking_to_staff_calendar_records_error(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+
+    class DummySession:
+        async def flush(self) -> None:
+            return None
+
+    async def fake_create_event_for_booking_detailed(*args, **kwargs):
+        return None, "sync failed"
+
+    monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
+
+    org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
+    staff = StaffMember(org_id=1, name="担当A", email="staff-a@example.com", google_refresh_token="refresh-token")
+    booking = Booking(
+        org_id=1,
+        staff_id=1,
+        service_id=1,
+        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        meeting_provider="none",
+        manage_token="manage-token",
+    )
+
+    ok = asyncio.run(
+        _sync_booking_to_staff_calendar(
+            DummySession(),
+            settings,
+            booking,
+            staff,
+            org,
+            service_name="初回相談",
+            booking_link_title="初回予約リンク",
+        )
+    )
+
+    assert ok is False
+    assert booking.google_event_id is None
+    assert booking.google_calendar_synced_at is None
+    assert booking.google_calendar_sync_error == "sync failed"
