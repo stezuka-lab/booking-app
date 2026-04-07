@@ -16,6 +16,7 @@ from app.booking.availability import (
 from app.booking.calendar_google import freebusy_busy_intervals
 from app.booking.db_models import Booking, BookingOrg, BookingService, PublicBookingLink, StaffMember
 from app.config import Settings
+from app.security.crypto import decrypt_secret
 
 # 予約開始時刻の既定刻み（分）。実際の刻みは min(この値, 所要時間) とし、所要より粗い刻みで枠を落とさない。
 BOOKING_SLOT_STEP_MINUTES = 30
@@ -361,7 +362,7 @@ async def eligible_staff(
     # ただし誰も未連携のときに rows を空にすると予約枠が常に 0 件になる（初期導入で多発）ため、
     # その場合だけ全員を対象に戻す（FreeBusy は未連携は [] ＝ Google 上は空き扱い）。
     if settings.is_google_oauth_configured():
-        linked = [s for s in rows if (s.google_refresh_token or "").strip()]
+        linked = [s for s in rows if (decrypt_secret(s.google_refresh_token, settings) or "").strip()]
         rows = linked if linked else rows
     return rows
 
@@ -394,11 +395,12 @@ async def _load_google_busy_map(
     tmin = window_start.isoformat()
     tmax = window_end.isoformat()
     for s in staff_list:
-        if not s.google_refresh_token:
+        refresh_token = decrypt_secret(s.google_refresh_token, settings)
+        if not refresh_token:
             out[s.id] = []
             continue
         intervals = await freebusy_busy_intervals(
-            s.google_refresh_token,
+            refresh_token,
             s.google_calendar_id,
             tmin,
             tmax,

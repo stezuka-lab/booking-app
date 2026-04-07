@@ -9,19 +9,12 @@
 <div class="booking-flow booking-flow-v2">
   <div class="booking-hero-bar">
     <div>
-      <span class="org-badge" id="link-label">オンライン予約</span>
       <h1 class="page-title booking-hero-title" id="page-heading">予約</h1>
       <p class="page-sub muted" id="org-title"></p>
-      <section class="booking-note-card booking-link-notice booking-link-notice-inline" id="booking-link-notice" hidden>
-        <strong>お知らせ</strong>
-        <p class="booking-multiline-note" id="booking-link-notice-text"></p>
-      </section>
+      <p class="booking-link-notice booking-link-notice-inline booking-multiline-note" id="booking-link-notice" hidden></p>
     </div>
     <div id="ga4-slot"></div>
   </div>
-
-  <p class="muted panel" id="booking-fixed-course-hint" hidden></p>
-
   <section class="panel booking-cal-section">
     <div class="gcal-toolbar booking-cal-toolbar">
       <button type="button" class="btn gcal-today" id="booking-cal-today">本日</button>
@@ -138,17 +131,12 @@
     const loading = document.getElementById('slots-loading');
     const grid = document.getElementById('booking-cal-grid');
     const empty = document.getElementById('slots-empty');
-    const fixedHint = document.getElementById('booking-fixed-course-hint');
     if (pageMsg) pageMsg.textContent = detail;
     if (loading) loading.hidden = true;
     if (grid) grid.hidden = true;
     if (empty) {
       empty.hidden = false;
       empty.textContent = detail;
-    }
-    if (fixedHint) {
-      fixedHint.hidden = false;
-      fixedHint.textContent = 'この予約リンクは現在無効です。';
     }
   }
 
@@ -567,7 +555,7 @@
     if (!lastAvail) return;
     if (isDateBlocked(day0)) {
       document.getElementById('page-msg').textContent =
-        'この日は予約を受け付けていません（店舗の休業日・土日祝の設定）';
+        'この日は予約を受け付けていません（休業日・土日祝設定）';
       return;
     }
     const START_H = getGridHours().START_H;
@@ -780,7 +768,7 @@
           ev.preventDefault();
           ev.stopPropagation();
           document.getElementById('page-msg').textContent =
-            'この日は予約を受け付けていません（店舗の休業日・土日祝の設定）';
+            'この日は予約を受け付けていません（休業日・土日祝設定）';
           return;
         }
         if (ev.target.closest('.booking-slot-choice')) return;
@@ -842,14 +830,12 @@
     metaAvailability = m.availability_defaults || {};
     cursorDate = startOfLocalDay(new Date());
     const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
-    document.getElementById('link-label').textContent = lt;
     document.getElementById('page-heading').textContent = lt;
     const noticeWrap = document.getElementById('booking-link-notice');
-    const noticeText = document.getElementById('booking-link-notice-text');
     const preBookingNotice = m.link && m.link.pre_booking_notice ? m.link.pre_booking_notice : '';
-    if (noticeWrap && noticeText) {
+    if (noticeWrap) {
       noticeWrap.hidden = !preBookingNotice;
-      noticeText.textContent = preBookingNotice;
+      noticeWrap.textContent = preBookingNotice;
     }
     const ga = m.ga4_measurement_id;
     if (ga) {
@@ -868,23 +854,9 @@
       (m.fixed_service && m.fixed_service.id) ||
       (m.link && m.link.service_id != null ? m.link.service_id : null);
     window.__BOOKING_LINK_SERVICE_ID__ = m.link && m.link.service_id != null ? m.link.service_id : null;
-    const tools = document.getElementById('booking-service-tools');
-    const fixHint = document.getElementById('booking-fixed-course-hint');
-    if (tools) tools.hidden = true;
-    if (fixHint) {
-      fixHint.hidden = false;
-      if (m.fixed_service) {
-        fixHint.textContent = m.fixed_service.name + '（' + m.fixed_service.duration_minutes + '分）';
-      } else {
-        const firstService = (m.services || [])[0];
-        if (firstService) {
-          fixedServiceId = firstService.id;
-          fixHint.textContent = firstService.name + '（' + firstService.duration_minutes + '分）';
-        } else {
-          fixHint.textContent = '';
-          fixHint.hidden = true;
-        }
-      }
+    const firstService = (m.services || [])[0];
+    if (!m.fixed_service && firstService) {
+      fixedServiceId = firstService.id;
     }
     renderExtraFields(m.form_fields || []);
     await loadSlots();

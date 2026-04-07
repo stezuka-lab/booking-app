@@ -4,10 +4,11 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
 <div class="admin-console">
+  <span class="page-kicker">権限管理</span>
   <h1 class="page-title">アカウント</h1>
   {% if viewer_is_admin | default(false) %}
   <p class="page-lead muted">
-    <strong>ユーザー</strong>の発行・一覧と、各行の<strong>組織</strong>（表示名・slug）の編集をまとめています。管理 API はログインセッションで認証されます。予約の店舗設定は <a href="/app/settings">設定</a> へ。
+    ユーザーの発行、権限、所属組織の設定をまとめて管理します。運用担当だけが触る画面です。
   </p>
 
   <section class="panel admin-section" id="accounts-panel">
@@ -47,17 +48,17 @@
       </div>
       <div class="admin-field">
         <label for="new-user-org-slug">組織 slug（任意）</label>
-        <input type="text" id="new-user-org-slug" autocomplete="off" spellcheck="false" placeholder="例: shibuya-shop" />
+        <input type="text" id="new-user-org-slug" autocomplete="off" spellcheck="false" placeholder="例: team-alpha" />
       </div>
     </div>
     <button type="button" class="btn primary" id="btn-create-user">発行</button>
 
     <h3 class="panel-subtitle">ユーザー一覧</h3>
     <div class="accounts-api-toolbar">
-      <p class="muted small" style="margin: 0 0 0.5rem">管理 API はブラウザのログイン状態で呼び出されます。</p>
+      <p class="muted small" style="margin: 0 0 0.5rem">一覧は自動で読み込みます。必要なときだけ組織一覧 JSON を開いて確認してください。</p>
       <div class="admin-toolbar">
         <button type="button" class="btn secondary" id="btn-orgs">組織一覧（JSON）</button>
-        <a class="btn secondary" href="/app/settings">店舗設定を開く</a>
+        <a class="btn secondary" href="/app/settings">予約設定を開く</a>
       </div>
       <pre id="acct-org-json" class="admin-json" style="margin-top: 0.75rem; max-height: 12rem; overflow: auto" hidden></pre>
     </div>
@@ -82,7 +83,7 @@
   </section>
 
   {% else %}
-  <p class="page-lead muted">店舗の予約設定は <a href="/app/settings">設定</a> から開けます。</p>
+  <p class="page-lead muted">予約設定は <a href="/app/settings">設定</a> から開けます。</p>
   <section class="panel admin-section">
     <p class="muted" style="margin: 0">組織の作成・ユーザー管理は管理者のみ利用できます。</p>
   </section>

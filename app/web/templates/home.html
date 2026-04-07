@@ -4,28 +4,57 @@
 {% block content %}
 <section class="hero-home">
   <div class="hero-home-inner">
-    <h1>予約管理</h1>
-    <p class="hero-home-lead">ログイン済みです。メニューから各機能を開けます。</p>
+    <span class="page-kicker">ダッシュボード</span>
+    <h1>予約運用をここで整えます</h1>
+    <p class="hero-home-lead">はじめて使うときは、カレンダー認証、予約リンク作成、公開確認の順に進めると迷いません。</p>
+    <div class="hero-home-actions">
+      <a class="btn primary" href="/app/calendar">カレンダー認証を始める</a>
+      <a class="btn secondary" href="/app/campaigns">予約リンクを作る</a>
+    </div>
   </div>
+</section>
+
+<section class="quick-steps">
+  <article class="quick-step">
+    <span class="quick-step-no">1</span>
+    <div>
+      <h2>カレンダーを連携</h2>
+      <p>担当ごとに Google カレンダーと Zoom URL を登録します。</p>
+    </div>
+  </article>
+  <article class="quick-step">
+    <span class="quick-step-no">2</span>
+    <div>
+      <h2>予約リンクを発行</h2>
+      <p>予約区分、担当、受付条件を決めて公開 URL を作成します。</p>
+    </div>
+  </article>
+  <article class="quick-step">
+    <span class="quick-step-no">3</span>
+    <div>
+      <h2>公開ページを確認</h2>
+      <p>顧客が見る画面を開き、日時選択から完了までを確認します。</p>
+    </div>
+  </article>
 </section>
 
 <section class="feature-grid">
   <article class="feature-card">
     <div class="feature-card-icon feature-card-icon--adm" aria-hidden="true"></div>
     <h2>設定</h2>
-    <p>受付時間・予約区分・担当・Google／Zoom。ブラウザだけで編集（DBはアプリ経由）。</p>
+    <p>受付時間、通知、カレンダー予定名など、全体ルールをまとめて整えます。</p>
     <a class="btn primary" href="/app/settings">開く</a>
   </article>
   <article class="feature-card">
     <div class="feature-card-icon feature-card-icon--book" aria-hidden="true"></div>
     <h2>予約リンク</h2>
-    <p>予約リンクごとに予約区分・担当を決め、専用 URL を発行します。</p>
+    <p>顧客向けの予約ページを作る場所です。用途別に複数の URL を発行できます。</p>
     <a class="btn secondary" href="/app/campaigns">開く</a>
   </article>
   <article class="feature-card">
     <div class="feature-card-icon feature-card-icon--cal" aria-hidden="true"></div>
     <h2>カレンダー認証</h2>
-    <p>Google カレンダー連携や認証状態の確認。</p>
+    <p>担当の予定連携、接続状態の確認、Zoom URL の登録を行います。</p>
     <a class="btn secondary" href="/app/calendar">開く</a>
   </article>
 </section>

@@ -15,8 +15,10 @@ from app.auth.models import AppUser, PasswordResetToken
 from app.auth.passwords import hash_password, verify_password
 from app.auth.rate_limit import (
     check_login_rate_limit,
+    check_password_reset_rate_limit,
     clear_login_failures,
     record_login_failure,
+    record_password_reset_attempt,
 )
 from app.auth.schemas import (
     AdminSetPasswordBody,
@@ -69,7 +71,7 @@ async def _materialize_org_assignment(
     new_org = BookingOrg(
         name=name_stripped,
         slug=slug,
-        routing_mode="round_robin",
+        routing_mode="priority",
         cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": True},
         availability_defaults_json={
             "timezone": "Asia/Tokyo",
@@ -202,10 +204,23 @@ def _token_hash(raw: str) -> str:
 
 @router.post("/api/auth/forgot-password")
 async def forgot_password(
+    request: Request,
     body: ForgotPasswordBody,
     db: AuthDb,
     settings: Settings = Depends(get_settings),
 ) -> dict:
+    identifier = f"{body.username.strip()}::{str(body.email).strip().lower()}"
+    check_password_reset_rate_limit(
+        request,
+        identifier,
+        max_attempts=max(1, int(settings.password_reset_rate_limit_max_attempts or 5)),
+        window_sec=max(60, int(settings.password_reset_rate_limit_window_sec or 3600)),
+    )
+    record_password_reset_attempt(
+        request,
+        identifier,
+        window_sec=max(60, int(settings.password_reset_rate_limit_window_sec or 3600)),
+    )
     u = await db.scalar(select(AppUser).where(AppUser.username == body.username.strip()))
     if not u or not u.is_active:
         return {"ok": True, "message": "該当する場合はメールを送信しました"}

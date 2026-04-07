@@ -3,8 +3,13 @@
 {% set nav = 'calendar' %}
 {% block main_class %}wide{% endblock %}
 {% block content %}
-<h1 class="page-title gcal-page-title">カレンダー認証</h1>
-<p class="muted page-lead">Google カレンダーとの連携を管理します。</p>
+<div class="admin-page-head">
+  <div>
+    <span class="page-kicker">予定連携</span>
+    <h1 class="page-title gcal-page-title">カレンダー認証</h1>
+    <p class="muted page-lead">担当ごとの予定連携と Zoom URL を管理します。ここが整うと、空き時間判定と案内送信が自動化されます。</p>
+  </div>
+</div>
 
 <div id="oauth-banner" class="cal-banner ok" hidden></div>
 <div id="oauth-banner-err" class="cal-banner err" hidden></div>
@@ -41,8 +46,8 @@
 
 <section class="cal-card gcal-card">
   <h2 class="cal-h2">担当ごとのカレンダー認証</h2>
-  <p class="muted cal-hint"><strong>カレンダーを連携</strong>で認可します。空き判定に外部予定が反映されます。</p>
-  <p class="muted cal-hint">担当ごとの <strong>Zoom URL</strong> を保存すると、その担当に予約が入ったときに予約完了画面・確認メール・Google カレンダー予定へ自動で案内を表示します。</p>
+  <p class="muted cal-hint"><strong>カレンダーを連携</strong> を押すと、その担当の予定が空き判定に反映されます。</p>
+  <p class="muted cal-hint">Zoom URL を入れると、その担当で予約が入ったときだけ予約完了画面・メール・カレンダーに案内を表示します。</p>
   <p id="cal-google-hint" class="muted"></p>
   <div class="admin-row align-start wrap" style="margin: 0.85rem 0">
     <div class="admin-field grow">
@@ -202,7 +207,7 @@
       }
       var dis = data.google_oauth_ready ? '' : ' disabled';
       var disconnect = s.has_google && data.google_oauth_ready
-        ? '<button type="button" class="btn sm ghost cal-disconnect" data-id="' + s.id + '">連携解除</button>'
+        ? '<button type="button" class="btn sm ghost cal-disconnect" data-id="' + s.id + '">削除</button>'
         : '';
       return (
         '<tr><td class="cal-td-name">' + esc(s.name) + '</td><td>' + esc(s.email || '') + '</td><td class="cal-td-gprof">' + gprof + '</td><td>' +
@@ -288,12 +293,12 @@
     Array.prototype.forEach.call(box.querySelectorAll('.cal-disconnect'), function (btn) {
       btn.addEventListener('click', function () {
         var id = parseInt(btn.getAttribute('data-id'), 10);
-        if (!confirm('この担当の Google 連携を解除しますか？')) return;
+        if (!confirm('この担当の連携行を削除します。名前・メール・Zoom URL も削除されます。よろしいですか？')) return;
         msgEl.textContent = '';
         fetch('/api/booking/admin/staff/' + id, {
-          method: 'PATCH',
-          headers: Object.assign({ 'Content-Type': 'application/json' }, headers()),
-          body: JSON.stringify({ clear_google_oauth: true }),
+          method: 'DELETE',
+          credentials: 'same-origin',
+          headers: headers(),
         })
           .then(function (r) {
             return r.json().then(function (j) {
@@ -305,6 +310,7 @@
               msgEl.textContent = x.j.detail || x.r.statusText;
               return;
             }
+            msgEl.textContent = '連携行を削除しました。';
             loadAll();
           })
           .catch(function (e) {

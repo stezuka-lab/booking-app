@@ -1,4 +1,6 @@
 from functools import lru_cache
+import hashlib
+from base64 import urlsafe_b64encode
 from urllib.parse import urlparse
 
 from pydantic import AliasChoices, Field, field_validator
@@ -67,6 +69,10 @@ class Settings(BaseSettings):
     security_hsts_seconds: int = 31536000
     auth_rate_limit_window_sec: int = 900
     auth_rate_limit_max_attempts: int = 10
+    password_reset_rate_limit_window_sec: int = 3600
+    password_reset_rate_limit_max_attempts: int = 5
+    booking_public_rate_limit_window_sec: int = 3600
+    booking_public_rate_limit_max_requests: int = 40
     api_docs_enabled: bool = True
     # DB にユーザーが 1 人もいないときだけ 1 回だけ作成（初期管理者）
     booking_bootstrap_admin_user: str = ""
@@ -83,6 +89,7 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_use_ssl: bool = False
     smtp_starttls: bool = True
+    booking_data_encryption_key: str = ""
 
     @field_validator(
         "public_base_url",
@@ -178,6 +185,19 @@ class Settings(BaseSettings):
 
     def should_expose_demo_info(self) -> bool:
         return not self.is_public_deployment()
+
+    def booking_data_encryption_key_value(self) -> str:
+        explicit = (self.booking_data_encryption_key or "").strip()
+        if explicit:
+            return explicit
+        basis = (
+            (self.booking_session_secret or "").strip()
+            or (self.booking_admin_secret or "").strip()
+        )
+        if not basis:
+            return ""
+        digest = hashlib.sha256(basis.encode("utf-8")).digest()
+        return urlsafe_b64encode(digest).decode("ascii")
 
 
 @lru_cache

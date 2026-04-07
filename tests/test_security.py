@@ -5,8 +5,16 @@ from types import SimpleNamespace
 import pytest
 from fastapi import HTTPException
 
-from app.auth.rate_limit import check_login_rate_limit, clear_login_failures, record_login_failure
+from app.auth.rate_limit import (
+    check_login_rate_limit,
+    check_password_reset_rate_limit,
+    clear_login_failures,
+    record_login_failure,
+    record_password_reset_attempt,
+)
 from app.config import Settings
+from app.main import _is_same_origin
+from app.security.crypto import decrypt_secret, encrypt_secret
 
 
 def _dummy_request(ip: str = "127.0.0.1"):
@@ -55,9 +63,38 @@ def test_login_rate_limit_blocks_after_repeated_failures() -> None:
     clear_login_failures(request, username)
 
 
+def test_password_reset_rate_limit_blocks_after_repeated_attempts() -> None:
+    request = _dummy_request("10.0.0.9")
+    ident = "tester::user@example.com"
+    for _ in range(2):
+        record_password_reset_attempt(request, ident, window_sec=3600)
+    with pytest.raises(HTTPException) as exc:
+        check_password_reset_rate_limit(request, ident, max_attempts=2, window_sec=3600)
+    assert exc.value.status_code == 429
+
+
 def test_security_headers_present(client) -> None:
     r = client.get("/health")
     assert r.status_code == 200
     assert r.headers.get("x-content-type-options") == "nosniff"
     assert r.headers.get("x-frame-options") == "DENY"
     assert r.headers.get("content-security-policy")
+
+
+def test_same_origin_allows_localhost_and_loopback_aliases() -> None:
+    assert _is_same_origin("http://localhost:8000/app/login", "http://127.0.0.1:8000")
+    assert _is_same_origin("http://127.0.0.1:8000/app/login", "http://localhost:8000")
+    assert not _is_same_origin("http://localhost:8001/app/login", "http://127.0.0.1:8000")
+
+
+def test_secret_encryption_roundtrip() -> None:
+    settings = Settings(booking_session_secret="test-session-secret")
+    encrypted = encrypt_secret("refresh-token", settings)
+    assert encrypted
+    assert encrypted != "refresh-token"
+    assert decrypt_secret(encrypted, settings) == "refresh-token"
+
+
+def test_secret_decrypt_accepts_legacy_plaintext() -> None:
+    settings = Settings()
+    assert decrypt_secret("legacy-plain-token", settings) == "legacy-plain-token"

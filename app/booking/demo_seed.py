@@ -6,7 +6,7 @@ import logging
 import secrets
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.booking.db_models import (
@@ -49,12 +49,29 @@ async def ensure_demo_booking_data(session: AsyncSession, settings: Settings) ->
             adv["timezone"] = "Asia/Tokyo"
             org.availability_defaults_json = adv
             await session.commit()
-        link = await session.scalar(
-            select(PublicBookingLink)
-            .where(PublicBookingLink.org_id == org.id)
-            .order_by(PublicBookingLink.id)
-            .limit(1)
-        )
+        demo_links = (
+            await session.scalars(
+                select(PublicBookingLink)
+                .where(PublicBookingLink.org_id == org.id)
+                .where(PublicBookingLink.title == "デモ予約")
+                .order_by(PublicBookingLink.id)
+            )
+        ).all()
+        if len(demo_links) > 1:
+            keep = demo_links[0]
+            for extra in demo_links[1:]:
+                await session.execute(delete(PublicBookingLink).where(PublicBookingLink.id == extra.id))
+            await session.commit()
+            link = keep
+        elif demo_links:
+            link = demo_links[0]
+        else:
+            link = await session.scalar(
+                select(PublicBookingLink)
+                .where(PublicBookingLink.org_id == org.id)
+                .order_by(PublicBookingLink.id)
+                .limit(1)
+            )
         if link:
             token = link.token
             if link.service_id is None:
@@ -71,7 +88,8 @@ async def ensure_demo_booking_data(session: AsyncSession, settings: Settings) ->
             token = secrets.token_urlsafe(16)
             svc_new = await session.scalar(
                 select(BookingService)
-                .where(BookingService.org_id == org.id, BookingService.active.is_(True))
+                .where(BookingService.org_id == org.id)
+                .where(BookingService.active.is_(True))
                 .order_by(BookingService.id)
                 .limit(1)
             )
@@ -89,8 +107,8 @@ async def ensure_demo_booking_data(session: AsyncSession, settings: Settings) ->
         org = BookingOrg(
             name="デモ店舗",
             slug=slug,
-            routing_mode="round_robin",
-            auto_confirm=True,
+            routing_mode="priority",
+            auto_confirm=False,
             cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": True},
             availability_defaults_json={
                 "timezone": "Asia/Tokyo",

@@ -4,72 +4,24 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
 <div class="admin-console">
-  <h1 class="page-title">予約リンク</h1>
-  <p class="page-lead muted">名前・予約区分・担当を指定して専用 URL を発行します。詳細は <a href="/app/settings">設定</a> で編集します。</p>
-
-  <section class="panel admin-section">
+  <div class="admin-page-head">
+    <div>
+      <span class="page-kicker">公開ページ作成</span>
+      <h1 class="page-title">予約リンク</h1>
+      <p class="page-lead muted">顧客が開く予約ページをここで作成します。上から順に入力すると、そのまま公開できます。</p>
+    </div>
     <div class="admin-toolbar">
-      <button type="button" class="btn primary" id="btn-summary">一覧を読み込む</button>
-      <a class="btn secondary" href="/app/settings">設定を開く</a>
+      <a class="btn secondary" href="/app/settings">設定</a>
       <a class="btn secondary" href="/app/calendar">カレンダー認証</a>
       {% if viewer_is_admin | default(false) %}
       <a class="btn secondary" href="/app/accounts">アカウント・接続</a>
       {% endif %}
     </div>
-  </section>
-
-  <section class="panel admin-section" id="link-create-panel" hidden>
-    <h2 class="panel-title">新規予約リンクを発行</h2>
-    <p class="muted panel-hint">
-      担当を選ばない場合は、組織内の<strong>全アクティブ担当</strong>が予約の割当対象になります。
-    </p>
-    <div class="admin-row">
-      <div class="admin-field grow">
-        <label for="new-link-title">リンク名（予約画面の見出しにも使われます）</label>
-        <input type="text" id="new-link-title" placeholder="例: 初回カウンセリング" />
-      </div>
-      <div class="admin-field">
-        <label for="new-link-service">予約区分 <span class="req">*</span></label>
-        <select id="new-link-service" class="admin-input-wide"></select>
-      </div>
-    </div>
-    <fieldset class="staff-checks" id="new-link-staff-wrap">
-      <legend class="field-label">対象担当（任意）</legend>
-      <div id="new-link-staff"></div>
-      <p class="muted small" style="margin-top: 0.5rem">優先度は数字が小さい担当ほど先に割り当てられます。</p>
-    </fieldset>
-    <div class="admin-row">
-      <div class="admin-field">
-        <label for="new-link-block-days">直近の日数をブロック（組織タイムゾーンの「本日」から N 日。0 で無効）</label>
-        <input type="number" id="new-link-block-days" min="0" max="366" value="0" />
-      </div>
-      <div class="admin-field">
-        <label for="new-link-buffer-minutes">予約の前後余白（分）</label>
-        <input type="number" id="new-link-buffer-minutes" min="0" max="180" step="5" value="0" />
-      </div>
-      <div class="admin-field">
-        <label for="new-link-max-advance-days">先行予約の上限（日）</label>
-        <input type="number" id="new-link-max-advance-days" min="0" max="730" step="1" value="0" />
-      </div>
-      <div class="admin-field">
-        <label for="new-link-bookable-until-date">この日以降は予約不可</label>
-        <input type="date" id="new-link-bookable-until-date" class="admin-input-wide" />
-      </div>
-    </div>
-    <div class="admin-field">
-      <label for="new-link-pre-booking-notice">予約ページのお知らせ</label>
-      <textarea id="new-link-pre-booking-notice" class="admin-input-wide" rows="4" placeholder="例: 当日は開始5分前までにZoomへご入室ください。"></textarea>
-    </div>
-    <div class="admin-field">
-      <label for="new-link-post-booking-message">予約完了後の追加メッセージ</label>
-      <textarea id="new-link-post-booking-message" class="admin-input-wide" rows="4" placeholder="例: 担当より事前確認が必要な場合は別途ご連絡します。"></textarea>
-    </div>
-    <button type="button" class="btn primary" id="btn-create-link">専用リンクを発行</button>
-  </section>
+  </div>
 
   <section class="panel admin-section" id="services-panel" hidden>
     <h2 class="panel-title">予約区分</h2>
-    <p class="muted panel-hint">予約リンクで使う区分名と所要時間をここで管理します。</p>
+    <p class="muted panel-hint">最初にここで予約区分を 1 件以上作成してください。予約リンクは、その区分が無いと発行できません。</p>
     <div class="table-wrap">
       <table class="admin-table">
         <thead>
@@ -85,10 +37,12 @@
     <div class="admin-row align-end wrap">
       <div class="admin-field grow">
         <label for="new-svc-name">区分名</label>
+        <p class="muted small">顧客に見える名前です。相談内容やメニュー名をそのまま入れてください。</p>
         <input type="text" id="new-svc-name" placeholder="例: 60分コース" />
       </div>
       <div class="admin-field">
         <label for="new-svc-dur">所要（分）</label>
+        <p class="muted small">1枠の長さです。30 や 60 などで入力します。</p>
         <input type="number" id="new-svc-dur" min="5" max="480" step="5" value="30" class="admin-input-sm" />
       </div>
       <div class="admin-field cal-actions">
@@ -97,8 +51,66 @@
     </div>
   </section>
 
+  <section class="panel admin-section" id="link-create-panel" hidden>
+    <h2 class="panel-title">新規予約リンクを発行</h2>
+    <p class="muted panel-hint">
+      上から順に入力すれば公開できます。担当を選ばない場合は、組織内の<strong>全アクティブ担当</strong>が割当対象になります。
+    </p>
+    <div class="admin-row">
+      <div class="admin-field grow">
+        <label for="new-link-title">リンク名（予約画面の見出しにも使われます）</label>
+        <p class="muted small">顧客に見えるタイトルです。用途が分かる名前にしてください。</p>
+        <input type="text" id="new-link-title" placeholder="例: 初回カウンセリング" />
+      </div>
+      <div class="admin-field">
+        <label for="new-link-service">予約区分 <span class="req">*</span></label>
+        <p class="muted small">ここで選んだ区分の所要時間が、予約枠の長さになります。</p>
+        <select id="new-link-service" class="admin-input-wide"></select>
+      </div>
+    </div>
+    <fieldset class="staff-checks" id="new-link-staff-wrap">
+      <legend class="field-label">対象担当（任意）</legend>
+      <div id="new-link-staff"></div>
+      <p class="muted small" style="margin-top: 0.5rem">担当を選ぶと、その担当だけが候補になります。優先度は数字が小さいほど先に割り当てます。</p>
+    </fieldset>
+    <div class="admin-row">
+      <div class="admin-field">
+        <label for="new-link-block-days">直近ブロック（日）</label>
+        <p class="muted small">今日から何日分を予約不可にするかです。0 なら制限しません。</p>
+        <input type="number" id="new-link-block-days" min="0" max="366" value="0" />
+      </div>
+      <div class="admin-field">
+        <label for="new-link-buffer-minutes">予約の前後余白（分）</label>
+        <p class="muted small">予約の前後に確保したい準備時間です。不要なら 0 のままで構いません。</p>
+        <input type="number" id="new-link-buffer-minutes" min="0" max="180" step="5" value="0" />
+      </div>
+      <div class="admin-field">
+        <label for="new-link-max-advance-days">何日先まで予約を受けるか</label>
+        <p class="muted small">0 なら制限なしです。30 なら 30 日先まで予約できます。</p>
+        <input type="number" id="new-link-max-advance-days" min="0" max="730" step="1" value="0" />
+      </div>
+      <div class="admin-field">
+        <label for="new-link-bookable-until-date">この日以降は予約不可</label>
+        <p class="muted small">期間限定のリンクにしたいときだけ設定します。</p>
+        <input type="date" id="new-link-bookable-until-date" class="admin-input-wide" />
+      </div>
+    </div>
+    <div class="admin-field">
+      <label for="new-link-pre-booking-notice">予約ページのお知らせ</label>
+      <p class="muted small">予約ページの上部にそのまま表示します。事前案内があればここに入力します。</p>
+      <textarea id="new-link-pre-booking-notice" class="admin-input-wide" rows="4" placeholder="例: 当日は開始5分前までにZoomへご入室ください。"></textarea>
+    </div>
+    <div class="admin-field">
+      <label for="new-link-post-booking-message">予約完了後の追加メッセージ</label>
+      <p class="muted small">予約完了画面と確認メールに表示します。次の案内や補足があれば入力します。</p>
+      <textarea id="new-link-post-booking-message" class="admin-input-wide" rows="4" placeholder="例: 担当より事前確認が必要な場合は別途ご連絡します。"></textarea>
+    </div>
+    <button type="button" class="btn primary" id="btn-create-link">専用リンクを発行</button>
+  </section>
+
   <section class="panel admin-section" id="links-panel" hidden>
     <h2 class="panel-title">発行済みの予約リンク</h2>
+    <p class="muted panel-hint">公開中の URL と状態をここで管理します。</p>
     <div class="table-wrap">
       <table class="admin-table">
         <thead>
@@ -122,7 +134,7 @@
   {% if viewer_is_admin | default(false) %}
   <details class="admin-details">
     <summary>デバッグ JSON</summary>
-    <pre id="admin-out" class="admin-json">一覧を読み込むと表示されます。</pre>
+    <pre id="admin-out" class="admin-json">読み込み後に表示されます。</pre>
   </details>
   {% endif %}
 </div>
@@ -133,10 +145,12 @@
     <input type="hidden" id="edit-campaign-id" />
     <div class="admin-field" style="margin-bottom: 0.75rem">
       <label for="edit-campaign-title">リンク名</label>
+      <p class="muted small">顧客に見えるタイトルです。用途がひと目で分かる名前にします。</p>
       <input type="text" id="edit-campaign-title" class="booking-dialog__input-wide" autocomplete="off" />
     </div>
     <div class="admin-field" style="margin-bottom: 0.75rem">
       <label for="edit-campaign-service">予約区分</label>
+      <p class="muted small">ここで選んだ区分の所要時間が、予約枠の長さになります。</p>
       <select id="edit-campaign-service" class="booking-dialog__input-wide"></select>
     </div>
     <fieldset class="staff-checks" style="margin: 0.75rem 0">
@@ -151,29 +165,35 @@
       </label>
     </div>
     <div class="admin-field" style="margin-bottom: 0.75rem">
-      <label for="edit-campaign-block-days">直近の日数をブロック</label>
+      <label for="edit-campaign-block-days">直近ブロック（日）</label>
+      <p class="muted small">今日から何日分を予約不可にするかです。0 なら制限しません。</p>
       <input type="number" id="edit-campaign-block-days" class="booking-dialog__input-wide" min="0" max="366" value="0" />
     </div>
     <div class="admin-row" style="margin-bottom: 0.75rem">
       <div class="admin-field">
         <label for="edit-campaign-buffer-minutes">予約の前後余白（分）</label>
+        <p class="muted small">予約の前後に確保したい準備時間です。不要なら 0 のままで構いません。</p>
         <input type="number" id="edit-campaign-buffer-minutes" class="booking-dialog__input-wide" min="0" max="180" step="5" value="0" />
       </div>
       <div class="admin-field">
-        <label for="edit-campaign-max-advance-days">先行予約の上限（日）</label>
+        <label for="edit-campaign-max-advance-days">何日先まで予約を受けるか</label>
+        <p class="muted small">0 なら制限なしです。30 なら 30 日先まで予約できます。</p>
         <input type="number" id="edit-campaign-max-advance-days" class="booking-dialog__input-wide" min="0" max="730" step="1" value="0" />
       </div>
       <div class="admin-field">
         <label for="edit-campaign-bookable-until-date">この日以降は予約不可</label>
+        <p class="muted small">期間限定のリンクにしたいときだけ設定します。</p>
         <input type="date" id="edit-campaign-bookable-until-date" class="booking-dialog__input-wide" />
       </div>
     </div>
     <div class="admin-field" style="margin-bottom: 0.75rem">
       <label for="edit-campaign-pre-booking-notice">予約ページのお知らせ</label>
+      <p class="muted small">予約ページの上部にそのまま表示します。事前案内があればここに入力します。</p>
       <textarea id="edit-campaign-pre-booking-notice" class="booking-dialog__input-wide" rows="4"></textarea>
     </div>
     <div class="admin-field" style="margin-bottom: 0.75rem">
       <label for="edit-campaign-post-booking-message">予約完了後の追加メッセージ</label>
+      <p class="muted small">予約完了画面と確認メールに表示します。次の案内や補足があれば入力します。</p>
       <textarea id="edit-campaign-post-booking-message" class="booking-dialog__input-wide" rows="4"></textarea>
     </div>
     <div class="booking-dialog__actions">
@@ -375,8 +395,14 @@
     fillStaffCheckboxes(wrap, data, [], {});
 
     const svcBody = document.getElementById('services-tbody');
+    const createBtn = document.getElementById('btn-create-link');
     svcBody.innerHTML = '';
     const svcs = data.services || [];
+    const activeServices = svcs.filter(function (s) { return s.active !== false; });
+    if (createBtn) {
+      createBtn.disabled = !activeServices.length;
+      createBtn.textContent = activeServices.length ? '専用リンクを発行' : '先に予約区分を追加してください';
+    }
     if (!svcs.length) {
       const trEmpty = document.createElement('tr');
       const tdEmpty = document.createElement('td');
@@ -551,8 +577,6 @@
     if (data) renderLinksSummary(data);
   }
 
-  document.getElementById('btn-summary').addEventListener('click', loadSummary);
-
   document.getElementById('btn-add-service').addEventListener('click', async function () {
     setMsg('');
     const name = document.getElementById('new-svc-name').value.trim();
@@ -587,7 +611,7 @@
     const svcEl = document.getElementById('new-link-service');
     const serviceId = svcEl ? parseInt(svcEl.value, 10) : NaN;
     if (!Number.isFinite(serviceId)) {
-      setMsg('予約区分を選んでください。区分が無い場合は「設定」で追加してください。', 'err');
+      setMsg('先に予約区分を作成してから予約リンクを発行してください。', 'err');
       return;
     }
     const ids = collectCheckedStaffIds('#new-link-staff');

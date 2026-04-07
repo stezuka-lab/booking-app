@@ -12,6 +12,7 @@
 4. 本番公開時は `.env.production.example` と `docs/DEPLOYMENT.md` を参照。
 5. 本番 DB は `Postgres` を推奨します。`asyncpg` は依存関係に追加済みです。
 6. 無料サーバー系は `python -m app.serve` で起動できます。`PORT` を自動で拾います。
+7. 顧客情報を扱う本番環境では `BOOKING_DATA_ENCRYPTION_KEY` を設定してください。Google 連携トークンの暗号化保存に使います。
 
 ## 起動
 

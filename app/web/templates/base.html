@@ -10,14 +10,20 @@
 </head>
 <body>
   <header class="app-header">
-    <a class="app-brand" href="/app">Booking</a>
+    <a class="app-brand" href="/app">
+      <span class="app-brand-mark" aria-hidden="true"></span>
+      <span class="app-brand-copy">
+        <strong>予約デスク</strong>
+        <span>予定調整をひとつの画面で</span>
+      </span>
+    </a>
     <nav class="app-nav">
       <span class="nav-auth-only app-org-chip" id="app-org-chip" hidden></span>
       <a href="/app" class="{% if nav == 'home' %}active{% endif %}">ホーム</a>
       <a href="/app/login" class="nav-guest-only {% if nav == 'login' %}active{% endif %}">ログイン</a>
+      <a href="/app/calendar" class="nav-auth-only {% if nav == 'calendar' %}active{% endif %}" hidden>カレンダー認証</a>
       <a href="/app/settings" class="nav-auth-only {% if nav == 'settings' %}active{% endif %}" hidden>設定</a>
       <a href="/app/campaigns" class="nav-auth-only {% if nav == 'links' %}active{% endif %}" hidden>予約リンク</a>
-      <a href="/app/calendar" class="nav-auth-only {% if nav == 'calendar' %}active{% endif %}" hidden>カレンダー認証</a>
       <a href="/app/accounts" class="nav-admin-only {% if nav == 'accounts' %}active{% endif %}" hidden>アカウント</a>
       <span class="auth-nav" id="auth-nav-slot"></span>
       <a href="/docs" target="_blank" rel="noopener" class="nav-admin-only" hidden>API</a>
@@ -27,7 +33,7 @@
     {% block content %}{% endblock %}
   </main>
   <footer class="app-footer">
-    <span>v{{ version }}</span>
+    <span>予約デスク v{{ version }}</span>
   </footer>
   {% block scripts %}{% endblock %}
   <script>

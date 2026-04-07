@@ -9,7 +9,7 @@
 <div class="booking-flow booking-flow-v2">
   <div class="booking-hero-bar">
     <div>
-      <span class="org-badge">予約の確認</span>
+      <span class="page-kicker">予約内容</span>
       <h1 class="page-title booking-hero-title">予約の確認・変更</h1>
       <p class="page-sub muted" id="manage-status-text">読み込み中…</p>
     </div>
@@ -19,8 +19,8 @@
     <h2 class="panel-title">予約内容</h2>
     <div id="manage-summary" class="muted"></div>
     <div class="booking-note-card">
-      <strong>ご案内</strong>
-      <span class="muted">変更やキャンセルが必要な場合は、このページから手続きしてください。</span>
+      <strong>このページでできること</strong>
+      <span class="muted">予約内容の確認、会議 URL の確認、キャンセル手続きができます。</span>
     </div>
     <p id="manage-msg" class="err booking-page-msg" role="alert"></p>
     <div class="booking-dialog__actions">
@@ -81,7 +81,7 @@
     if (manageData.policy_reason === 'ok') {
       policyEl.textContent = 'オンラインでキャンセルできます。';
     } else {
-      policyEl.textContent = 'オンライン変更の期限外です。必要に応じて店舗へ連絡してください。';
+      policyEl.textContent = 'オンライン変更の期限外です。必要に応じて担当者へ連絡してください。';
     }
   }
 

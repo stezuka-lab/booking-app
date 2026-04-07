@@ -6,6 +6,7 @@ from collections import defaultdict
 from fastapi import HTTPException, Request
 
 _login_failures: dict[str, list[float]] = defaultdict(list)
+_password_reset_attempts: dict[str, list[float]] = defaultdict(list)
 
 
 def _client_ip(request: Request) -> str:
@@ -51,3 +52,40 @@ def record_login_failure(
 
 def clear_login_failures(request: Request, username: str) -> None:
     _login_failures.pop(_bucket_key(request, username), None)
+
+
+def _password_reset_bucket_key(request: Request, identifier: str) -> str:
+    return f"{_client_ip(request)}::{(identifier or '').strip().lower()}"
+
+
+def check_password_reset_rate_limit(
+    request: Request,
+    identifier: str,
+    *,
+    max_attempts: int = 5,
+    window_sec: int = 3600,
+) -> None:
+    key = _password_reset_bucket_key(request, identifier)
+    now = time.time()
+    bucket = _password_reset_attempts[key]
+    cutoff = now - window_sec
+    bucket[:] = [t for t in bucket if t >= cutoff]
+    if len(bucket) >= max_attempts:
+        raise HTTPException(
+            429,
+            "再設定リクエストが多すぎます。しばらく時間をおいて再度お試しください。",
+        )
+
+
+def record_password_reset_attempt(
+    request: Request,
+    identifier: str,
+    *,
+    window_sec: int = 3600,
+) -> None:
+    key = _password_reset_bucket_key(request, identifier)
+    now = time.time()
+    bucket = _password_reset_attempts[key]
+    cutoff = now - window_sec
+    bucket[:] = [t for t in bucket if t >= cutoff]
+    bucket.append(now)

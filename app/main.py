@@ -126,9 +126,21 @@ def _security_headers(settings: Settings) -> dict[str, str]:
 def _is_same_origin(candidate: str, expected_origin: str) -> bool:
     try:
         parsed = urlparse(candidate)
-        if not parsed.scheme or not parsed.netloc:
+        expected = urlparse(expected_origin)
+        if not parsed.scheme or not parsed.netloc or not expected.scheme or not expected.netloc:
             return False
-        return f"{parsed.scheme}://{parsed.netloc}".lower() == expected_origin.lower()
+        actual_origin = f"{parsed.scheme}://{parsed.netloc}".lower()
+        normalized_expected = f"{expected.scheme}://{expected.netloc}".lower()
+        if actual_origin == normalized_expected:
+            return True
+        actual_host = (parsed.hostname or "").lower()
+        expected_host = (expected.hostname or "").lower()
+        actual_port = parsed.port
+        expected_port = expected.port
+        is_local_pair = {actual_host, expected_host} <= {"localhost", "127.0.0.1"}
+        if is_local_pair and parsed.scheme.lower() == expected.scheme.lower() and actual_port == expected_port:
+            return True
+        return False
     except Exception:
         return False
 
@@ -148,12 +160,17 @@ def _should_enforce_same_origin(request_path: str, method: str) -> bool:
 async def apply_http_security(request, call_next):
     settings = get_settings()
     if _should_enforce_same_origin(request.url.path, request.method):
-        expected_origin = settings.public_base_url_value()
+        expected_origins = {
+            settings.public_base_url_value().rstrip("/"),
+            str(request.base_url).rstrip("/"),
+        }
         origin = (request.headers.get("origin") or "").strip()
         referer = (request.headers.get("referer") or "").strip()
-        if origin and not _is_same_origin(origin, expected_origin):
+        if origin and not any(_is_same_origin(origin, expected) for expected in expected_origins):
             return JSONResponse({"detail": "cross-site request blocked"}, status_code=403)
-        if not origin and referer and not _is_same_origin(referer, expected_origin):
+        if not origin and referer and not any(
+            _is_same_origin(referer, expected) for expected in expected_origins
+        ):
             return JSONResponse({"detail": "cross-site request blocked"}, status_code=403)
     response = await call_next(request)
     for key, value in _security_headers(settings).items():

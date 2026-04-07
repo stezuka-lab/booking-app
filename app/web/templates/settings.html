@@ -4,57 +4,52 @@
 {% block main_class %}wide{% endblock %}
 {% block content %}
 <div class="admin-console">
-  <h1 class="page-title">設定</h1>
-
-  <section class="panel admin-section">
+  <div class="admin-page-head">
+    <div>
+      <span class="page-kicker">全体設定</span>
+      <h1 class="page-title">設定</h1>
+      <p class="page-lead muted">予約全体のルールを決める画面です。まずは受付時間と通知設定を整えるだけで運用を始められます。</p>
+    </div>
     <div class="admin-toolbar">
-      <button type="button" class="btn primary" id="btn-summary">設定を読み込む</button>
       <a class="btn secondary" href="/app/calendar">カレンダー認証</a>
       <a class="btn secondary" href="/app/campaigns">予約リンク</a>
       {% if viewer_is_admin | default(false) %}
       <a class="btn secondary" href="/app/accounts">アカウント・組織・接続</a>
       {% endif %}
     </div>
-  </section>
+  </div>
 
   <section class="panel admin-section" id="summary-panel" hidden>
     <h2 class="panel-title">概要</h2>
     <div class="summary-cards" id="summary-cards"></div>
   </section>
 
-  <section class="panel admin-section" id="calendar-auth-panel" hidden>
-    <h2 class="panel-title">カレンダー認証</h2>
-    <p class="muted panel-hint" id="calendar-auth-summary-hint"></p>
-    <div class="admin-toolbar">
-      <a class="btn primary" href="/app/calendar">カレンダー認証を開く</a>
-    </div>
-  </section>
-
   <section class="panel admin-section" id="org-settings-panel" hidden>
-    <h2 class="panel-title">割当・確定</h2>
+    <h2 class="panel-title">担当の割り当て方</h2>
+    <p class="muted panel-hint">予約が入ったときに、誰へ割り当てるかを決めます。迷う場合は「優先度順」で問題ありません。</p>
     <div class="admin-row align-end">
       <div class="admin-field">
         <label class="field-label" for="org-routing-mode">ルーティング</label>
         <select id="org-routing-mode">
-          <option value="round_robin">round_robin（均等）</option>
-          <option value="priority">priority（優先度順に割当）</option>
-          <option value="priority_fill">priority_fill（優先度順に枠が埋まる）</option>
+          <option value="priority">優先度順: 優先度が高い担当から割り当てます</option>
+          <option value="round_robin">均等割り: できるだけ均等に割り当てます</option>
+          <option value="priority_fill">上から順: 上位担当の枠から先に埋めます</option>
         </select>
-      </div>
-      <div class="admin-field admin-field-check">
-        <label class="check-line">
-          <input type="checkbox" id="org-auto-confirm" />
-          予約を自動確定
-        </label>
+        <p class="muted small">担当ごとの優先度は「予約リンク」画面で設定します。</p>
       </div>
       <div class="admin-field cal-actions">
-        <button type="button" class="btn primary" id="btn-save-org">保存</button>
+        <button type="button" class="btn primary" id="btn-save-org">割り当て方を保存</button>
       </div>
     </div>
   </section>
 
   <section class="panel admin-section" id="org-email-panel" hidden>
     <h2 class="panel-title">予約完了メール</h2>
+    <p class="muted panel-hint">顧客向け確認メールと担当通知メールの送信設定です。実際に送るにはサーバー側で SMTP 設定が必要です。</p>
+    <div class="booking-note-card">
+      <strong>メール送信に必要なもの</strong>
+      <p class="booking-multiline-note">サーバー側で SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM を設定してください。設定が無い場合は予約は保存されますが、メールは送信されません。</p>
+    </div>
     <div class="admin-row">
       <div class="admin-field admin-field-check">
         <label class="check-line">
@@ -74,10 +69,12 @@
     </div>
     <div class="admin-field grow">
       <label for="email-intro">顧客向けメールの冒頭（任意・複数行可）</label>
+      <p class="muted small">予約内容の上に表示します。短いあいさつや補足だけで十分です。</p>
       <textarea id="email-intro" class="booking-dialog__input-wide" rows="3" placeholder="例: このたびはお申し込みありがとうございます。"></textarea>
     </div>
     <div class="admin-field grow">
       <label for="email-footer">顧客向けメールの末尾（任意）</label>
+      <p class="muted small">問い合わせ先や補足があれば末尾に追加します。</p>
       <textarea id="email-footer" class="booking-dialog__input-wide" rows="3" placeholder="例: ご不明点はお電話でお問い合わせください。"></textarea>
     </div>
   </section>
@@ -125,16 +122,17 @@
     </div>
     <div class="admin-row align-start wrap">
       <div class="admin-field grow cal-title-template-wrap">
-        <label class="field-label" for="org-cal-title-template">カレンダー予定の件名（テンプレート）</label>
+        <label class="field-label" for="org-cal-title-template">カレンダー予定の件名</label>
+        <p class="muted small">下のボタンで項目を追加すると、その順番で件名を組み立てます。不要な項目は × で外せます。</p>
         <div class="cal-title-template-box">
           <div class="cal-preset-row">
-            <span class="muted small">定型例:</span>
-            <button type="button" class="btn sm secondary" id="cal-tpl-preset-1" data-tpl="{service} — {name}">区分 — お名前</button>
-            <button type="button" class="btn sm secondary" id="cal-tpl-preset-2" data-tpl="{name}（{service}）">お名前（区分）</button>
-            <button type="button" class="btn sm secondary" id="cal-tpl-preset-3" data-tpl="{company} {name} / {service}">会社 氏名 / 区分</button>
+            <span class="muted small">よく使う並び:</span>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-1" data-tpl="{service} — {name}">区分 → お名前</button>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-2" data-tpl="{name}（{service}）">お名前 → 区分</button>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-3" data-tpl="{company} {name} / {service}">会社名 → お名前 → 区分</button>
           </div>
           <div class="cal-title-chips" role="group" aria-label="プレースホルダを挿入">
-            <span class="cal-title-chip-label">挿入（タップで追加）</span>
+            <span class="cal-title-chip-label">追加する項目</span>
             <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{service}">区分名 {service}</button>
             <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{name}">お名前 {name}</button>
             <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{company}">会社名 {company}</button>
@@ -144,6 +142,7 @@
             <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="（">（</button>
             <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="）">）</button>
           </div>
+          <div class="cal-title-builder" id="cal-title-builder" aria-live="polite"></div>
           <input
             type="text"
             id="org-cal-title-template"
@@ -174,7 +173,7 @@
   {% if viewer_is_admin | default(false) %}
   <details class="admin-details">
     <summary>デバッグ JSON</summary>
-    <pre id="admin-out" class="admin-json">設定を読み込むと表示されます。</pre>
+    <pre id="admin-out" class="admin-json">読み込み後に表示されます。</pre>
   </details>
   {% endif %}
 </div>
@@ -226,8 +225,8 @@
     if (!s) return 'slug を入力してください。';
     if (!ORG_SLUG_RE.test(s)) {
       return (
-        'slug は英小文字・数字・ハイフンのみです（例: admin-shop）。' +
-        '「管理者」などの日本語は「組織の表示名」に入力してください。'
+        'slug は英小文字・数字・ハイフンのみです（例: admin-team）。' +
+        '日本語名は「組織の表示名」に入力してください。'
       );
     }
     return '';
@@ -277,7 +276,6 @@
 
   function showPanels(show) {
     document.getElementById('summary-panel').hidden = !show;
-    document.getElementById('calendar-auth-panel').hidden = !show;
     document.getElementById('org-settings-panel').hidden = !show;
     document.getElementById('org-email-panel').hidden = !show;
     document.getElementById('org-availability-panel').hidden = !show;
@@ -304,6 +302,73 @@
     updateCalendarTitlePreview();
   }
 
+  function parseCalendarTitleTemplate(raw) {
+    const text = String(raw || '');
+    const re = /(\{(?:service|name|company|phone|customer_number)\})/g;
+    return text
+      .split(re)
+      .filter(function (x) {
+        return x !== '';
+      })
+      .map(function (part) {
+        return { raw: part, isToken: /^\{.+\}$/.test(part) };
+      });
+  }
+
+  function tokenLabel(token) {
+    return {
+      '{service}': '区分名',
+      '{name}': 'お名前',
+      '{company}': '会社名',
+      '{phone}': '電話',
+      '{customer_number}': '顧客番号',
+    }[token] || token;
+  }
+
+  function removeCalendarTitleSegment(index) {
+    const el = document.getElementById('org-cal-title-template');
+    if (!el) return;
+    const parts = parseCalendarTitleTemplate(el.value);
+    if (index < 0 || index >= parts.length) return;
+    parts.splice(index, 1);
+    el.value = parts
+      .map(function (part) {
+        return part.raw;
+      })
+      .join('');
+    updateCalendarTitlePreview();
+  }
+
+  function renderCalendarTitleBuilder() {
+    const el = document.getElementById('org-cal-title-template');
+    const root = document.getElementById('cal-title-builder');
+    if (!el || !root) return;
+    const parts = parseCalendarTitleTemplate(el.value);
+    if (!parts.length) {
+      root.innerHTML = '<span class="muted small">まだ並びがありません。上のボタンを押して追加してください。</span>';
+      return;
+    }
+    root.innerHTML = '';
+    parts.forEach(function (part, idx) {
+      const chip = document.createElement('span');
+      chip.className = 'cal-title-builder-chip' + (part.isToken ? ' is-token' : ' is-text');
+      const label = document.createElement('span');
+      label.className = 'cal-title-builder-label';
+      label.textContent = part.isToken ? tokenLabel(part.raw) : (part.raw === ' — ' ? '—' : part.raw);
+      chip.appendChild(label);
+      const remove = document.createElement('button');
+      remove.type = 'button';
+      remove.className = 'cal-title-builder-remove';
+      remove.setAttribute('aria-label', 'この項目を削除');
+      remove.textContent = '×';
+      remove.addEventListener('click', function () {
+        removeCalendarTitleSegment(idx);
+      });
+      chip.appendChild(remove);
+      root.appendChild(chip);
+    });
+  }
+
   function updateCalendarTitlePreview() {
     const el = document.getElementById('org-cal-title-template');
     const wrap = document.getElementById('org-cal-title-preview-wrap');
@@ -323,6 +388,7 @@
     preview = preview.replace(/\s+/g, ' ').trim();
     out.textContent = preview || '—';
     wrap.hidden = false;
+    renderCalendarTitleBuilder();
   }
 
   function renderSummary(data) {
@@ -350,15 +416,7 @@
     card('予約区分', String((data.services || []).length) + ' 件');
     card('予約リンク', String((data.links || []).length) + ' 件');
     card('カレンダー認証', data.google_oauth_ready ? '設定済み' : '未設定');
-    const authHint = document.getElementById('calendar-auth-summary-hint');
-    if (authHint) {
-      authHint.textContent = data.google_oauth_ready
-        ? '担当ごとの連携・解除や認証状態の確認は「カレンダー認証」画面で管理します。'
-        : 'Google カレンダーと連携するには「カレンダー認証」画面で設定してください。';
-    }
-
-    document.getElementById('org-routing-mode').value = org.routing_mode || 'round_robin';
-    document.getElementById('org-auto-confirm').checked = !!org.auto_confirm;
+    document.getElementById('org-routing-mode').value = org.routing_mode || 'priority';
 
     const em = org.email_settings_json || {};
     document.getElementById('email-send-customer').checked = em.send_customer_confirmation !== false;
@@ -452,7 +510,6 @@
     setMsg('');
     const body = {
       routing_mode: document.getElementById('org-routing-mode').value,
-      auto_confirm: document.getElementById('org-auto-confirm').checked,
     };
     const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()), {
       method: 'PATCH',
@@ -501,8 +558,6 @@
     setTimeout(function () { setMsg(''); }, 2000);
     await loadSummary();
   });
-
-  document.getElementById('btn-summary').addEventListener('click', loadSummary);
 
   document.querySelectorAll('.cal-title-insert-btn').forEach(function (b) {
     b.addEventListener('click', function () {

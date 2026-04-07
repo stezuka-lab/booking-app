@@ -86,7 +86,7 @@ def meeting_kind_label_ja(booking: Booking) -> str:
         return "Zoom（オンライン）"
     if mp == "teams":
         return "Microsoft Teams（オンライン）"
-    return "会場・方法は店舗にお任せ／対面など（オンライン URL なし）"
+    return "会場・方法は担当からご案内します（オンライン URL なし）"
 
 
 def build_booking_confirmation_email_body(

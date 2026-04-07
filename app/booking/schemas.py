@@ -13,8 +13,8 @@ def validate_org_slug_value(v: str) -> str:
     t = v.strip().lower()
     if not _ORG_SLUG_RE.match(t):
         raise ValueError(
-            "組織 slug は URL 用の英小文字・数字・ハイフンのみです（例: demo-shop, admin-shop）。"
-            "「管理者」などの日本語の店舗名は「組織の表示名」に入力してください。"
+            "組織 slug は URL 用の英小文字・数字・ハイフンのみです（例: demo-team, admin-team）。"
+            "日本語名は「組織の表示名」に入力してください。"
         )
     if len(t) > 128:
         raise ValueError("slug が長すぎます")
@@ -79,7 +79,7 @@ class StaffCreate(BaseModel):
 class OrgCreate(BaseModel):
     name: str
     slug: str
-    routing_mode: str = "round_robin"
+    routing_mode: str = "priority"
 
     @field_validator("slug")
     @classmethod

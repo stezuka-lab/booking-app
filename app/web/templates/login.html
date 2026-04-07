@@ -3,8 +3,9 @@
 {% set nav = 'login' %}
 {% block content %}
 <div class="admin-console" style="max-width: 28rem; margin: 2rem auto">
-  <h1 class="page-title">ログイン</h1>
-  <p class="page-lead muted">ユーザーIDとパスワードでログインします。</p>
+  <span class="page-kicker">サインイン</span>
+  <h1 class="page-title">管理画面にログイン</h1>
+  <p class="page-lead muted">ユーザーIDとパスワードを入力してください。Enter キーでもそのまま進めます。</p>
   <div class="panel admin-section">
     <div class="admin-field">
       <label for="login-user">ユーザーID</label>
@@ -27,7 +28,7 @@
 (function () {
   const next = {{ login_next | tojson }};
   const msg = document.getElementById('login-msg');
-  document.getElementById('btn-login').addEventListener('click', async function () {
+  async function submitLogin() {
     msg.textContent = '';
     const u = document.getElementById('login-user').value.trim();
     const p = document.getElementById('login-pass').value;
@@ -43,6 +44,17 @@
       return;
     }
     window.location.href = next || '/app';
+  }
+
+  document.getElementById('btn-login').addEventListener('click', submitLogin);
+  ['login-user', 'login-pass'].forEach(function (id) {
+    var el = document.getElementById(id);
+    if (!el) return;
+    el.addEventListener('keydown', function (ev) {
+      if (ev.key !== 'Enter') return;
+      ev.preventDefault();
+      submitLogin();
+    });
   });
 })();
 </script>

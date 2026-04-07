@@ -82,10 +82,17 @@ from app.booking.schemas import (
 )
 from app.config import Settings, get_settings
 from app.db import get_session_factory
+from app.security.crypto import decrypt_secret, encrypt_secret
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["booking"])
+
+
+def _staff_google_refresh_token(staff: StaffMember | None, settings: Settings) -> str | None:
+    if staff is None:
+        return None
+    return decrypt_secret(getattr(staff, "google_refresh_token", None), settings)
 
 
 async def get_db() -> AsyncSession:
@@ -265,7 +272,7 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
         if not fs or fs.org_id != org.id:
             raise HTTPException(
                 404,
-                "この予約リンクに紐づく予約区分が見つかりません。店舗の設定で予約区分を確認してください。",
+                "この予約リンクに紐づく予約区分が見つかりません。設定で予約区分を確認してください。",
             )
         fixed_service = {
             "id": fs.id,
@@ -367,7 +374,7 @@ async def link_availability(
             defaults, "duration", BOOKING_SLOT_STEP_MINUTES
         )
     oauth_on = settings.is_google_oauth_configured()
-    linked_n = sum(1 for s in staff_list if (s.google_refresh_token or "").strip())
+    linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
     unlinked_fallback = bool(oauth_on and staff_list and linked_n == 0)
     return {
         "slots": slots,
@@ -444,7 +451,7 @@ async def _create_booking_from_body(
         if local_booking_date > last_ok:
             raise HTTPException(
                 400,
-                "この日付は予約受付の範囲外です（店舗の「先行予約の上限日数」の設定）。",
+                "この日付は予約受付の範囲外です（先行予約の上限日数の設定）。",
             )
     if link_cutoff_date is not None and local_booking_date > link_cutoff_date:
         raise HTTPException(
@@ -454,7 +461,7 @@ async def _create_booking_from_body(
     if day_is_blocked_for_booking(local_booking_date, defaults_avail):
         raise HTTPException(
             400,
-            "この日は予約を受け付けていません（店舗の土日・祝日の設定をご確認ください）",
+            "この日は予約を受け付けていません（土日・祝日設定をご確認ください）",
         )
     if local_booking_date in link_lead_blocked_dates(org, link):
         raise HTTPException(
@@ -672,7 +679,11 @@ async def book_appointment(
     db: DbSession,
     settings: SettingsDep,
 ) -> dict[str, Any]:
-    check_public_booking_rate_limit(request)
+    check_public_booking_rate_limit(
+        request,
+        max_requests=max(1, int(settings.booking_public_rate_limit_max_requests or 40)),
+        window_sec=max(60, int(settings.booking_public_rate_limit_window_sec or 3600)),
+    )
     b, staff, customer_cal, booking_link_title, post_booking_message = await _create_booking_from_body(token, body, db, settings)
     await db.commit()
     org = await db.get(BookingOrg, b.org_id)
@@ -751,7 +762,7 @@ async def _finalize_confirmed_booking(
     cal_desc_lines.append(f"担当: {(staff.name or '').strip()}")
     cal_desc_lines.append(f"変更・キャンセル: {manage_url}")
     ev = await create_event_for_booking(
-        staff.google_refresh_token,
+        _staff_google_refresh_token(staff, settings),
         staff.google_calendar_id,
         summary,
         b.start_utc.isoformat(),
@@ -844,7 +855,7 @@ async def _delete_staff_calendar_event_if_present(
     if not event_id or not staff:
         return False
     await delete_event_for_booking(
-        staff.google_refresh_token,
+        _staff_google_refresh_token(staff, settings),
         staff.google_calendar_id,
         event_id,
         settings,
@@ -862,7 +873,11 @@ async def book_with_files(
     payload: str = Form(...),
     files: list[UploadFile] = File(default=[]),
 ) -> dict[str, Any]:
-    check_public_booking_rate_limit(request)
+    check_public_booking_rate_limit(
+        request,
+        max_requests=max(1, int(settings.booking_public_rate_limit_max_requests or 40)),
+        window_sec=max(60, int(settings.booking_public_rate_limit_window_sec or 3600)),
+    )
     data = json.loads(payload)
     data["link_token"] = token
     body = BookingCreate.model_validate(data)
@@ -970,7 +985,7 @@ async def manage_reschedule(
     if not staff:
         raise HTTPException(
             400,
-            "担当が削除されているため、オンラインでの変更はできません。店舗へお問い合わせください。",
+            "担当が削除されているため、オンラインでの変更はできません。担当者へお問い合わせください。",
         )
     new_start = body.new_start_utc
     if new_start.tzinfo is None:
@@ -980,7 +995,7 @@ async def manage_reschedule(
     if day_is_blocked_for_booking(org_local_date_for_utc_instant(new_start, org), defaults_avail):
         raise HTTPException(
             400,
-            "この日は予約を受け付けていません（店舗の土日祝・休業設定）",
+            "この日は予約を受け付けていません（土日祝・休業設定）",
         )
     ws, we = org_calendar_day_bounds_utc(new_start, org)
     _pad = timedelta(days=1)
@@ -1009,7 +1024,7 @@ async def manage_reschedule(
     b.end_utc = new_end
     if b.status == "confirmed" and b.google_event_id:
         await patch_event_for_booking(
-            staff.google_refresh_token,
+            _staff_google_refresh_token(staff, settings),
             staff.google_calendar_id,
             b.google_event_id,
             b.start_utc.isoformat(),
@@ -1198,7 +1213,7 @@ async def admin_org_summary(
                 "priority_rank": s.priority_rank,
                 "active": s.active,
                 "line_user_id": s.line_user_id,
-                "has_google": bool(s.google_refresh_token),
+                "has_google": bool(_staff_google_refresh_token(s, settings)),
                 "google_calendar_id": s.google_calendar_id or "",
                 "google_profile_email": s.google_profile_email,
                 "google_profile_name": s.google_profile_name,
@@ -1360,7 +1375,7 @@ async def admin_org_calendar(
                 "id": s.id,
                 "name": s.name,
                 "email": s.email,
-                "has_google": bool(s.google_refresh_token),
+                "has_google": bool(_staff_google_refresh_token(s, settings)),
                 "active": s.active,
             }
             for s in staff_list
@@ -1792,7 +1807,7 @@ async def admin_approve_booking(
     if not staff:
         raise HTTPException(
             400,
-            "担当が削除されているため、管理画面からの確定処理ができません。店舗で対応してください。",
+            "担当が削除されているため、管理画面からの確定処理ができません。担当者側で対応してください。",
         )
     b.status = "confirmed"
     b.approved_at = datetime.now(timezone.utc)
@@ -2008,8 +2023,8 @@ async def oauth_google_callback(
     new_rt = data.get("refresh_token")
     access_token = (data.get("access_token") or "").strip()
     if new_rt:
-        staff.google_refresh_token = new_rt
-    elif not staff.google_refresh_token:
+        staff.google_refresh_token = encrypt_secret(new_rt, settings)
+    elif not _staff_google_refresh_token(staff, settings):
         logger.warning(
             "OAuth response had no refresh_token; user may need to revoke app access and reconnect"
         )
