@@ -30,6 +30,14 @@ def booking_meeting_url_value(booking: Booking, settings: Settings) -> str:
     return (decrypt_secret(getattr(booking, "meeting_url", None), settings) or "").strip()
 
 
+def booking_customer_name_value(booking: Booking, settings: Settings) -> str:
+    return (decrypt_secret(getattr(booking, "customer_name", None), settings) or "").strip()
+
+
+def booking_customer_email_value(booking: Booking, settings: Settings) -> str:
+    return (decrypt_secret(getattr(booking, "customer_email", None), settings) or "").strip()
+
+
 def merge_email_settings(raw: Any) -> dict[str, Any]:
     out = dict(DEFAULT_EMAIL_SETTINGS)
     if isinstance(raw, dict):
@@ -150,8 +158,10 @@ def build_staff_notification_email_body(
 ) -> tuple[str, str]:
     link_title = (booking_link_title or "").strip() or "予約"
     meet_url = booking_meeting_url_value(booking, settings)
+    customer_name = booking_customer_name_value(booking, settings)
+    customer_email = booking_customer_email_value(booking, settings)
     staff_lines = [
-        f"新規予約: {booking.customer_name} <{booking.customer_email}>",
+        f"新規予約: {customer_name} <{customer_email}>",
         f"予約リンク: {link_title}",
         f"日時: {format_booking_datetime_range_ja(org, booking.start_utc, booking.end_utc)}",
     ]
@@ -163,7 +173,7 @@ def build_staff_notification_email_body(
         staff_lines.append("")
         staff_lines.append(extra)
     staff_body = "\n".join(staff_lines)
-    staff_subject = f"[予約通知] {booking.customer_name} {link_title}"
+    staff_subject = f"[予約通知] {customer_name} {link_title}"
     return staff_subject, staff_body
 
 
@@ -220,7 +230,7 @@ async def send_customer_confirmation_email(
         post_booking_message=post_booking_message,
     )
     if dry_run:
-        logger.info("DRY-RUN customer booking email customer=%s", booking.customer_email)
+        logger.info("DRY-RUN customer booking email customer=%s", booking_customer_email_value(booking, settings))
         return True, None
     import asyncio
 
@@ -228,7 +238,7 @@ async def send_customer_confirmation_email(
         await asyncio.to_thread(
             _send_sync,
             settings,
-            [booking.customer_email],
+            [booking_customer_email_value(booking, settings)],
             subject,
             body,
         )

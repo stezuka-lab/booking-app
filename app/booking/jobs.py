@@ -11,6 +11,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.booking.db_models import Booking, BookingOrg, BookingService, CustomerProfile, StaffMember
 from app.booking.email_booking import (
     EMAIL_DISABLED_REASON,
+    booking_customer_email_value,
+    booking_customer_name_value,
     booking_meeting_url_value,
     send_customer_confirmation_email,
     send_simple_mail,
@@ -91,6 +93,8 @@ async def _send_reminders(session: AsyncSession, settings: Settings) -> None:
         start = b.start_utc
         if start.tzinfo is None:
             start = start.replace(tzinfo=timezone.utc)
+        customer_name = booking_customer_name_value(b, settings)
+        customer_email = booking_customer_email_value(b, settings)
         staff = await session.get(StaffMember, b.staff_id) if b.staff_id is not None else None
         base = settings.public_base_url_value()
         url = f"{base}/app/manage/{b.manage_token}"
@@ -105,7 +109,7 @@ async def _send_reminders(session: AsyncSession, settings: Settings) -> None:
                 body += f"会議 URL: {meeting_url}\n"
             sent = await send_simple_mail(
                 settings,
-                [b.customer_email],
+                [customer_email],
                 f"[リマインド] 予約 {start.date()}",
                 body,
                 dry_run=settings.actions_dry_run,
@@ -122,7 +126,7 @@ async def _send_reminders(session: AsyncSession, settings: Settings) -> None:
             body = f"もうすぐ予約です（約{second_h}時間前）。\n{start.isoformat()}\n{url}\n"
             sent = await send_simple_mail(
                 settings,
-                [b.customer_email],
+                [customer_email],
                 f"[リマインド·直前] 予約 {start.date()}",
                 body,
                 dry_run=settings.actions_dry_run,
@@ -140,8 +144,8 @@ async def _send_reminders(session: AsyncSession, settings: Settings) -> None:
             sent = await send_simple_mail(
                 settings,
                 [staff.email],
-                f"[担当リマインド] {b.customer_name} {start.date()}",
-                f"{b.customer_name} / {b.customer_email}\n{start.isoformat()}\n{url}",
+                f"[担当リマインド] {customer_name} {start.date()}",
+                f"{customer_name} / {customer_email}\n{start.isoformat()}\n{url}",
                 dry_run=settings.actions_dry_run,
             )
             if sent:
@@ -158,8 +162,8 @@ async def _send_reminders(session: AsyncSession, settings: Settings) -> None:
             sent = await send_simple_mail(
                 settings,
                 [staff.email],
-                f"[担当·直前] {b.customer_name} {start.date()}",
-                f"約{second_h}時間後: {b.customer_name}\n{start.isoformat()}\n{url}",
+                f"[担当·直前] {customer_name} {start.date()}",
+                f"約{second_h}時間後: {customer_name}\n{start.isoformat()}\n{url}",
                 dry_run=settings.actions_dry_run,
             )
             if sent:
@@ -168,7 +172,7 @@ async def _send_reminders(session: AsyncSession, settings: Settings) -> None:
                 await send_line_push(
                     settings,
                     staff.line_user_id.strip(),
-                    f"[リマインド·直前] {b.customer_name}\n{start.isoformat()}\n{url}",
+                    f"[リマインド·直前] {customer_name}\n{start.isoformat()}\n{url}",
                 )
 
 

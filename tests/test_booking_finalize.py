@@ -12,6 +12,7 @@ from app.booking.router import (
 )
 from app.booking.email_booking import build_booking_confirmation_email_body
 from app.config import get_settings
+from app.security.crypto import encrypt_secret
 
 
 def test_booking_endpoint_survives_finalize_failure(client, monkeypatch) -> None:
@@ -247,3 +248,71 @@ def test_booking_confirmation_email_body_includes_post_booking_message() -> None
     )
 
     assert "開始5分前までにご準備ください。" in body
+
+
+def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    captured: dict[str, object] = {}
+
+    class DummySession:
+        async def flush(self) -> None:
+            return None
+
+    async def fake_create_event_for_booking(*args, **kwargs):
+        captured["description"] = kwargs.get("description")
+        return {"id": "evt-enc"}
+
+    async def fake_upsert_customer(*args, **kwargs):
+        captured["upsert_args"] = args
+        return None
+
+    async def fake_send_booking_emails(*args, **kwargs):
+        return {"customer": True, "staff": True, "customer_error": None, "staff_error": None}
+
+    async def fake_notify_staff_line_booking(*args, **kwargs):
+        captured["line_customer_name"] = kwargs.get("customer_name")
+        return {"ok": True}
+
+    monkeypatch.setattr(booking_router, "create_event_for_booking", fake_create_event_for_booking)
+    monkeypatch.setattr(booking_router, "_upsert_customer", fake_upsert_customer)
+    monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
+    monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
+
+    org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
+    staff = StaffMember(
+        org_id=1,
+        name="担当A",
+        email="staff-a@example.com",
+        google_refresh_token="refresh-token",
+        zoom_meeting_url=encrypt_secret("https://zoom.example/staff-a", settings),
+    )
+    booking = Booking(
+        org_id=1,
+        staff_id=1,
+        service_id=1,
+        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name=encrypt_secret("Encrypted Customer", settings),
+        customer_email=encrypt_secret("encrypted@example.com", settings),
+        meeting_provider="zoom",
+        manage_token="manage-token",
+    )
+
+    asyncio.run(
+        _finalize_confirmed_booking(
+            DummySession(),
+            settings,
+            booking,
+            staff,
+            org,
+            "初回相談",
+            booking_link_title="初回予約リンク",
+        )
+    )
+
+    assert "予約者: Encrypted Customer" in str(captured["description"])
+    assert "メール: encrypted@example.com" in str(captured["description"])
+    assert captured["line_customer_name"] == "Encrypted Customer"

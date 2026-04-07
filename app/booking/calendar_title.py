@@ -6,6 +6,9 @@ import logging
 import re
 from typing import TYPE_CHECKING
 
+from app.config import get_settings
+from app.security.crypto import decrypt_secret
+
 if TYPE_CHECKING:
     from app.booking.db_models import Booking, BookingOrg
 
@@ -26,6 +29,7 @@ def format_calendar_event_title(
     defaults = org.availability_defaults_json or {}
     raw = (defaults.get("calendar_title_template") or "").strip()
     tpl = raw or DEFAULT_CALENDAR_TITLE_TEMPLATE
+    settings = get_settings()
 
     fa = getattr(booking, "form_answers_json", None)
     fa_dict = fa if isinstance(fa, dict) else {}
@@ -33,7 +37,7 @@ def format_calendar_event_title(
     note_legacy = (getattr(booking, "calendar_title_note", None) or "").strip()
     mapping = {
         "service": (service_name or "").strip(),
-        "name": (booking.customer_name or "").strip(),
+        "name": (decrypt_secret(getattr(booking, "customer_name", None), settings) or "").strip(),
         "company": (getattr(booking, "company_name", None) or "").strip(),
         "phone": (booking.customer_phone or "").strip(),
         "customer_number": cust_no,

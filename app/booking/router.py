@@ -102,10 +102,28 @@ def _staff_google_profile_email(staff: StaffMember | None, settings: Settings) -
     return (decrypt_secret(getattr(staff, "google_profile_email", None), settings) or "").strip()
 
 
+def _staff_zoom_meeting_url(staff: StaffMember | None, settings: Settings) -> str:
+    if staff is None:
+        return ""
+    return (decrypt_secret(getattr(staff, "zoom_meeting_url", None), settings) or "").strip()
+
+
 def _booking_meeting_url(booking: Booking | None, settings: Settings) -> str:
     if booking is None:
         return ""
     return (decrypt_secret(getattr(booking, "meeting_url", None), settings) or "").strip()
+
+
+def _booking_customer_name(booking: Booking | None, settings: Settings) -> str:
+    if booking is None:
+        return ""
+    return (decrypt_secret(getattr(booking, "customer_name", None), settings) or "").strip()
+
+
+def _booking_customer_email(booking: Booking | None, settings: Settings) -> str:
+    if booking is None:
+        return ""
+    return (decrypt_secret(getattr(booking, "customer_email", None), settings) or "").strip()
 
 
 async def get_db() -> AsyncSession:
@@ -598,8 +616,8 @@ async def _create_booking_from_body(
         start_utc=start,
         end_utc=end,
         status=status,
-        customer_name=body.customer_name,
-        customer_email=str(body.customer_email),
+        customer_name=encrypt_secret(body.customer_name, settings) or body.customer_name,
+        customer_email=encrypt_secret(str(body.customer_email), settings) or str(body.customer_email),
         booking_link_title_snapshot=(link.title or "予約"),
         customer_phone=body.customer_phone,
         company_name=(body.company_name or "").strip() or None,
@@ -746,11 +764,13 @@ async def _finalize_confirmed_booking(
 ) -> bool:
     """カレンダー反映・会議 URL・メール・CRM。顧客の Google カレンダー追加に成功したら True。"""
     summary = format_calendar_event_title(org, service_name, b)
+    customer_name = _booking_customer_name(b, settings)
+    customer_email = _booking_customer_email(b, settings)
     meet = b.meeting_provider == "meet"
     manage_url = f"{settings.public_base_url_value()}/app/manage/{b.manage_token}"
     meeting_url = _booking_meeting_url(b, settings)
     if b.meeting_provider == "zoom" and not meeting_url:
-        sz = (staff.zoom_meeting_url or "").strip()
+        sz = _staff_zoom_meeting_url(staff, settings)
         if sz:
             meeting_url = sz
         elif settings.zoom_default_meeting_url:
@@ -768,8 +788,8 @@ async def _finalize_confirmed_booking(
     if (post_booking_message or "").strip():
         cal_desc_lines.append(f"ご案内: {(post_booking_message or '').strip()}")
     cal_desc_lines.append(f"予約リンク: {booking_link_title}")
-    cal_desc_lines.append(f"予約者: {(b.customer_name or '').strip()}")
-    cal_desc_lines.append(f"メール: {(b.customer_email or '').strip()}")
+    cal_desc_lines.append(f"予約者: {customer_name}")
+    cal_desc_lines.append(f"メール: {customer_email}")
     if cust_no:
         cal_desc_lines.append(f"顧客番号: {cust_no}")
     if (b.company_name or "").strip():
@@ -797,7 +817,7 @@ async def _finalize_confirmed_booking(
                     meeting_url = ep["uri"]
                     b.meeting_url = encrypt_secret(meeting_url, settings)
                     break
-    await _upsert_customer(session, org.id, b.customer_email, b.customer_name, b.start_utc)
+    await _upsert_customer(session, org.id, customer_email, customer_name, b.start_utc)
     await session.flush()
 
     customer_cal_ok = False
@@ -809,8 +829,8 @@ async def _finalize_confirmed_booking(
         if (post_booking_message or "").strip():
             desc_lines.append(f"ご案内: {(post_booking_message or '').strip()}")
         desc_lines.append(f"予約リンク: {booking_link_title}")
-        desc_lines.append(f"予約者: {(b.customer_name or '').strip()}")
-        desc_lines.append(f"メール: {(b.customer_email or '').strip()}")
+        desc_lines.append(f"予約者: {customer_name}")
+        desc_lines.append(f"メール: {customer_email}")
         if cust_no:
             desc_lines.append(f"顧客番号: {cust_no}")
         if (b.company_name or "").strip():
@@ -855,7 +875,7 @@ async def _finalize_confirmed_booking(
     await notify_staff_line_booking(
         settings,
         staff_line_user_id=staff.line_user_id,
-        customer_name=b.customer_name,
+        customer_name=customer_name,
         start_iso=b.start_utc.isoformat(),
         manage_hint=manage_url,
     )
@@ -947,7 +967,7 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
             "status": b.status,
             "start_utc": b.start_utc.isoformat(),
             "end_utc": b.end_utc.isoformat(),
-            "customer_name": b.customer_name,
+            "customer_name": _booking_customer_name(b, settings),
             "meeting_url": _booking_meeting_url(b, settings),
         },
         "staff": {"name": staff_name},
@@ -1233,7 +1253,7 @@ async def admin_org_summary(
                 "google_calendar_id": s.google_calendar_id or "",
                 "google_profile_email": _staff_google_profile_email(s, settings),
                 "google_profile_name": s.google_profile_name,
-                "zoom_meeting_url": s.zoom_meeting_url or "",
+                "zoom_meeting_url": _staff_zoom_meeting_url(s, settings),
             }
             for s in staff
         ],
@@ -1304,8 +1324,8 @@ async def admin_list_bookings(
                 "status": b.status,
                 "start_utc": b.start_utc.isoformat(),
                 "end_utc": b.end_utc.isoformat(),
-                "customer_name": b.customer_name,
-                "customer_email": b.customer_email,
+                "customer_name": _booking_customer_name(b, settings),
+                "customer_email": _booking_customer_email(b, settings),
                 "booking_link_title_snapshot": b.booking_link_title_snapshot,
                 "staff_id": b.staff_id,
                 "staff_display_name": b.staff_display_name,
@@ -1366,15 +1386,17 @@ async def admin_org_calendar(
         svc = await db.get(BookingService, b.service_id) if b.service_id else None
         svc_name = svc.name if svc else "予約"
         staff_label = (st.name if st else None) or (b.staff_display_name or "") or "（削除済み担当）"
+        customer_name = _booking_customer_name(b, settings)
+        customer_email = _booking_customer_email(b, settings)
         events.append(
             {
                 "id": b.id,
                 "staff_id": b.staff_id,
                 "staff_name": staff_label,
-                "customer_name": b.customer_name,
-                "customer_email": b.customer_email,
+                "customer_name": customer_name,
+                "customer_email": customer_email,
                 "service_name": svc_name,
-                "title": f"{svc_name} — {b.customer_name}",
+                "title": f"{svc_name} — {customer_name}",
                 "start_utc": b.start_utc.isoformat(),
                 "end_utc": b.end_utc.isoformat(),
                 "status": b.status,
@@ -1421,7 +1443,7 @@ async def admin_add_staff(
         email=email,
         priority_rank=body.priority_rank,
         google_calendar_id=body.google_calendar_id,
-        zoom_meeting_url=body.zoom_meeting_url,
+        zoom_meeting_url=encrypt_secret(body.zoom_meeting_url, settings) if body.zoom_meeting_url else None,
         line_user_id=body.line_user_id,
     )
     db.add(s)
@@ -1467,7 +1489,7 @@ async def admin_patch_staff(
     if body.line_user_id is not None:
         s.line_user_id = body.line_user_id or None
     if body.zoom_meeting_url is not None:
-        s.zoom_meeting_url = body.zoom_meeting_url.strip() or None
+        s.zoom_meeting_url = encrypt_secret(body.zoom_meeting_url.strip(), settings) if body.zoom_meeting_url.strip() else None
     if body.active is not None:
         s.active = body.active
     if body.clear_google_oauth is True:
@@ -1899,7 +1921,7 @@ async def admin_approve_booking(
         org_slug=org.slug,
         target_type="booking",
         target_id=b.id,
-        detail={"customer_name": b.customer_name, "staff_id": b.staff_id},
+        detail={"customer_name": _booking_customer_name(b, settings), "staff_id": b.staff_id},
     )
     await db.commit()
     return {"ok": True, "status": b.status}
@@ -1930,7 +1952,7 @@ async def admin_reject_booking(
         org_slug=org.slug,
         target_type="booking",
         target_id=b.id,
-        detail={"customer_name": b.customer_name, "staff_id": b.staff_id},
+        detail={"customer_name": _booking_customer_name(b, settings), "staff_id": b.staff_id},
     )
     await db.commit()
     return {"ok": True, "status": b.status}

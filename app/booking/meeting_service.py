@@ -4,6 +4,7 @@ import secrets
 from typing import TYPE_CHECKING
 
 from app.config import Settings
+from app.security.crypto import decrypt_secret
 
 if TYPE_CHECKING:
     from app.booking.db_models import StaffMember
@@ -11,7 +12,7 @@ if TYPE_CHECKING:
 
 def resolve_meeting_provider_for_staff(staff: "StaffMember", settings: Settings) -> str:
     """顧客が会議手段を選ばない場合: 担当 Zoom → 既定 Zoom → Teams 既定 → なし。"""
-    if (getattr(staff, "zoom_meeting_url", None) or "").strip():
+    if (decrypt_secret(getattr(staff, "zoom_meeting_url", None), settings) or "").strip():
         return "zoom"
     if (getattr(settings, "zoom_default_meeting_url", None) or "").strip():
         return "zoom"
@@ -27,7 +28,7 @@ def build_meeting_url(
 ) -> tuple[str, str]:
     """会議 URL と保存用プロバイダ名を返す。Meet はカレンダー作成時に付与する前提でここでは none。"""
     p = (provider or "none").lower()
-    staff_zoom = (getattr(staff, "zoom_meeting_url", None) or "").strip() if staff else ""
+    staff_zoom = (decrypt_secret(getattr(staff, "zoom_meeting_url", None), settings) or "").strip() if staff else ""
     if p == "zoom":
         if staff_zoom:
             return staff_zoom, "zoom"
