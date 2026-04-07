@@ -22,6 +22,7 @@ from app.auth.rate_limit import (
     record_password_reset_attempt,
 )
 from app.auth.schemas import (
+    AdminDeleteUserBody,
     AdminSetPasswordBody,
     AdminUserCreate,
     AdminUserOrgPatch,
@@ -128,6 +129,11 @@ async def _repair_default_org_for_user(db: AsyncSession, user: AppUser) -> None:
     )
     await db.commit()
     await db.refresh(user)
+
+
+def _verify_admin_password_or_403(actor: AppUser, current_password: str) -> None:
+    if not verify_password(current_password or "", actor.password_hash):
+        raise HTTPException(403, "管理者パスワードが正しくありません")
 
 
 async def _maybe_delete_unshared_org(
@@ -478,12 +484,14 @@ async def admin_patch_user_org(
 @router.delete("/api/auth/admin/users/{user_id}")
 async def admin_delete_user(
     user_id: int,
+    body: AdminDeleteUserBody,
     request: Request,
     db: AuthDb,
     settings: Settings = Depends(get_settings),
     x_admin_secret: str | None = Header(None),
 ) -> dict:
     actor = await require_session_admin_only(request, settings, db, x_admin_secret)
+    _verify_admin_password_or_403(actor, body.current_password)
     if user_id == actor.id:
         raise HTTPException(400, "自分自身は削除できません")
     u = await db.get(AppUser, user_id)

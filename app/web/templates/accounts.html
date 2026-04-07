@@ -336,7 +336,18 @@
       b2.textContent = '削除';
       b2.addEventListener('click', async function () {
         if (!window.confirm('ユーザー「' + u.username + '」を削除しますか？')) return;
-        const r3 = await fetch('/api/auth/admin/users/' + u.id, { method: 'DELETE', credentials: 'same-origin' });
+        const adminPw = window.prompt('削除を確定するため、現在ログイン中の管理者パスワードを入力してください。');
+        if (adminPw == null) return;
+        if (!adminPw) {
+          alert('管理者パスワードを入力してください。');
+          return;
+        }
+        const r3 = await fetch('/api/auth/admin/users/' + u.id, {
+          method: 'DELETE',
+          credentials: 'same-origin',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ current_password: adminPw }),
+        });
         const j3 = await r3.json().catch(function () {
           return {};
         });

@@ -13,7 +13,11 @@ from app.auth.router import (
     _default_org_assignment_for_user,
     _materialize_org_assignment,
     _maybe_delete_unshared_org,
+    _verify_admin_password_or_403,
 )
+from app.auth.models import AppUser
+from app.auth.passwords import hash_password
+from fastapi import HTTPException
 
 
 def test_default_org_availability_defaults_match_expected() -> None:
@@ -150,3 +154,19 @@ def test_maybe_delete_unshared_org_keeps_shared_org() -> None:
     deleted = asyncio.run(_maybe_delete_unshared_org(DummyDb(), "shared-org", 10))
 
     assert deleted is False
+
+
+def test_verify_admin_password_or_403_accepts_correct_password() -> None:
+    actor = AppUser(username="admin", password_hash=hash_password("correct-password"), role="admin")
+
+    _verify_admin_password_or_403(actor, "correct-password")
+
+
+def test_verify_admin_password_or_403_rejects_wrong_password() -> None:
+    actor = AppUser(username="admin", password_hash=hash_password("correct-password"), role="admin")
+
+    try:
+        _verify_admin_password_or_403(actor, "wrong-password")
+        raise AssertionError("expected HTTPException")
+    except HTTPException as exc:
+        assert exc.status_code == 403
