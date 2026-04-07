@@ -534,7 +534,11 @@ async def link_availability(
         fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
         _gpad = timedelta(hours=2)
-        gmap = await _load_google_busy_map(staff_list, fts - _gpad, tts + _gpad, settings)
+        try:
+            gmap = await _load_google_busy_map(staff_list, fts - _gpad, tts + _gpad, settings)
+        except Exception:
+            logger.exception("Public link Google busy load failed: token=%s org_id=%s", token, org.id)
+            gmap = {}
         lead_blocked = link_lead_blocked_dates(org, link)
         slots, slot_generation_step = await available_slots_for_link(
             db,
@@ -553,7 +557,11 @@ async def link_availability(
             max_advance_days_override=link_max_adv_days,
             bookable_until_date_override=link_cutoff_date,
         )
-        busy_union = await busy_intervals_union_for_link(db, staff_list, from_ts, to_ts, gmap)
+        try:
+            busy_union = await busy_intervals_union_for_link(db, staff_list, from_ts, to_ts, gmap)
+        except Exception:
+            logger.exception("Public link busy union failed: token=%s org_id=%s", token, org.id)
+            busy_union = []
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
         unlinked_fallback = bool(oauth_on and staff_list and linked_n == 0)

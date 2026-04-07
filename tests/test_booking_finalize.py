@@ -59,6 +59,35 @@ def test_booking_endpoint_survives_finalize_failure(client, monkeypatch) -> None
     assert body["customer_calendar_added"] is False
 
 
+def test_public_availability_survives_busy_union_failure(client, monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    token = (health.json().get("booking_demo") or {}).get("token")
+    assert token
+
+    async def boom(*args, **kwargs):
+        raise RuntimeError("busy-union boom")
+
+    monkeypatch.setattr(booking_router, "busy_intervals_union_for_link", boom)
+
+    now = datetime.now(timezone.utc)
+    response = client.get(
+        f"/api/booking/links/{token}/availability",
+        params={
+            "from_ts": now.isoformat(),
+            "to_ts": (now + timedelta(days=7)).isoformat(),
+            "service_id": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert "busy_intervals" in body
+    assert body.get("availability_error") in (None, "")
+
+
 def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch) -> None:
     import app.booking.router as booking_router
 
