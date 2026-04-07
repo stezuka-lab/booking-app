@@ -43,6 +43,7 @@ from app.security.audit import write_audit_log
 
 router = APIRouter(tags=["auth"])
 _ORG_SLUG_SANITIZE_RE = re.compile(r"[^a-z0-9]+")
+_LEGACY_DEMO_ORG_SLUG = "demo-shop"
 
 
 async def _session_db() -> AsyncSession:
@@ -114,6 +115,21 @@ async def _default_org_assignment_for_user(
     return out
 
 
+async def _repair_default_org_for_user(db: AsyncSession, user: AppUser) -> None:
+    if user.role == "admin":
+        return
+    current_slug = (user.default_org_slug or "").strip()
+    if current_slug and current_slug != _LEGACY_DEMO_ORG_SLUG:
+        return
+    user.default_org_slug = await _default_org_assignment_for_user(
+        db,
+        user.username,
+        user.display_name,
+    )
+    await db.commit()
+    await db.refresh(user)
+
+
 @router.post("/api/auth/login")
 async def login(
     request: Request,
@@ -144,6 +160,7 @@ async def login(
         )
         raise HTTPException(401, "ユーザーIDまたはパスワードが正しくありません")
     clear_login_failures(request, username)
+    await _repair_default_org_for_user(db, u)
     request.session["user_id"] = u.id
     return {
         "ok": True,
@@ -168,6 +185,7 @@ async def me(request: Request, db: AuthDb) -> dict:
     u = await get_current_app_user(request, db)
     if not u:
         return {"authenticated": False}
+    await _repair_default_org_for_user(db, u)
     default_org_name: str | None = None
     if u.default_org_slug:
         org_row = await db.scalar(select(BookingOrg).where(BookingOrg.slug == u.default_org_slug))
