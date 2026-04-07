@@ -35,7 +35,6 @@
   <footer class="app-footer">
     <span>予約デスク v{{ version }}</span>
   </footer>
-  {% block scripts %}{% endblock %}
   <script>
   window.__APP_VIEWER__ = {{ (app_viewer if app_viewer is defined else {'authenticated': False, 'user': None}) | tojson }};
   </script>
@@ -54,6 +53,7 @@
     };
   })();
   </script>
+  {% block scripts %}{% endblock %}
   <script>
   (function () {
     var el = document.getElementById('auth-nav-slot');
