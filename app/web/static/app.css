@@ -1898,6 +1898,20 @@ body {
   align-items: flex-end;
 }
 
+.section-actions {
+  display: flex;
+  justify-content: flex-start;
+  align-items: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+  padding-top: 0.9rem;
+  border-top: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.section-actions .btn {
+  min-width: 10rem;
+}
+
 .admin-input-sm {
   width: 6.5rem;
   max-width: 100%;

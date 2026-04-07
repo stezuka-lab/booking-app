@@ -45,9 +45,9 @@
         <p class="muted small">1枠の長さです。30 や 60 などで入力します。</p>
         <input type="number" id="new-svc-dur" min="5" max="480" step="5" value="30" class="admin-input-sm" />
       </div>
-      <div class="admin-field cal-actions">
-        <button type="button" class="btn primary" id="btn-add-service">区分を追加</button>
-      </div>
+    </div>
+    <div class="section-actions">
+      <button type="button" class="btn primary" id="btn-add-service">区分を追加</button>
     </div>
   </section>
 
@@ -105,7 +105,9 @@
       <p class="muted small">予約完了画面と確認メールに表示します。次の案内や補足があれば入力します。</p>
       <textarea id="new-link-post-booking-message" class="admin-input-wide" rows="4" placeholder="例: 担当より事前確認が必要な場合は別途ご連絡します。"></textarea>
     </div>
-    <button type="button" class="btn primary" id="btn-create-link">専用リンクを発行</button>
+    <div class="section-actions">
+      <button type="button" class="btn primary" id="btn-create-link">専用リンクを発行</button>
+    </div>
   </section>
 
   <section class="panel admin-section" id="links-panel" hidden>
