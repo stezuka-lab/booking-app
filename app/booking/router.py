@@ -480,79 +480,101 @@ async def link_availability(
     service = await db.get(BookingService, effective_sid) if effective_sid else None
     if effective_sid and (not service or service.org_id != org.id):
         raise HTTPException(400, "invalid service")
-    staff_ids = list(json_list_or_empty(link.staff_ids_json))
-    link_priority_overrides = _normalize_link_priority_overrides(
-        getattr(link, "staff_priority_overrides_json", None),
-        staff_ids,
-    )
-    link_buf_min = link_buffer_minutes(link, org, settings)
+    defaults = json_object_or_empty(org.availability_defaults_json)
+    buf_min = link_buffer_minutes(link, org, settings)
     link_max_adv_days = link_max_advance_booking_days(link, org)
     link_cutoff_date = link_bookable_until_date(link)
-    staff_list = await eligible_staff(db, org, staff_ids, service, settings)
-    fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
-    tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
-    _gpad = timedelta(hours=2)
-    gmap = await _load_google_busy_map(staff_list, fts - _gpad, tts + _gpad, settings)
-    lead_blocked = link_lead_blocked_dates(org, link)
-    slots, slot_generation_step = await available_slots_for_link(
-        db,
-        org,
-        staff_ids,
-        service,
-        from_ts,
-        to_ts,
-        settings,
-        slot_minutes=None,
-        staff_list=staff_list,
-        google_busy_map=gmap,
-        extra_blocked_dates=lead_blocked,
-        link_priority_overrides=link_priority_overrides,
-        buffer_minutes_override=link_buf_min,
-        max_advance_days_override=link_max_adv_days,
-        bookable_until_date_override=link_cutoff_date,
+    duration_min = (
+        max(1, int(service.duration_minutes))
+        if service
+        else availability_defaults_positive_int(defaults, "duration", BOOKING_SLOT_STEP_MINUTES)
     )
-    busy_union = await busy_intervals_union_for_link(db, staff_list, from_ts, to_ts, gmap)
-    buf_min = link_buf_min
-    # 枠の可否は available_slots_for_link 内の staff_is_free のみで決める。
-    # ここで busy と再照合すると、交差 busy や表現の差で取れる枠が落ちる（複数担当時に特に危険）。
-    defaults = json_object_or_empty(org.availability_defaults_json)
-    if service:
-        duration_min = max(1, int(service.duration_minutes))
-    else:
-        duration_min = availability_defaults_positive_int(
-            defaults, "duration", BOOKING_SLOT_STEP_MINUTES
+    try:
+        staff_ids = list(json_list_or_empty(link.staff_ids_json))
+        link_priority_overrides = _normalize_link_priority_overrides(
+            getattr(link, "staff_priority_overrides_json", None),
+            staff_ids,
         )
-    oauth_on = settings.is_google_oauth_configured()
-    linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
-    unlinked_fallback = bool(oauth_on and staff_list and linked_n == 0)
-    return {
-        "slots": slots,
-        "busy_intervals": [
-            {"start_utc": a.isoformat(), "end_utc": b.isoformat()} for a, b in busy_union
-        ],
-        "blocked_dates": blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts),
-        "slot_minutes": slot_generation_step,
-        "service_duration_minutes": duration_min,
-        "buffer_minutes": buf_min,
-        "max_advance_booking_days": link_max_adv_days,
-        "bookable_until_date": link_cutoff_date.isoformat() if link_cutoff_date else None,
-        "eligible_staff_count": len(staff_list),
-        "scheduling_hints": scheduling_hints_json(
-            duration_min,
-            buf_min,
-            eligible_staff_count=len(staff_list),
-        ),
-        "calendar_integration": {
-            "oauth_configured": oauth_on,
-            "google_linked_staff_count": linked_n,
-            "unlinked_fallback_active": unlinked_fallback,
-            "warning_ja": (
-                "Google カレンダーが誰も連携していないため、空きはシステム上すべて空きとして枠を出しています。本番運用では各担当の Google 連携を完了してください。"
-                if unlinked_fallback
-                else None
+        staff_list = await eligible_staff(db, org, staff_ids, service, settings)
+        fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
+        tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
+        _gpad = timedelta(hours=2)
+        gmap = await _load_google_busy_map(staff_list, fts - _gpad, tts + _gpad, settings)
+        lead_blocked = link_lead_blocked_dates(org, link)
+        slots, slot_generation_step = await available_slots_for_link(
+            db,
+            org,
+            staff_ids,
+            service,
+            from_ts,
+            to_ts,
+            settings,
+            slot_minutes=None,
+            staff_list=staff_list,
+            google_busy_map=gmap,
+            extra_blocked_dates=lead_blocked,
+            link_priority_overrides=link_priority_overrides,
+            buffer_minutes_override=buf_min,
+            max_advance_days_override=link_max_adv_days,
+            bookable_until_date_override=link_cutoff_date,
+        )
+        busy_union = await busy_intervals_union_for_link(db, staff_list, from_ts, to_ts, gmap)
+        oauth_on = settings.is_google_oauth_configured()
+        linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
+        unlinked_fallback = bool(oauth_on and staff_list and linked_n == 0)
+        return {
+            "slots": slots,
+            "busy_intervals": [
+                {"start_utc": a.isoformat(), "end_utc": b.isoformat()} for a, b in busy_union
+            ],
+            "blocked_dates": blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts),
+            "slot_minutes": slot_generation_step,
+            "service_duration_minutes": duration_min,
+            "buffer_minutes": buf_min,
+            "max_advance_booking_days": link_max_adv_days,
+            "bookable_until_date": link_cutoff_date.isoformat() if link_cutoff_date else None,
+            "eligible_staff_count": len(staff_list),
+            "scheduling_hints": scheduling_hints_json(
+                duration_min,
+                buf_min,
+                eligible_staff_count=len(staff_list),
             ),
-        },
-    }
+            "calendar_integration": {
+                "oauth_configured": oauth_on,
+                "google_linked_staff_count": linked_n,
+                "unlinked_fallback_active": unlinked_fallback,
+                "warning_ja": (
+                    "Google カレンダーが誰も連携していないため、空きはシステム上すべて空きとして枠を出しています。本番運用では各担当の Google 連携を完了してください。"
+                    if unlinked_fallback
+                    else None
+                ),
+            },
+        }
+    except Exception:
+        logger.exception("Public link availability failed: token=%s org_id=%s", token, org.id)
+        return {
+            "slots": [],
+            "busy_intervals": [],
+            "blocked_dates": blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts),
+            "slot_minutes": max(1, min(BOOKING_SLOT_STEP_MINUTES, duration_min)),
+            "service_duration_minutes": duration_min,
+            "buffer_minutes": buf_min,
+            "max_advance_booking_days": link_max_adv_days,
+            "bookable_until_date": link_cutoff_date.isoformat() if link_cutoff_date else None,
+            "eligible_staff_count": 0,
+            "availability_error": "空き枠の取得に失敗しました。カレンダー認証または予約リンク設定を確認してください。",
+            "scheduling_hints": scheduling_hints_json(
+                duration_min,
+                buf_min,
+                eligible_staff_count=0,
+            ),
+            "calendar_integration": {
+                "oauth_configured": settings.is_google_oauth_configured(),
+                "google_linked_staff_count": 0,
+                "unlinked_fallback_active": False,
+                "warning_ja": None,
+            },
+        }
 
 
 async def _create_booking_from_body(

@@ -917,6 +917,13 @@
     loading.hidden = true;
     lastAvail = j;
     lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
+    if (j.availability_error) {
+      const pageMsg = document.getElementById('page-msg');
+      if (pageMsg) pageMsg.textContent = j.availability_error;
+    } else {
+      const pageMsg = document.getElementById('page-msg');
+      if (pageMsg) pageMsg.textContent = '';
+    }
     renderCalendar();
   }
 
