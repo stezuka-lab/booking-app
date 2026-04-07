@@ -36,6 +36,11 @@ from app.booking.db_models import (
     StaffMember,
 )
 from app.booking.email_booking import google_calendar_template_url, send_booking_emails
+from app.booking.initial_setup import (
+    default_org_availability_defaults,
+    default_org_cancel_policy,
+    ensure_org_initial_setup,
+)
 from app.booking.meeting_service import build_meeting_url, resolve_meeting_provider_for_staff
 from app.booking.line_notify import notify_staff_line_booking
 from app.booking.rate_limit import check_public_booking_rate_limit
@@ -1092,21 +1097,13 @@ async def admin_create_org(
         name=body.name,
         slug=body.slug,
         routing_mode=body.routing_mode,
-        cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": True},
-        availability_defaults_json={
-            "timezone": "Asia/Tokyo",
-            "start": "08:00",
-            "end": "22:00",
-            "slot_minutes": 30,
-            "buffer_minutes": 0,
-            "block_saturday": False,
-            "block_sunday": False,
-            "block_weekends": False,
-            "block_holidays": False,
-        },
+        cancel_policy_json=default_org_cancel_policy(),
+        availability_defaults_json=default_org_availability_defaults(),
     )
     db.add(org)
     try:
+        await db.flush()
+        await ensure_org_initial_setup(db, org)
         await db.commit()
         await db.refresh(org)
     except IntegrityError:

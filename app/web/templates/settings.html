@@ -357,7 +357,7 @@
       chip.className = 'cal-title-builder-chip' + (part.isToken ? ' is-token' : ' is-text');
       const label = document.createElement('span');
       label.className = 'cal-title-builder-label';
-      label.textContent = part.isToken ? tokenLabel(part.raw) : (part.raw === ' — ' ? '区切り線' : part.raw);
+      label.textContent = part.isToken ? tokenLabel(part.raw) : part.raw.trim();
       chip.appendChild(label);
       const remove = document.createElement('button');
       remove.type = 'button';

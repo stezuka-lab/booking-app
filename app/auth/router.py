@@ -29,6 +29,11 @@ from app.auth.schemas import (
     ResetPasswordBody,
     UserPreferencesPatch,
 )
+from app.booking.initial_setup import (
+    default_org_availability_defaults,
+    default_org_cancel_policy,
+    ensure_org_initial_setup,
+)
 from app.booking.db_models import BookingAuditLog, BookingOrg
 from app.booking.email_booking import send_simple_mail
 from app.config import Settings, get_settings
@@ -73,22 +78,13 @@ async def _materialize_org_assignment(
         name=name_stripped,
         slug=slug,
         routing_mode="priority",
-        cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": True},
-        availability_defaults_json={
-            "timezone": "Asia/Tokyo",
-            "start": "08:00",
-            "end": "22:00",
-            "slot_minutes": 30,
-            "buffer_minutes": 0,
-            "block_saturday": False,
-            "block_sunday": False,
-            "block_weekends": False,
-            "block_holidays": False,
-        },
+        cancel_policy_json=default_org_cancel_policy(),
+        availability_defaults_json=default_org_availability_defaults(),
     )
     db.add(new_org)
     try:
         await db.flush()
+        await ensure_org_initial_setup(db, new_org)
     except IntegrityError:
         await db.rollback()
         raise HTTPException(400, "この組織 slug は既に使われています")
