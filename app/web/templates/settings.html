@@ -241,7 +241,7 @@
   }
 
   function slugInput() {
-    return patchSlug || 'demo-shop';
+    return patchSlug || '';
   }
 
   async function applyMeOrgPreference() {
@@ -253,6 +253,13 @@
 
   function getPatchSlug() {
     return patchSlug != null ? patchSlug : slugInput();
+  }
+
+  function ensureOrgSelected() {
+    if (getPatchSlug()) return true;
+    showPanels(false);
+    setMsg('このアカウントに組織が設定されていません。管理者に組織を割り当ててもらってください。', 'err');
+    return false;
   }
 
   function headersJson() {
@@ -478,6 +485,7 @@
   }
 
   async function loadSummary() {
+    if (!ensureOrgSelected()) return;
     const q = new URLSearchParams({
       include_staff: 'false',
       include_services: 'false',
@@ -490,6 +498,7 @@
   }
 
   document.getElementById('btn-save-email').addEventListener('click', async function () {
+    if (!ensureOrgSelected()) return;
     setMsg('');
     const body = {
       email_settings: {
@@ -519,6 +528,7 @@
   });
 
   document.getElementById('btn-save-org').addEventListener('click', async function () {
+    if (!ensureOrgSelected()) return;
     setMsg('');
     const body = {
       routing_mode: document.getElementById('org-routing-mode').value,
@@ -539,6 +549,7 @@
   });
 
   document.getElementById('btn-save-availability').addEventListener('click', async function () {
+    if (!ensureOrgSelected()) return;
     setMsg('');
     const cur = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary');
     if (!cur) return;

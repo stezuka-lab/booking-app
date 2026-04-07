@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import re
 import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
@@ -41,6 +42,7 @@ from app.db import get_session_factory
 from app.security.audit import write_audit_log
 
 router = APIRouter(tags=["auth"])
+_ORG_SLUG_SANITIZE_RE = re.compile(r"[^a-z0-9]+")
 
 
 async def _session_db() -> AsyncSession:
@@ -90,6 +92,26 @@ async def _materialize_org_assignment(
         await db.rollback()
         raise HTTPException(400, "この組織 slug は既に使われています")
     return slug
+
+
+async def _default_org_assignment_for_user(
+    db: AsyncSession,
+    username: str,
+    display_name: str | None,
+) -> str:
+    base_slug = _ORG_SLUG_SANITIZE_RE.sub("-", (username or "").strip().lower()).strip("-")
+    if not base_slug:
+        base_slug = "team"
+    slug = base_slug
+    seq = 2
+    while await db.scalar(select(BookingOrg.id).where(BookingOrg.slug == slug)):
+        slug = f"{base_slug}-{seq}"
+        seq += 1
+    org_name = (display_name or "").strip() or f"{username} 用"
+    out = await _materialize_org_assignment(db, slug, org_name)
+    if not out:
+        raise HTTPException(500, "default org assignment failed")
+    return out
 
 
 @router.post("/api/auth/login")
@@ -146,13 +168,6 @@ async def me(request: Request, db: AuthDb) -> dict:
     u = await get_current_app_user(request, db)
     if not u:
         return {"authenticated": False}
-    # 未設定なら先頭の組織をこのアカウントに自動紐付け（手動選択なしで利用可）
-    if u.default_org_slug is None:
-        first = (await db.scalars(select(BookingOrg).order_by(BookingOrg.id).limit(1))).first()
-        if first is not None:
-            u.default_org_slug = first.slug
-            await db.commit()
-            await db.refresh(u)
     default_org_name: str | None = None
     if u.default_org_slug:
         org_row = await db.scalar(select(BookingOrg).where(BookingOrg.slug == u.default_org_slug))
@@ -351,6 +366,12 @@ async def admin_create_user(
         role = "admin"
 
     default_org_slug = await _materialize_org_assignment(db, body.org_slug, body.org_name)
+    if not default_org_slug:
+        default_org_slug = await _default_org_assignment_for_user(
+            db,
+            un,
+            body.display_name or body.org_name,
+        )
 
     u = AppUser(
         username=un,

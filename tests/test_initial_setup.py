@@ -9,7 +9,7 @@ from app.booking.initial_setup import (
     default_org_cancel_policy,
     ensure_org_initial_setup,
 )
-from app.auth.router import _materialize_org_assignment
+from app.auth.router import _default_org_assignment_for_user, _materialize_org_assignment
 
 
 def test_default_org_availability_defaults_match_expected() -> None:
@@ -84,3 +84,28 @@ def test_materialize_org_assignment_backfills_existing_org(monkeypatch) -> None:
 
     assert slug == "existing-org"
     assert called["org_id"] == 5
+
+
+def test_default_org_assignment_for_user_creates_unique_slug(monkeypatch) -> None:
+    called: dict[str, str] = {}
+
+    class DummyDb:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def scalar(self, _query):
+            self.calls += 1
+            return 1 if self.calls == 1 else None
+
+    async def fake_materialize(_db, slug, name):
+        called["slug"] = slug
+        called["name"] = name
+        return slug
+
+    monkeypatch.setattr("app.auth.router._materialize_org_assignment", fake_materialize)
+
+    slug = asyncio.run(_default_org_assignment_for_user(DummyDb(), "User.Name", "担当A"))
+
+    assert slug == "user-name-2"
+    assert called["slug"] == "user-name-2"
+    assert called["name"] == "担当A"

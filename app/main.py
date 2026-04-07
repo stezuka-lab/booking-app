@@ -156,6 +156,14 @@ def _should_enforce_same_origin(request_path: str, method: str) -> bool:
     )
 
 
+def _should_disable_cache(request_path: str) -> bool:
+    return (
+        request_path.startswith("/app/booking/")
+        or request_path.startswith("/app/manage/")
+        or request_path.startswith("/api/booking/manage/")
+    )
+
+
 @app.middleware("http")
 async def apply_http_security(request, call_next):
     settings = get_settings()
@@ -175,6 +183,10 @@ async def apply_http_security(request, call_next):
     response = await call_next(request)
     for key, value in _security_headers(settings).items():
         response.headers.setdefault(key, value)
+    if _should_disable_cache(request.url.path):
+        response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+        response.headers["Pragma"] = "no-cache"
+        response.headers["Expires"] = "0"
     return response
 
 app.include_router(auth_router)

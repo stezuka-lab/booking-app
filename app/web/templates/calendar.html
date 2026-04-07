@@ -62,7 +62,7 @@
 (function () {
   var msgEl = document.getElementById('cal-msg');
   var slugDisplayEl = document.getElementById('cal-slug-display');
-  var currentOrgSlug = 'demo-shop';
+  var currentOrgSlug = '';
 
   function applyMeSlug() {
     return Promise.resolve().then(function () {
@@ -78,6 +78,14 @@
 
   function slug() {
     return currentOrgSlug;
+  }
+
+  function ensureOrgSelected() {
+    if (currentOrgSlug) return true;
+    msgEl.textContent = 'このアカウントに組織が設定されていません。管理者に組織を割り当ててもらってください。';
+    setAddStaffButtonEnabled(false);
+    renderStaffTableAuthError('other');
+    return false;
   }
   function headers() {
     return {};
@@ -317,6 +325,7 @@
   }
 
   function loadAll() {
+    if (!ensureOrgSelected()) return;
     msgEl.textContent = '';
     var q = new URLSearchParams({
       include_staff: 'true',
@@ -360,6 +369,7 @@
   }
 
   document.getElementById('btn-add-staff-calendar').addEventListener('click', function () {
+    if (!ensureOrgSelected()) return;
     msgEl.textContent = '';
     setAddStaffButtonEnabled(false);
     fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/staff', {

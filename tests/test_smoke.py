@@ -74,6 +74,18 @@ def test_calendar_page(client: TestClient) -> None:
     assert "/app/login" in (r.headers.get("location") or "")
 
 
+def test_public_booking_page_no_store(client: TestClient) -> None:
+    r = client.get("/app/booking/sample-token")
+    assert r.status_code == 200
+    assert "no-store" in (r.headers.get("cache-control") or "")
+
+
+def test_manage_page_no_store(client: TestClient) -> None:
+    r = client.get("/app/manage/sample-token")
+    assert r.status_code == 200
+    assert "no-store" in (r.headers.get("cache-control") or "")
+
+
 def test_legacy_booking_redirect(client: TestClient) -> None:
     r = client.get("/booking/public/test-token-abc", follow_redirects=False)
     assert r.status_code == 307

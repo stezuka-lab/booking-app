@@ -207,7 +207,7 @@
 {% block scripts %}
 <script>
 (function () {
-  var currentOrgSlug = 'demo-shop';
+  var currentOrgSlug = '';
   const msg = document.getElementById('admin-msg');
   const out = document.getElementById('admin-out');
   let campaignSummary = null;
@@ -219,6 +219,13 @@
 
   function slug() {
     return currentOrgSlug;
+  }
+
+  function ensureOrgSelected() {
+    if (currentOrgSlug) return true;
+    showLinkPanels(false);
+    setMsg('このアカウントに組織が設定されていません。管理者に組織を割り当ててもらってください。', 'err');
+    return false;
   }
 
   function headersJson() {
@@ -572,6 +579,7 @@
   }
 
   async function loadSummary() {
+    if (!ensureOrgSelected()) return;
     const q = new URLSearchParams({
       include_staff: 'true',
       include_services: 'true',
@@ -584,6 +592,7 @@
   }
 
   document.getElementById('btn-add-service').addEventListener('click', async function () {
+    if (!ensureOrgSelected()) return;
     setMsg('');
     const name = document.getElementById('new-svc-name').value.trim();
     if (!name) {
@@ -612,6 +621,7 @@
   });
 
   document.getElementById('btn-create-link').addEventListener('click', async function () {
+    if (!ensureOrgSelected()) return;
     setMsg('');
     const title = document.getElementById('new-link-title').value.trim() || '予約リンク';
     const svcEl = document.getElementById('new-link-service');
@@ -749,6 +759,8 @@
   }
   if (appViewer && appViewer.authenticated) {
     loadSummary().catch(function () {});
+  } else {
+    showLinkPanels(false);
   }
 })();
 </script>

@@ -42,11 +42,11 @@
     <label class="field-label" for="modal-customer-number">顧客番号（AP/EP）</label>
     <input id="modal-customer-number" type="text" autocomplete="off" placeholder="例: AP12345 / EP12345" class="booking-dialog__input-wide" />
     <label class="field-label" for="modal-name">お名前 <span class="req">*</span></label>
-    <input id="modal-name" type="text" autocomplete="name" placeholder="山田 太郎" class="booking-dialog__input-wide" />
+    <input id="modal-name" type="text" autocomplete="off" placeholder="山田 太郎" class="booking-dialog__input-wide" />
     <label class="field-label" for="modal-email">メール <span class="req">*</span></label>
-    <input id="modal-email" type="email" autocomplete="email" placeholder="example@email.com" class="booking-dialog__input-wide" />
+    <input id="modal-email" type="email" autocomplete="off" placeholder="example@email.com" class="booking-dialog__input-wide" />
     <label class="field-label" for="modal-company">会社名（任意・カレンダー表示用）</label>
-    <input id="modal-company" type="text" autocomplete="organization" class="booking-dialog__input-wide" />
+    <input id="modal-company" type="text" autocomplete="off" class="booking-dialog__input-wide" />
     <div id="modal-google-cal-row" class="booking-google-cal-row" hidden>
       <p class="muted foot-hint">任意：Google カレンダーにも追加できます。</p>
       <div class="booking-dialog__actions" style="margin-top: 0.5rem">
@@ -476,6 +476,10 @@
       successMsgText.textContent = '';
     }
     successDialogEl.showModal();
+    document.getElementById('modal-customer-number').value = '';
+    document.getElementById('modal-name').value = '';
+    document.getElementById('modal-email').value = '';
+    document.getElementById('modal-company').value = '';
   }
 
   function placeBusyInLayer(layer, day0, day1, busyList, totalH, hp, START_H) {
