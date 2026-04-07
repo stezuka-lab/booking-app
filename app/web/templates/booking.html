@@ -10,7 +10,6 @@
   <div class="booking-hero-bar">
     <div>
       <h1 class="page-title booking-hero-title" id="page-heading">予約</h1>
-      <p class="page-sub muted" id="org-title"></p>
       <p class="booking-link-notice booking-link-notice-inline booking-multiline-note" id="booking-link-notice" hidden></p>
     </div>
     <div id="ga4-slot"></div>
@@ -826,7 +825,6 @@
     if (grow) {
       grow.hidden = !(ggc && ggc.enabled && ggc.client_id);
     }
-    document.getElementById('org-title').textContent = m.org.name;
     metaAvailability = m.availability_defaults || {};
     cursorDate = startOfLocalDay(new Date());
     const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
