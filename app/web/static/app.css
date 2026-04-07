@@ -2221,7 +2221,7 @@ body {
 
 .cal-title-builder-chip.is-symbol {
   gap: 0.18rem;
-  padding: 0.18rem 0.26rem 0.18rem 0.44rem;
+  padding: 0.16rem 0.22rem 0.16rem 0.38rem;
   background: #fbfaf7;
   border-color: #eadfce;
 }
@@ -2241,11 +2241,11 @@ body {
   border: 1px solid rgba(111, 118, 133, 0.16);
   background: rgba(255, 255, 255, 0.78);
   color: #68707f;
-  width: 0.8rem;
-  height: 0.8rem;
+  width: 0.68rem;
+  height: 0.68rem;
   border-radius: 999px;
-  font-size: 0.58rem;
-  line-height: 0.72rem;
+  font-size: 0.46rem;
+  line-height: 0.62rem;
   cursor: pointer;
   padding: 0;
   display: inline-flex;
