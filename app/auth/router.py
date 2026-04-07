@@ -130,6 +130,28 @@ async def _repair_default_org_for_user(db: AsyncSession, user: AppUser) -> None:
     await db.refresh(user)
 
 
+async def _maybe_delete_unshared_org(
+    db: AsyncSession,
+    org_slug: str | None,
+    excluding_user_id: int,
+) -> bool:
+    slug = (org_slug or "").strip()
+    if not slug:
+        return False
+    remaining_users = await db.scalar(
+        select(func.count())
+        .select_from(AppUser)
+        .where(AppUser.default_org_slug == slug, AppUser.id != excluding_user_id)
+    )
+    if int(remaining_users or 0) > 0:
+        return False
+    org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+    if not org:
+        return False
+    await db.delete(org)
+    return True
+
+
 @router.post("/api/auth/login")
 async def login(
     request: Request,
@@ -472,6 +494,8 @@ async def admin_delete_user(
     )
     if u.role == "admin" and admin_cnt is not None and int(admin_cnt) <= 1:
         raise HTTPException(400, "最後の管理者は削除できません")
+    deleted_org = await _maybe_delete_unshared_org(db, u.default_org_slug, u.id)
+    await db.execute(delete(PasswordResetToken).where(PasswordResetToken.user_id == u.id))
     await write_audit_log(
         db,
         request,
@@ -479,11 +503,11 @@ async def admin_delete_user(
         org_slug=u.default_org_slug,
         target_type="app_user",
         target_id=u.id,
-        detail={"username": u.username, "role": u.role},
+        detail={"username": u.username, "role": u.role, "deleted_org": deleted_org},
     )
     await db.execute(delete(AppUser).where(AppUser.id == user_id))
     await db.commit()
-    return {"ok": True}
+    return {"ok": True, "deleted_org": deleted_org}
 
 
 @router.post("/api/auth/admin/users/{user_id}/password")

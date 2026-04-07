@@ -9,7 +9,11 @@ from app.booking.initial_setup import (
     default_org_cancel_policy,
     ensure_org_initial_setup,
 )
-from app.auth.router import _default_org_assignment_for_user, _materialize_org_assignment
+from app.auth.router import (
+    _default_org_assignment_for_user,
+    _materialize_org_assignment,
+    _maybe_delete_unshared_org,
+)
 
 
 def test_default_org_availability_defaults_match_expected() -> None:
@@ -109,3 +113,40 @@ def test_default_org_assignment_for_user_creates_unique_slug(monkeypatch) -> Non
     assert slug == "user-name-2"
     assert called["slug"] == "user-name-2"
     assert called["name"] == "担当A"
+
+
+def test_maybe_delete_unshared_org_deletes_org_when_unused() -> None:
+    org = BookingOrg(id=9, name="Solo Org", slug="solo-org")
+
+    class DummyDb:
+        def __init__(self) -> None:
+            self.deleted = []
+            self.calls = 0
+
+        async def scalar(self, _query):
+            self.calls += 1
+            if self.calls == 1:
+                return 0
+            return org
+
+        async def delete(self, row):
+            self.deleted.append(row)
+
+    db = DummyDb()
+    deleted = asyncio.run(_maybe_delete_unshared_org(db, "solo-org", 10))
+
+    assert deleted is True
+    assert db.deleted == [org]
+
+
+def test_maybe_delete_unshared_org_keeps_shared_org() -> None:
+    class DummyDb:
+        async def scalar(self, _query):
+            return 1
+
+        async def delete(self, _row):
+            raise AssertionError("shared org should not be deleted")
+
+    deleted = asyncio.run(_maybe_delete_unshared_org(DummyDb(), "shared-org", 10))
+
+    assert deleted is False
