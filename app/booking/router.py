@@ -21,6 +21,7 @@ from app.booking.calendar_policy import day_is_blocked_for_booking
 from app.booking.calendar_title import format_calendar_event_title
 from app.booking.calendar_google import (
     create_event_for_booking,
+    create_event_for_booking_detailed,
     delete_event_for_booking,
     insert_customer_primary_calendar_with_access_token,
     patch_event_for_booking,
@@ -809,7 +810,7 @@ async def _finalize_confirmed_booking(
         cal_desc_lines.append(f"会社名: {(b.company_name or '').strip()}")
     cal_desc_lines.append(f"担当: {(staff.name or '').strip()}")
     cal_desc_lines.append(f"変更・キャンセル: {manage_url}")
-    ev = await create_event_for_booking(
+    ev, cal_err = await create_event_for_booking_detailed(
         _staff_google_refresh_token(staff, settings),
         staff.google_calendar_id,
         summary,
@@ -823,6 +824,8 @@ async def _finalize_confirmed_booking(
     )
     if ev:
         b.google_event_id = ev.get("id")
+        b.google_calendar_synced_at = datetime.now(timezone.utc)
+        b.google_calendar_sync_error = None
         if meet:
             hang = (ev.get("conferenceData") or {}).get("entryPoints") or []
             for ep in hang:
@@ -830,6 +833,9 @@ async def _finalize_confirmed_booking(
                     meeting_url = ep["uri"]
                     b.meeting_url = encrypt_secret(meeting_url, settings)
                     break
+    else:
+        b.google_calendar_synced_at = None
+        b.google_calendar_sync_error = cal_err or "Googleカレンダー登録に失敗しました"
     await _upsert_customer(session, org.id, customer_email, customer_name, b.start_utc, settings)
     await session.flush()
 
@@ -1335,6 +1341,13 @@ async def admin_list_bookings(
                 "staff_id": b.staff_id,
                 "staff_display_name": b.staff_display_name,
                 "service_id": b.service_id,
+                "google_event_id": b.google_event_id,
+                "google_calendar_synced_at": (
+                    b.google_calendar_synced_at.isoformat()
+                    if b.google_calendar_synced_at
+                    else None
+                ),
+                "google_calendar_sync_error": b.google_calendar_sync_error,
                 "customer_confirmation_email_sent_at": (
                     b.customer_confirmation_email_sent_at.isoformat()
                     if b.customer_confirmation_email_sent_at

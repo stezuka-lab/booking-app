@@ -184,6 +184,10 @@ class Booking(Base):
     meeting_provider: Mapped[str] = mapped_column(String(32), default="none")
     meeting_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     google_event_id: Mapped[str | None] = mapped_column(String(512), nullable=True)
+    google_calendar_synced_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    google_calendar_sync_error: Mapped[str | None] = mapped_column(Text, nullable=True)
     manage_token: Mapped[str] = mapped_column(String(64), unique=True, index=True)
     # UTM / 経路
     utm_source: Mapped[str | None] = mapped_column(String(256), nullable=True)

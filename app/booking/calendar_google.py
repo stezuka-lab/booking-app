@@ -220,6 +220,43 @@ async def create_event_for_booking(
         return None
 
 
+async def create_event_for_booking_detailed(
+    refresh_token: str | None,
+    calendar_id: str | None,
+    summary: str,
+    start_iso: str,
+    end_iso: str,
+    settings: Settings,
+    *,
+    with_meet: bool,
+    attendees_emails: list[str] | None = None,
+    description: str | None = None,
+    location: str | None = None,
+) -> tuple[dict[str, Any] | None, str | None]:
+    if not refresh_token:
+        msg = "担当のGoogleカレンダー連携が未設定です"
+        logger.warning(msg)
+        return None, msg
+    try:
+        ev = await asyncio.to_thread(
+            create_calendar_event_sync,
+            refresh_token,
+            calendar_id or "primary",
+            summary,
+            start_iso,
+            end_iso,
+            settings,
+            with_meet=with_meet,
+            attendees_emails=attendees_emails,
+            description=description,
+            location=location,
+        )
+        return ev, None
+    except Exception as exc:
+        logger.exception("Google Calendar create failed")
+        return None, (str(exc).strip() or exc.__class__.__name__)[:500]
+
+
 async def patch_event_for_booking(
     refresh_token: str | None,
     calendar_id: str | None,

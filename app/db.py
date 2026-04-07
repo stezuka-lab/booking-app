@@ -138,6 +138,18 @@ async def _sqlite_add_missing_columns() -> None:
         await _ensure_sqlite_column(
             conn,
             "bookings",
+            "google_calendar_synced_at",
+            '"google_calendar_synced_at" DATETIME',
+        )
+        await _ensure_sqlite_column(
+            conn,
+            "bookings",
+            "google_calendar_sync_error",
+            '"google_calendar_sync_error" TEXT',
+        )
+        await _ensure_sqlite_column(
+            conn,
+            "bookings",
             "staff_reminder_1h_sent_at",
             '"staff_reminder_1h_sent_at" DATETIME',
         )

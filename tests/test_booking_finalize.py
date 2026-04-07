@@ -74,6 +74,12 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
         captured["location"] = kwargs.get("location")
         return {"id": "evt-1"}
 
+    async def fake_create_event_for_booking_detailed(*args, **kwargs):
+        captured["attendees_emails"] = kwargs.get("attendees_emails")
+        captured["description"] = kwargs.get("description")
+        captured["location"] = kwargs.get("location")
+        return {"id": "evt-1"}, None
+
     async def fake_upsert_customer(*args, **kwargs):
         return None
 
@@ -88,7 +94,7 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
     async def fake_notify_staff_line_booking(*args, **kwargs):
         return {"ok": False, "skipped": True}
 
-    monkeypatch.setattr(booking_router, "create_event_for_booking", fake_create_event_for_booking)
+    monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
     monkeypatch.setattr(booking_router, "_upsert_customer", fake_upsert_customer)
     monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
     monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
@@ -131,6 +137,8 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
 
     assert customer_calendar_added is False
     assert booking.google_event_id == "evt-1"
+    assert booking.google_calendar_sync_error is None
+    assert booking.google_calendar_synced_at is not None
     assert captured["attendees_emails"] is None
     assert captured["location"] == "https://zoom.example/staff-a"
     assert "Zoom URL: https://zoom.example/staff-a" in str(captured["description"])
@@ -141,6 +149,65 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
     assert booking.customer_confirmation_email_sent_at is None
     assert booking.customer_confirmation_email_error == "SMTP temporary failure"
     assert booking.customer_confirmation_email_last_attempt_at is not None
+
+
+def test_finalize_confirmed_booking_records_calendar_sync_error_when_unlinked(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+
+    class DummySession:
+        async def flush(self) -> None:
+            return None
+
+    async def fake_upsert_customer(*args, **kwargs):
+        return None
+
+    async def fake_send_booking_emails(*args, **kwargs):
+        return {"customer": True, "staff": True, "customer_error": None, "staff_error": None}
+
+    async def fake_notify_staff_line_booking(*args, **kwargs):
+        return {"ok": True}
+
+    monkeypatch.setattr(booking_router, "_upsert_customer", fake_upsert_customer)
+    monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
+    monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
+
+    org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
+    staff = StaffMember(
+        org_id=1,
+        name="担当A",
+        email="staff-a@example.com",
+        google_refresh_token=None,
+    )
+    booking = Booking(
+        org_id=1,
+        staff_id=1,
+        service_id=1,
+        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        meeting_provider="none",
+        manage_token="manage-token",
+    )
+
+    asyncio.run(
+        _finalize_confirmed_booking(
+            DummySession(),
+            settings,
+            booking,
+            staff,
+            org,
+            "初回相談",
+            booking_link_title="初回予約リンク",
+        )
+    )
+
+    assert booking.google_event_id is None
+    assert booking.google_calendar_synced_at is None
+    assert booking.google_calendar_sync_error == "担当のGoogleカレンダー連携が未設定です"
 
 
 def test_delete_staff_calendar_event_clears_google_event_id(monkeypatch) -> None:
@@ -260,9 +327,9 @@ def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatc
         async def flush(self) -> None:
             return None
 
-    async def fake_create_event_for_booking(*args, **kwargs):
+    async def fake_create_event_for_booking_detailed(*args, **kwargs):
         captured["description"] = kwargs.get("description")
-        return {"id": "evt-enc"}
+        return {"id": "evt-enc"}, None
 
     async def fake_upsert_customer(*args, **kwargs):
         captured["upsert_args"] = args
@@ -275,7 +342,7 @@ def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatc
         captured["line_customer_name"] = kwargs.get("customer_name")
         return {"ok": True}
 
-    monkeypatch.setattr(booking_router, "create_event_for_booking", fake_create_event_for_booking)
+    monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
     monkeypatch.setattr(booking_router, "_upsert_customer", fake_upsert_customer)
     monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
     monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
