@@ -2236,7 +2236,8 @@ body {
   font-size: 0.82rem;
 }
 
-.cal-title-builder-remove {
+button.cal-title-builder-remove,
+.cal-title-builder-chip .cal-title-builder-remove {
   appearance: none;
   border: 1px solid rgba(111, 118, 133, 0.16);
   background: rgba(255, 255, 255, 0.78);
