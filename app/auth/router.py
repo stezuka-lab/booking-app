@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Header, HTTPException, Request
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -29,10 +29,11 @@ from app.auth.schemas import (
     ResetPasswordBody,
     UserPreferencesPatch,
 )
-from app.booking.db_models import BookingOrg
+from app.booking.db_models import BookingAuditLog, BookingOrg
 from app.booking.email_booking import send_simple_mail
 from app.config import Settings, get_settings
 from app.db import get_session_factory
+from app.security.audit import write_audit_log
 
 router = APIRouter(tags=["auth"])
 
@@ -255,11 +256,20 @@ async def forgot_password(
     )
     if not ok and not settings.actions_dry_run:
         raise HTTPException(500, "メール送信に失敗しました")
+    await write_audit_log(
+        db,
+        request,
+        action="auth.password_reset_requested",
+        target_type="app_user",
+        target_id=u.id,
+        detail={"username": u.username},
+    )
+    await db.commit()
     return {"ok": True, "message": "該当する場合はメールを送信しました"}
 
 
 @router.post("/api/auth/reset-password")
-async def reset_password_ep(body: ResetPasswordBody, db: AuthDb) -> dict:
+async def reset_password_ep(request: Request, body: ResetPasswordBody, db: AuthDb) -> dict:
     th = _token_hash(body.token.strip())
     now = datetime.now(timezone.utc)
     row = await db.scalar(
@@ -276,6 +286,14 @@ async def reset_password_ep(body: ResetPasswordBody, db: AuthDb) -> dict:
         raise HTTPException(400, "アカウントが無効です")
     user.password_hash = hash_password(body.new_password)
     row.used_at = now
+    await write_audit_log(
+        db,
+        request,
+        action="auth.password_reset_completed",
+        target_type="app_user",
+        target_id=user.id,
+        detail={"username": user.username},
+    )
     await db.commit()
     return {"ok": True}
 
@@ -346,6 +364,16 @@ async def admin_create_user(
         default_org_slug=default_org_slug,
     )
     db.add(u)
+    await db.flush()
+    await write_audit_log(
+        db,
+        request,
+        action="auth.user_created",
+        org_slug=default_org_slug,
+        target_type="app_user",
+        target_id=u.id,
+        detail={"username": u.username, "role": u.role},
+    )
     await db.commit()
     await db.refresh(u)
     return {
@@ -371,6 +399,15 @@ async def admin_patch_user_org(
         raise HTTPException(404, "user not found")
     slug = await _materialize_org_assignment(db, body.org_slug, body.org_name)
     user.default_org_slug = slug
+    await write_audit_log(
+        db,
+        request,
+        action="auth.user_org_updated",
+        org_slug=slug,
+        target_type="app_user",
+        target_id=user.id,
+        detail={"username": user.username},
+    )
     await db.commit()
     await db.refresh(user)
     org_name_out: str | None = None
@@ -399,6 +436,15 @@ async def admin_delete_user(
     )
     if u.role == "admin" and admin_cnt is not None and int(admin_cnt) <= 1:
         raise HTTPException(400, "最後の管理者は削除できません")
+    await write_audit_log(
+        db,
+        request,
+        action="auth.user_deleted",
+        org_slug=u.default_org_slug,
+        target_type="app_user",
+        target_id=u.id,
+        detail={"username": u.username, "role": u.role},
+    )
     await db.execute(delete(AppUser).where(AppUser.id == user_id))
     await db.commit()
     return {"ok": True}
@@ -418,5 +464,46 @@ async def admin_set_user_password(
     if not u:
         raise HTTPException(404, "user not found")
     u.password_hash = hash_password(body.new_password)
+    await write_audit_log(
+        db,
+        request,
+        action="auth.user_password_updated",
+        org_slug=u.default_org_slug,
+        target_type="app_user",
+        target_id=u.id,
+        detail={"username": u.username},
+    )
     await db.commit()
     return {"ok": True}
+
+
+@router.get("/api/auth/admin/audit-logs")
+async def admin_list_audit_logs(
+    request: Request,
+    db: AuthDb,
+    settings: Settings = Depends(get_settings),
+    x_admin_secret: str | None = Header(None),
+) -> dict[str, Any]:
+    await require_session_admin_only(request, settings, db, x_admin_secret)
+    rows = (
+        await db.scalars(
+            select(BookingAuditLog).order_by(desc(BookingAuditLog.created_at), desc(BookingAuditLog.id)).limit(200)
+        )
+    ).all()
+    return {
+        "logs": [
+            {
+                "id": row.id,
+                "created_at": row.created_at.isoformat() if row.created_at else None,
+                "action": row.action,
+                "org_slug": row.org_slug,
+                "actor_username": row.actor_username,
+                "actor_role": row.actor_role,
+                "target_type": row.target_type,
+                "target_id": row.target_id,
+                "ip_address": row.ip_address,
+                "detail": row.detail_json or {},
+            }
+            for row in rows
+        ]
+    }

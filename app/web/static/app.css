@@ -2008,6 +2008,49 @@ body {
   padding: 0;
 }
 
+.staff-priority-row {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 0.9rem;
+  padding: 0.45rem 0;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.staff-priority-row:last-child {
+  border-bottom: 0;
+}
+
+.staff-priority-check {
+  flex: 1 1 auto;
+  min-width: 16rem;
+  margin: 0;
+}
+
+.staff-priority-name {
+  display: inline-flex;
+  align-items: center;
+  line-height: 1.35;
+}
+
+.staff-priority-input {
+  display: flex;
+  align-items: center;
+  gap: 0.55rem;
+  flex: 0 0 auto;
+}
+
+.staff-priority-label {
+  margin: 0;
+  font-size: 0.8rem;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.staff-priority-input .admin-input-sm {
+  width: 5.5rem;
+}
+
 .check-line {
   display: flex;
   align-items: center;
@@ -2127,53 +2170,83 @@ body {
   max-width: 100%;
 }
 
+.cal-title-builder-field {
+  display: block;
+  width: 100%;
+  min-height: 3rem;
+  margin: 0.45rem 0 0.8rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.03);
+}
+
 .cal-title-builder {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.5rem;
-  margin: 0.35rem 0 0.8rem;
-  min-height: 2.25rem;
+  align-items: center;
+  gap: 0.45rem;
+  min-height: 1.9rem;
+}
+
+.cal-title-builder-placeholder {
+  font-size: 0.9rem;
+  color: var(--muted);
 }
 
 .cal-title-builder-chip {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
-  padding: 0.38rem 0.55rem 0.38rem 0.7rem;
+  gap: 0.4rem;
+  padding: 0.32rem 0.45rem 0.32rem 0.65rem;
   border-radius: 999px;
-  border: 1px solid var(--border);
-  background: #fff;
-  color: var(--text);
-  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  border: 1px solid #d8e4db;
+  background: #f8fbf9;
+  color: #20302a;
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
+  white-space: nowrap;
+  max-width: 100%;
 }
 
 .cal-title-builder-chip.is-token {
-  background: rgba(199, 224, 208, 0.34);
-  border-color: rgba(31, 95, 82, 0.18);
+  background: #edf7f1;
+  border-color: #cfe4d8;
 }
 
 .cal-title-builder-chip.is-text {
-  background: rgba(241, 235, 225, 0.7);
+  background: #f7f4ee;
+  border-color: #e6ddd0;
 }
 
 .cal-title-builder-label {
-  font-size: 0.84rem;
-  line-height: 1.2;
+  font-size: 0.9rem;
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .cal-title-builder-remove {
   appearance: none;
-  border: 0;
-  background: transparent;
-  color: #6f7685;
-  font-size: 0.92rem;
-  line-height: 1;
+  border: 1px solid rgba(111, 118, 133, 0.16);
+  background: rgba(255, 255, 255, 0.78);
+  color: #68707f;
+  width: 1.15rem;
+  height: 1.15rem;
+  border-radius: 999px;
+  font-size: 0.82rem;
+  line-height: 1rem;
   cursor: pointer;
   padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
 }
 
 .cal-title-builder-remove:hover {
   color: #1d2433;
+  border-color: rgba(29, 36, 51, 0.24);
+  background: #fff;
 }
 
 .cal-title-preview-line {

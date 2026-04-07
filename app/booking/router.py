@@ -83,6 +83,7 @@ from app.booking.schemas import (
 from app.config import Settings, get_settings
 from app.db import get_session_factory
 from app.security.crypto import decrypt_secret, encrypt_secret
+from app.security.audit import write_audit_log
 
 logger = logging.getLogger(__name__)
 
@@ -1409,6 +1410,16 @@ async def admin_add_staff(
         line_user_id=body.line_user_id,
     )
     db.add(s)
+    await db.flush()
+    await write_audit_log(
+        db,
+        request,
+        action="booking.staff_created",
+        org_slug=org.slug,
+        target_type="staff",
+        target_id=s.id,
+        detail={"name": s.name, "email": s.email},
+    )
     await db.commit()
     await db.refresh(s)
     return {"id": s.id}
@@ -1449,6 +1460,15 @@ async def admin_patch_staff(
         s.google_calendar_id = None
         s.google_profile_email = None
         s.google_profile_name = None
+    await write_audit_log(
+        db,
+        request,
+        action="booking.staff_updated",
+        org_slug=org.slug,
+        target_type="staff",
+        target_id=s.id,
+        detail={"name": s.name, "active": s.active, "cleared_google": body.clear_google_oauth is True},
+    )
     await db.commit()
     return {"ok": True}
 
@@ -1490,6 +1510,15 @@ async def admin_delete_staff(
         if str(staff_id) in pri_map:
             pri_map.pop(str(staff_id), None)
             link.staff_priority_overrides_json = pri_map
+    await write_audit_log(
+        db,
+        request,
+        action="booking.staff_deleted",
+        org_slug=org.slug,
+        target_type="staff",
+        target_id=staff_id,
+        detail={"name": s.name, "email": s.email},
+    )
     await db.execute(delete(StaffMember).where(StaffMember.id == staff_id))
     await db.commit()
     return {"ok": True, "deleted_id": staff_id}
@@ -1652,6 +1681,16 @@ async def admin_add_link(
         block_next_days=bnd,
     )
     db.add(link)
+    await db.flush()
+    await write_audit_log(
+        db,
+        request,
+        action="booking.link_created",
+        org_slug=org.slug,
+        target_type="booking_link",
+        target_id=link.id,
+        detail={"title": link.title, "service_id": link.service_id, "active": link.active},
+    )
     await db.commit()
     await db.refresh(link)
     base = settings.public_base_url_value()
@@ -1734,6 +1773,15 @@ async def admin_patch_link(
         link.active = bool(body.active)
     if body.block_next_days is not None:
         link.block_next_days = max(0, min(366, int(body.block_next_days)))
+    await write_audit_log(
+        db,
+        request,
+        action="booking.link_updated",
+        org_slug=org.slug,
+        target_type="booking_link",
+        target_id=link.id,
+        detail={"title": link.title, "service_id": link.service_id, "active": link.active},
+    )
     await db.commit()
     base = settings.public_base_url_value()
     return {
@@ -1780,6 +1828,15 @@ async def admin_delete_link(
     if not org:
         raise HTTPException(404, "org not found")
     await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=org.slug)
+    await write_audit_log(
+        db,
+        request,
+        action="booking.link_deleted",
+        org_slug=org.slug,
+        target_type="booking_link",
+        target_id=link.id,
+        detail={"title": link.title, "service_id": link.service_id},
+    )
     await db.execute(delete(PublicBookingLink).where(PublicBookingLink.id == link_id))
     await db.commit()
     return {"ok": True}
@@ -1820,6 +1877,15 @@ async def admin_approve_booking(
         svc.name if svc else "予約",
         booking_link_title=(b.booking_link_title_snapshot or svc.name or "予約"),
     )
+    await write_audit_log(
+        db,
+        request,
+        action="booking.booking_approved",
+        org_slug=org.slug,
+        target_type="booking",
+        target_id=b.id,
+        detail={"customer_name": b.customer_name, "staff_id": b.staff_id},
+    )
     await db.commit()
     return {"ok": True, "status": b.status}
 
@@ -1842,6 +1908,15 @@ async def admin_reject_booking(
         raise HTTPException(400, "invalid booking")
     await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=org.slug)
     b.status = "rejected"
+    await write_audit_log(
+        db,
+        request,
+        action="booking.booking_rejected",
+        org_slug=org.slug,
+        target_type="booking",
+        target_id=b.id,
+        detail={"customer_name": b.customer_name, "staff_id": b.staff_id},
+    )
     await db.commit()
     return {"ok": True, "status": b.status}
 
@@ -2051,6 +2126,15 @@ async def oauth_google_callback(
                     staff.name = nm[:256]
         except Exception as ex:
             logger.warning("Google userinfo fetch failed: %s", ex)
+    await write_audit_log(
+        db,
+        None,
+        action="booking.google_oauth_connected",
+        org_slug=None,
+        target_type="staff",
+        target_id=staff.id,
+        detail={"email": staff.google_profile_email or staff.email or "", "name": staff.google_profile_name or staff.name or ""},
+    )
     await db.commit()
     return RedirectResponse(
         url=f"{cal}?google_oauth=ok&staff_id={staff_id}",

@@ -276,24 +276,23 @@
       })
       .forEach(function (s) {
         const row = document.createElement('div');
-        row.className = 'admin-row align-end wrap';
-        row.style.marginBottom = '0.45rem';
+        row.className = 'staff-priority-row';
         const lab = document.createElement('label');
-        lab.className = 'check-line';
-        lab.style.flex = '1 1 16rem';
+        lab.className = 'check-line staff-priority-check';
         const cb = document.createElement('input');
         cb.type = 'checkbox';
         cb.value = String(s.id);
         if (set[s.id]) cb.checked = true;
         lab.appendChild(cb);
-        lab.appendChild(document.createTextNode(' ' + (s.name || '') + ' (id ' + s.id + ')'));
+        const staffText = document.createElement('span');
+        staffText.className = 'staff-priority-name';
+        staffText.textContent = (s.name || '') + ' (id ' + s.id + ')';
+        lab.appendChild(staffText);
         row.appendChild(lab);
         const priWrap = document.createElement('div');
-        priWrap.className = 'admin-field';
-        priWrap.style.minWidth = '8rem';
+        priWrap.className = 'staff-priority-input';
         const priLabel = document.createElement('label');
-        priLabel.className = 'field-label';
-        priLabel.style.marginTop = '0';
+        priLabel.className = 'staff-priority-label';
         priLabel.textContent = '優先度';
         const pri = document.createElement('input');
         pri.type = 'number';

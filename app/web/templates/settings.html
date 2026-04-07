@@ -133,16 +133,18 @@
           </div>
           <div class="cal-title-chips" role="group" aria-label="プレースホルダを挿入">
             <span class="cal-title-chip-label">追加する項目</span>
-            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{service}">区分名 {service}</button>
-            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{name}">お名前 {name}</button>
-            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{company}">会社名 {company}</button>
-            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{phone}">電話 {phone}</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{service}">区分名</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{name}">お名前</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{company}">会社名</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{phone}">電話</button>
             <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{customer_number}">顧客番号</button>
-            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token=" — ">—</button>
-            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="（">（</button>
-            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="）">）</button>
+            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token=" — ">区切り線</button>
+            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="（">開きカッコ</button>
+            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="）">閉じカッコ</button>
           </div>
-          <div class="cal-title-builder" id="cal-title-builder" aria-live="polite"></div>
+          <div class="cal-title-builder-field">
+            <div class="cal-title-builder" id="cal-title-builder" aria-live="polite"></div>
+          </div>
           <input
             type="text"
             id="org-cal-title-template"
@@ -150,6 +152,7 @@
             placeholder="{service} — {name}（{company}）"
             autocomplete="off"
             spellcheck="false"
+            hidden
           />
           <p class="cal-title-preview-line" id="org-cal-title-preview-wrap" hidden>
             <span class="muted small">例の見え方: </span><strong id="org-cal-title-preview">—</strong>
@@ -345,7 +348,7 @@
     if (!el || !root) return;
     const parts = parseCalendarTitleTemplate(el.value);
     if (!parts.length) {
-      root.innerHTML = '<span class="muted small">まだ並びがありません。上のボタンを押して追加してください。</span>';
+      root.innerHTML = '<span class="cal-title-builder-placeholder">上のボタンを押すと、ここに項目が並びます。</span>';
       return;
     }
     root.innerHTML = '';
@@ -354,13 +357,13 @@
       chip.className = 'cal-title-builder-chip' + (part.isToken ? ' is-token' : ' is-text');
       const label = document.createElement('span');
       label.className = 'cal-title-builder-label';
-      label.textContent = part.isToken ? tokenLabel(part.raw) : (part.raw === ' — ' ? '—' : part.raw);
+      label.textContent = part.isToken ? tokenLabel(part.raw) : (part.raw === ' — ' ? '区切り線' : part.raw);
       chip.appendChild(label);
       const remove = document.createElement('button');
       remove.type = 'button';
       remove.className = 'cal-title-builder-remove';
       remove.setAttribute('aria-label', 'この項目を削除');
-      remove.textContent = '×';
+      remove.innerHTML = '&times;';
       remove.addEventListener('click', function () {
         removeCalendarTitleSegment(idx);
       });
