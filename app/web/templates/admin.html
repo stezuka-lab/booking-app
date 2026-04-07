@@ -754,14 +754,33 @@
   });
 
   var appViewer = window.__APP_VIEWER__ || {};
-  if (appViewer.authenticated && appViewer.user && appViewer.user.default_org_slug) {
-    currentOrgSlug = appViewer.user.default_org_slug;
-  }
-  if (appViewer && appViewer.authenticated) {
-    loadSummary().catch(function () {});
-  } else {
+  function bootAdminPage() {
+    if (appViewer.authenticated && appViewer.user && appViewer.user.default_org_slug) {
+      currentOrgSlug = appViewer.user.default_org_slug;
+      loadSummary().catch(function () {});
+      return;
+    }
+    if (!(appViewer && appViewer.authenticated)) {
+      showLinkPanels(false);
+      return;
+    }
+    if (window.__loadAuthMe) {
+      window.__loadAuthMe().then(function (live) {
+        if (live && live.authenticated && live.user && live.user.default_org_slug) {
+          currentOrgSlug = live.user.default_org_slug;
+          loadSummary().catch(function () {});
+        } else {
+          showLinkPanels(false);
+          setMsg('このアカウントに組織が設定されていません。管理者に組織を割り当ててもらってください。', 'err');
+        }
+      }).catch(function () {
+        showLinkPanels(false);
+      });
+      return;
+    }
     showLinkPanels(false);
   }
+  bootAdminPage();
 })();
 </script>
 {% endblock %}

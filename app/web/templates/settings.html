@@ -248,6 +248,15 @@
     const viewer = window.__APP_VIEWER__ || {};
     if (viewer.authenticated && viewer.user && viewer.user.default_org_slug) {
       patchSlug = viewer.user.default_org_slug;
+      return;
+    }
+    if (window.__loadAuthMe) {
+      try {
+        const live = await window.__loadAuthMe();
+        if (live && live.authenticated && live.user && live.user.default_org_slug) {
+          patchSlug = live.user.default_org_slug;
+        }
+      } catch (e) {}
     }
   }
 

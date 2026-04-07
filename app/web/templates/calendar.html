@@ -70,9 +70,20 @@
       if (j.authenticated && j.user && j.user.default_org_slug) {
         currentOrgSlug = j.user.default_org_slug;
         if (slugDisplayEl) slugDisplayEl.textContent = currentOrgSlug;
-      } else if (slugDisplayEl) {
-        slugDisplayEl.textContent = currentOrgSlug;
+        return;
       }
+      return (window.__loadAuthMe ? window.__loadAuthMe() : Promise.resolve({ authenticated: false })).then(function (live) {
+        if (live && live.authenticated && live.user && live.user.default_org_slug) {
+          currentOrgSlug = live.user.default_org_slug;
+          if (slugDisplayEl) slugDisplayEl.textContent = currentOrgSlug;
+        } else if (slugDisplayEl) {
+          slugDisplayEl.textContent = currentOrgSlug;
+        }
+      }).catch(function () {
+        if (slugDisplayEl) {
+          slugDisplayEl.textContent = currentOrgSlug;
+        }
+      });
     });
   }
 

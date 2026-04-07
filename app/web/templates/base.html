@@ -47,6 +47,11 @@
       if (init.credentials == null) init.credentials = 'same-origin';
       return orig.call(this, input, init);
     };
+    window.__loadAuthMe = function () {
+      return window.fetch('/api/auth/me', { credentials: 'same-origin' })
+        .then(function (r) { return r.json(); })
+        .catch(function () { return { authenticated: false, user: null }; });
+    };
   })();
   </script>
   <script>
