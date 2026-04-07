@@ -416,9 +416,10 @@
       card('組織', org.name || '—');
     }
     card('公開ベース URL', '<code>' + (data.public_base_url || '') + '</code>');
-    card('担当', String((data.staff || []).length) + ' 名');
-    card('予約区分', String((data.services || []).length) + ' 件');
-    card('予約リンク', String((data.links || []).length) + ' 件');
+    const counts = data.counts || {};
+    card('担当', String(counts.staff != null ? counts.staff : (data.staff || []).length) + ' 名');
+    card('予約区分', String(counts.services != null ? counts.services : (data.services || []).length) + ' 件');
+    card('予約リンク', String(counts.links != null ? counts.links : (data.links || []).length) + ' 件');
     card('カレンダー認証', data.google_oauth_ready ? '設定済み' : '未設定');
     document.getElementById('org-routing-mode').value = org.routing_mode || 'priority';
 
@@ -477,7 +478,14 @@
   }
 
   async function loadSummary() {
-    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary');
+    const q = new URLSearchParams({
+      include_staff: 'false',
+      include_services: 'false',
+      include_links: 'false',
+      include_forms: 'false',
+      include_counts: 'true'
+    });
+    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary?' + q.toString());
     if (data) renderSummary(data);
   }
 

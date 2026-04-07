@@ -572,7 +572,14 @@
   }
 
   async function loadSummary() {
-    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary');
+    const q = new URLSearchParams({
+      include_staff: 'true',
+      include_services: 'true',
+      include_links: 'true',
+      include_forms: 'false',
+      include_counts: 'false'
+    });
+    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString());
     if (data) renderLinksSummary(data);
   }
 

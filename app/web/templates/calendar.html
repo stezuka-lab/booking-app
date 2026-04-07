@@ -318,7 +318,14 @@
 
   function loadAll() {
     msgEl.textContent = '';
-    fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary', {
+    var q = new URLSearchParams({
+      include_staff: 'true',
+      include_services: 'false',
+      include_links: 'false',
+      include_forms: 'false',
+      include_counts: 'false'
+    });
+    fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString(), {
       credentials: 'same-origin',
       headers: headers(),
     })

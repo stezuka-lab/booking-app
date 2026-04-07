@@ -12,7 +12,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -1288,17 +1288,52 @@ async def admin_org_summary(
     slug: str,
     db: DbSession,
     settings: SettingsDep,
+    include_staff: bool = True,
+    include_services: bool = True,
+    include_links: bool = True,
+    include_forms: bool = True,
+    include_counts: bool = False,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=slug)
     org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
     if not org:
         raise HTTPException(404, "org not found")
-    staff = (await db.scalars(select(StaffMember).where(StaffMember.org_id == org.id))).all()
-    services = (await db.scalars(select(BookingService).where(BookingService.org_id == org.id))).all()
-    links = (await db.scalars(select(PublicBookingLink).where(PublicBookingLink.org_id == org.id))).all()
-    forms = (await db.scalars(select(BookingFormDefinition).where(BookingFormDefinition.org_id == org.id))).all()
+    staff = (
+        (await db.scalars(select(StaffMember).where(StaffMember.org_id == org.id))).all()
+        if include_staff
+        else []
+    )
+    services = (
+        (await db.scalars(select(BookingService).where(BookingService.org_id == org.id))).all()
+        if include_services or include_links
+        else []
+    )
+    links = (
+        (await db.scalars(select(PublicBookingLink).where(PublicBookingLink.org_id == org.id))).all()
+        if include_links
+        else []
+    )
+    forms = (
+        (await db.scalars(select(BookingFormDefinition).where(BookingFormDefinition.org_id == org.id))).all()
+        if include_forms
+        else []
+    )
     base = settings.public_base_url_value()
+    counts: dict[str, int] = {}
+    if include_counts:
+        counts["staff"] = len(staff) if include_staff else int(
+            await db.scalar(select(func.count()).select_from(StaffMember).where(StaffMember.org_id == org.id)) or 0
+        )
+        counts["services"] = len(services) if include_services else int(
+            await db.scalar(select(func.count()).select_from(BookingService).where(BookingService.org_id == org.id)) or 0
+        )
+        counts["links"] = len(links) if include_links else int(
+            await db.scalar(select(func.count()).select_from(PublicBookingLink).where(PublicBookingLink.org_id == org.id)) or 0
+        )
+        counts["forms"] = len(forms) if include_forms else int(
+            await db.scalar(select(func.count()).select_from(BookingFormDefinition).where(BookingFormDefinition.org_id == org.id)) or 0
+        )
     return {
         "public_base_url": base,
         "org": {
@@ -1365,6 +1400,7 @@ async def admin_org_summary(
             for l in links
         ],
         "google_oauth_ready": settings.is_google_oauth_configured(),
+        "counts": counts,
         "forms": [{"id": f.id, "name": f.name, "active": f.active} for f in forms],
     }
 
