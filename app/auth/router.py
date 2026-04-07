@@ -68,6 +68,7 @@ async def _materialize_org_assignment(
     if existing:
         if name_stripped is not None and name_stripped != existing.name:
             existing.name = name_stripped
+        await ensure_org_initial_setup(db, existing)
         return slug
     if not name_stripped:
         raise HTTPException(

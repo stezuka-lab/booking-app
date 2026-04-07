@@ -9,6 +9,7 @@ from app.booking.initial_setup import (
     default_org_cancel_policy,
     ensure_org_initial_setup,
 )
+from app.auth.router import _materialize_org_assignment
 
 
 def test_default_org_availability_defaults_match_expected() -> None:
@@ -64,3 +65,22 @@ def test_ensure_org_initial_setup_adds_service_and_form_when_missing() -> None:
         and row.fields_json == default_form_fields()
         for row in added
     )
+
+
+def test_materialize_org_assignment_backfills_existing_org(monkeypatch) -> None:
+    org = BookingOrg(id=5, name="Existing Org", slug="existing-org")
+    called: dict[str, object] = {}
+
+    class DummySession:
+        async def scalar(self, _query):
+            return org
+
+    async def fake_ensure(session, target_org):
+        called["org_id"] = target_org.id
+
+    monkeypatch.setattr("app.auth.router.ensure_org_initial_setup", fake_ensure)
+
+    slug = asyncio.run(_materialize_org_assignment(DummySession(), "existing-org", None))
+
+    assert slug == "existing-org"
+    assert called["org_id"] == 5
