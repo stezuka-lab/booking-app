@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -391,14 +392,13 @@ async def _load_google_busy_map(
     settings: Settings,
 ) -> dict[int, list[tuple[datetime, datetime]]]:
     """担当 id ごとに必ずキーを返す。トークンが無い担当は []（未連携＝Google 上は空き扱い）。"""
-    out: dict[int, list[tuple[datetime, datetime]]] = {}
     tmin = window_start.isoformat()
     tmax = window_end.isoformat()
-    for s in staff_list:
+
+    async def load_for_staff(s: StaffMember) -> tuple[int, list[tuple[datetime, datetime]]]:
         refresh_token = decrypt_secret(s.google_refresh_token, settings)
         if not refresh_token:
-            out[s.id] = []
-            continue
+            return s.id, []
         intervals = await freebusy_busy_intervals(
             refresh_token,
             s.google_calendar_id,
@@ -406,8 +406,10 @@ async def _load_google_busy_map(
             tmax,
             settings,
         )
-        out[s.id] = list(intervals) if intervals else []
-    return out
+        return s.id, list(intervals) if intervals else []
+
+    pairs = await asyncio.gather(*(load_for_staff(s) for s in staff_list))
+    return {staff_id: intervals for staff_id, intervals in pairs}
 
 
 async def _db_booking_intervals_for_staff(

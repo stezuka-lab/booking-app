@@ -244,15 +244,11 @@
     return patchSlug || 'demo-shop';
   }
 
-  /** サーバー（/api/auth/me）の default_org_slug のみ使用。ブラウザ横断の slug は使わない */
   async function applyMeOrgPreference() {
-    try {
-      const r = await fetch('/api/auth/me', { credentials: 'same-origin' });
-      const j = await r.json();
-      if (j.authenticated && j.user && j.user.default_org_slug) {
-        patchSlug = j.user.default_org_slug;
-      }
-    } catch (e) {}
+    const viewer = window.__APP_VIEWER__ || {};
+    if (viewer.authenticated && viewer.user && viewer.user.default_org_slug) {
+      patchSlug = viewer.user.default_org_slug;
+    }
   }
 
   function getPatchSlug() {

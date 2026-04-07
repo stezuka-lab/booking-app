@@ -65,19 +65,15 @@
   var currentOrgSlug = 'demo-shop';
 
   function applyMeSlug() {
-    return fetch('/api/auth/me', { credentials: 'same-origin' })
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (j) {
-        if (j.authenticated && j.user && j.user.default_org_slug) {
-          currentOrgSlug = j.user.default_org_slug;
-          if (slugDisplayEl) slugDisplayEl.textContent = currentOrgSlug;
-        } else if (slugDisplayEl) {
-          slugDisplayEl.textContent = currentOrgSlug;
-        }
-      })
-      .catch(function () {});
+    return Promise.resolve().then(function () {
+      var j = window.__APP_VIEWER__ || {};
+      if (j.authenticated && j.user && j.user.default_org_slug) {
+        currentOrgSlug = j.user.default_org_slug;
+        if (slugDisplayEl) slugDisplayEl.textContent = currentOrgSlug;
+      } else if (slugDisplayEl) {
+        slugDisplayEl.textContent = currentOrgSlug;
+      }
+    });
   }
 
   function slug() {

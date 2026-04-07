@@ -37,6 +37,9 @@
   </footer>
   {% block scripts %}{% endblock %}
   <script>
+  window.__APP_VIEWER__ = {{ (app_viewer if app_viewer is defined else {'authenticated': False, 'user': None}) | tojson }};
+  </script>
+  <script>
   (function () {
     var orig = window.fetch;
     window.fetch = function (input, init) {
@@ -50,53 +53,47 @@
   (function () {
     var el = document.getElementById('auth-nav-slot');
     if (!el) return;
-    fetch('/api/auth/me', { credentials: 'same-origin' })
-      .then(function (r) {
-        return r.json();
-      })
-      .then(function (j) {
-        document.querySelectorAll('.nav-guest-only').forEach(function (n) {
-          n.hidden = !!j.authenticated;
+    var j = window.__APP_VIEWER__ || { authenticated: false, user: null };
+    document.querySelectorAll('.nav-guest-only').forEach(function (n) {
+      n.hidden = !!j.authenticated;
+    });
+    document.querySelectorAll('.nav-auth-only').forEach(function (n) {
+      n.hidden = !j.authenticated;
+    });
+    var isAdmin = j.authenticated && j.user && j.user.role === 'admin';
+    document.querySelectorAll('.nav-admin-only').forEach(function (n) {
+      n.hidden = !isAdmin;
+    });
+    if (j.authenticated) {
+      var orgChip = document.getElementById('app-org-chip');
+      if (orgChip) {
+        var orgName = j.user && j.user.default_org_name ? String(j.user.default_org_name) : '';
+        orgChip.textContent = orgName || '';
+        orgChip.hidden = !orgName;
+      }
+      el.innerHTML = '<a href="#" class="auth-nav-link" id="auth-logout-link">ログアウト</a>';
+      var a = document.getElementById('auth-logout-link');
+      if (a) {
+        a.addEventListener('click', function (ev) {
+          ev.preventDefault();
+          fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).then(function () {
+            try {
+              localStorage.removeItem('booking_admin_secret');
+              localStorage.removeItem('booking_admin_slug');
+              localStorage.removeItem('booking_admin_secret_v1');
+            } catch (e) {}
+            window.location.href = '/app/login';
+          });
         });
-        document.querySelectorAll('.nav-auth-only').forEach(function (n) {
-          n.hidden = !j.authenticated;
-        });
-        var isAdmin = j.authenticated && j.user && j.user.role === 'admin';
-        document.querySelectorAll('.nav-admin-only').forEach(function (n) {
-          n.hidden = !isAdmin;
-        });
-        if (j.authenticated) {
-          var orgChip = document.getElementById('app-org-chip');
-          if (orgChip) {
-            var orgName = j.user && j.user.default_org_name ? String(j.user.default_org_name) : '';
-            orgChip.textContent = orgName || '';
-            orgChip.hidden = !orgName;
-          }
-          el.innerHTML = '<a href="#" class="auth-nav-link" id="auth-logout-link">ログアウト</a>';
-          var a = document.getElementById('auth-logout-link');
-          if (a) {
-            a.addEventListener('click', function (ev) {
-              ev.preventDefault();
-              fetch('/api/auth/logout', { method: 'POST', credentials: 'same-origin' }).then(function () {
-                try {
-                  localStorage.removeItem('booking_admin_secret');
-                  localStorage.removeItem('booking_admin_slug');
-                  localStorage.removeItem('booking_admin_secret_v1');
-                } catch (e) {}
-                window.location.href = '/app/login';
-              });
-            });
-          }
-        } else {
-          var orgChipOff = document.getElementById('app-org-chip');
-          if (orgChipOff) {
-            orgChipOff.textContent = '';
-            orgChipOff.hidden = true;
-          }
-          el.innerHTML = '';
-        }
-      })
-      .catch(function () {});
+      }
+    } else {
+      var orgChipOff = document.getElementById('app-org-chip');
+      if (orgChipOff) {
+        orgChipOff.textContent = '';
+        orgChipOff.hidden = true;
+      }
+      el.innerHTML = '';
+    }
   })();
   </script>
 </body>

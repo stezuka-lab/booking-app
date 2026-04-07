@@ -736,19 +736,13 @@
     await loadSummary();
   });
 
-  fetch('/api/auth/me', { credentials: 'same-origin' })
-    .then(function (r) {
-      return r.json();
-    })
-    .then(function (j) {
-      if (j.authenticated && j.user && j.user.default_org_slug) {
-        currentOrgSlug = j.user.default_org_slug;
-      }
-      if (j && j.authenticated) {
-        loadSummary().catch(function () {});
-      }
-    })
-    .catch(function () {});
+  var appViewer = window.__APP_VIEWER__ || {};
+  if (appViewer.authenticated && appViewer.user && appViewer.user.default_org_slug) {
+    currentOrgSlug = appViewer.user.default_org_slug;
+  }
+  if (appViewer && appViewer.authenticated) {
+    loadSummary().catch(function () {});
+  }
 })();
 </script>
 {% endblock %}
