@@ -3,8 +3,8 @@ from __future__ import annotations
 import asyncio
 from datetime import datetime, timedelta, timezone
 
-from app.booking.db_models import Booking
-from app.booking.jobs import _send_reminders
+from app.booking.db_models import Booking, CustomerProfile
+from app.booking.jobs import _repeat_outreach, _send_reminders
 from app.config import Settings
 from app.security.crypto import encrypt_secret
 
@@ -89,3 +89,31 @@ def test_send_reminders_uses_decrypted_customer_fields(monkeypatch) -> None:
     asyncio.run(_send_reminders(DummySession([booking]), settings))
 
     assert captured["to_addrs"] == ["customer@example.com"]
+
+
+def test_repeat_outreach_uses_decrypted_display_name(monkeypatch) -> None:
+    settings = Settings(
+        smtp_host="smtp.example.com",
+        booking_session_secret="test-session-secret",
+        booking_repeat_outreach_days=30,
+    )
+    profile = CustomerProfile(
+        org_id=1,
+        email_normalized="customer@example.com",
+        display_name=encrypt_secret("Customer Name", settings),
+        last_booking_utc=datetime.now(timezone.utc) - timedelta(days=45),
+        repeat_outreach_sent_at=None,
+    )
+    captured: dict[str, object] = {}
+
+    async def fake_send_simple_mail(_settings, to_addrs, subject, body, *, dry_run):
+        captured["to_addrs"] = to_addrs
+        captured["body"] = body
+        return True
+
+    monkeypatch.setattr("app.booking.jobs.send_simple_mail", fake_send_simple_mail)
+
+    asyncio.run(_repeat_outreach(DummySession([profile]), settings))
+
+    assert captured["to_addrs"] == ["customer@example.com"]
+    assert "Customer Name" in str(captured["body"])

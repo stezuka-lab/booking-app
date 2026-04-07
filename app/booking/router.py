@@ -126,6 +126,12 @@ def _booking_customer_email(booking: Booking | None, settings: Settings) -> str:
     return (decrypt_secret(getattr(booking, "customer_email", None), settings) or "").strip()
 
 
+def _customer_profile_display_name(profile: CustomerProfile | None, settings: Settings) -> str:
+    if profile is None:
+        return ""
+    return (decrypt_secret(getattr(profile, "display_name", None), settings) or "").strip()
+
+
 async def get_db() -> AsyncSession:
     factory = get_session_factory()
     async with factory() as session:
@@ -238,6 +244,7 @@ async def _upsert_customer(
     email: str,
     display_name: str,
     booking_time: datetime,
+    settings: Settings,
 ) -> None:
     key = _normalize_email(email)
     row = await session.scalar(
@@ -250,13 +257,14 @@ async def _upsert_customer(
         row = CustomerProfile(
             org_id=org_id,
             email_normalized=key,
-            display_name=display_name,
+            display_name=encrypt_secret(display_name, settings) or display_name,
             last_booking_utc=booking_time,
             repeat_outreach_sent_at=None,
         )
         session.add(row)
     else:
-        row.display_name = display_name or row.display_name
+        if display_name:
+            row.display_name = encrypt_secret(display_name, settings) or display_name
         if not row.last_booking_utc or booking_time > row.last_booking_utc:
             row.last_booking_utc = booking_time
         row.repeat_outreach_sent_at = None
@@ -817,7 +825,7 @@ async def _finalize_confirmed_booking(
                     meeting_url = ep["uri"]
                     b.meeting_url = encrypt_secret(meeting_url, settings)
                     break
-    await _upsert_customer(session, org.id, customer_email, customer_name, b.start_utc)
+    await _upsert_customer(session, org.id, customer_email, customer_name, b.start_utc, settings)
     await session.flush()
 
     customer_cal_ok = False

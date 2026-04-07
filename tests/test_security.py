@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone as dt_timezone
 from types import SimpleNamespace
 
 import pytest
@@ -12,6 +13,8 @@ from app.auth.rate_limit import (
     record_login_failure,
     record_password_reset_attempt,
 )
+from app.booking.router import _upsert_customer
+from app.booking.db_models import CustomerProfile
 from app.config import Settings
 from app.main import _is_same_origin
 from app.security.crypto import decrypt_secret, encrypt_secret
@@ -98,3 +101,32 @@ def test_secret_encryption_roundtrip() -> None:
 def test_secret_decrypt_accepts_legacy_plaintext() -> None:
     settings = Settings()
     assert decrypt_secret("legacy-plain-token", settings) == "legacy-plain-token"
+
+
+def test_upsert_customer_encrypts_display_name() -> None:
+    settings = Settings(booking_session_secret="test-session-secret")
+    added: list[CustomerProfile] = []
+
+    class DummySession:
+        async def scalar(self, _query):
+            return None
+
+        def add(self, row):
+            added.append(row)
+
+    import asyncio
+
+    asyncio.run(
+        _upsert_customer(
+            DummySession(),
+            1,
+            "customer@example.com",
+            "Customer Name",
+            datetime.now(dt_timezone.utc),
+            settings,
+        )
+    )
+
+    assert added
+    assert added[0].display_name != "Customer Name"
+    assert decrypt_secret(added[0].display_name, settings) == "Customer Name"

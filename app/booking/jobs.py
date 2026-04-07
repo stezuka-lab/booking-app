@@ -20,6 +20,7 @@ from app.booking.email_booking import (
 from app.booking.line_notify import send_line_push
 from app.config import Settings, get_settings
 from app.db import get_session_factory
+from app.security.crypto import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -189,7 +190,7 @@ async def _repeat_outreach(session: AsyncSession, settings: Settings) -> None:
             settings,
             [c.email_normalized],
             "ご無沙汰しております（予約のご案内）",
-            f"{c.display_name or 'お客様'}\n"
+            f"{(decrypt_secret(getattr(c, 'display_name', None), settings) or '').strip() or 'お客様'}\n"
             f"前回ご予約から{days}日以上経過しました。またのご利用をお待ちしております。\n"
             f"{settings.public_base_url_value()}/booking/",
             dry_run=settings.actions_dry_run,
