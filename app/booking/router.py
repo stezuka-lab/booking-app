@@ -96,6 +96,18 @@ def _staff_google_refresh_token(staff: StaffMember | None, settings: Settings) -
     return decrypt_secret(getattr(staff, "google_refresh_token", None), settings)
 
 
+def _staff_google_profile_email(staff: StaffMember | None, settings: Settings) -> str:
+    if staff is None:
+        return ""
+    return (decrypt_secret(getattr(staff, "google_profile_email", None), settings) or "").strip()
+
+
+def _booking_meeting_url(booking: Booking | None, settings: Settings) -> str:
+    if booking is None:
+        return ""
+    return (decrypt_secret(getattr(booking, "meeting_url", None), settings) or "").strip()
+
+
 async def get_db() -> AsyncSession:
     factory = get_session_factory()
     async with factory() as session:
@@ -594,7 +606,7 @@ async def _create_booking_from_body(
         calendar_title_note=(body.calendar_title_note or "").strip() or None,
         form_answers_json=body.form_answers or {},
         meeting_provider=provider_resolved,
-        meeting_url=meet_url_placeholder or None,
+        meeting_url=encrypt_secret(meet_url_placeholder, settings) if meet_url_placeholder else None,
         manage_token=manage_token,
         utm_source=body.utm_source,
         utm_medium=body.utm_medium,
@@ -645,7 +657,7 @@ def _public_booking_response(
     base = settings.public_base_url_value()
     manage_url = f"{base}/app/manage/{b.manage_token}"
     title = format_calendar_event_title(org, service_name, b)
-    meet = (b.meeting_url or "").strip()
+    meet = _booking_meeting_url(b, settings)
     details_lines: list[str] = []
     if meet:
         details_lines.append(f"オンライン: {meet}")
@@ -711,7 +723,7 @@ async def book_appointment(
             "status": b.status,
             "link_title": booking_link_title,
             "manage_url": f"{base}/app/manage/{b.manage_token}",
-            "meeting_url": (b.meeting_url or "").strip(),
+            "meeting_url": _booking_meeting_url(b, settings),
             "staff_name": staff.name or "",
             "google_calendar_add_url": "",
             "customer_calendar_added": bool(customer_cal),
@@ -736,21 +748,23 @@ async def _finalize_confirmed_booking(
     summary = format_calendar_event_title(org, service_name, b)
     meet = b.meeting_provider == "meet"
     manage_url = f"{settings.public_base_url_value()}/app/manage/{b.manage_token}"
-    if b.meeting_provider == "zoom" and not b.meeting_url:
+    meeting_url = _booking_meeting_url(b, settings)
+    if b.meeting_provider == "zoom" and not meeting_url:
         sz = (staff.zoom_meeting_url or "").strip()
         if sz:
-            b.meeting_url = sz
+            meeting_url = sz
         elif settings.zoom_default_meeting_url:
-            b.meeting_url = settings.zoom_default_meeting_url
-    if b.meeting_provider == "teams" and not b.meeting_url and settings.teams_default_meeting_url:
-        b.meeting_url = settings.teams_default_meeting_url
+            meeting_url = settings.zoom_default_meeting_url
+    if b.meeting_provider == "teams" and not meeting_url and settings.teams_default_meeting_url:
+        meeting_url = settings.teams_default_meeting_url
+    b.meeting_url = encrypt_secret(meeting_url, settings) if meeting_url else None
 
     cust_no = ""
     if isinstance(b.form_answers_json, dict):
         cust_no = str(b.form_answers_json.get("customer_number") or "").strip()
     cal_desc_lines: list[str] = []
-    if (b.meeting_url or "").strip():
-        cal_desc_lines.append(f"Zoom URL: {(b.meeting_url or '').strip()}")
+    if meeting_url:
+        cal_desc_lines.append(f"Zoom URL: {meeting_url}")
     if (post_booking_message or "").strip():
         cal_desc_lines.append(f"ご案内: {(post_booking_message or '').strip()}")
     cal_desc_lines.append(f"予約リンク: {booking_link_title}")
@@ -772,7 +786,7 @@ async def _finalize_confirmed_booking(
         with_meet=meet,
         attendees_emails=None,
         description="\n".join(cal_desc_lines),
-        location=(b.meeting_url or "").strip() or None,
+        location=meeting_url or None,
     )
     if ev:
         b.google_event_id = ev.get("id")
@@ -780,7 +794,8 @@ async def _finalize_confirmed_booking(
             hang = (ev.get("conferenceData") or {}).get("entryPoints") or []
             for ep in hang:
                 if ep.get("entryPointType") == "video" and ep.get("uri"):
-                    b.meeting_url = ep["uri"]
+                    meeting_url = ep["uri"]
+                    b.meeting_url = encrypt_secret(meeting_url, settings)
                     break
     await _upsert_customer(session, org.id, b.customer_email, b.customer_name, b.start_utc)
     await session.flush()
@@ -789,8 +804,8 @@ async def _finalize_confirmed_booking(
     cust_tok = (customer_google_access_token or "").strip()
     if cust_tok:
         desc_lines: list[str] = []
-        if (b.meeting_url or "").strip():
-            desc_lines.append(f"Zoom URL: {(b.meeting_url or '').strip()}")
+        if meeting_url:
+            desc_lines.append(f"Zoom URL: {meeting_url}")
         if (post_booking_message or "").strip():
             desc_lines.append(f"ご案内: {(post_booking_message or '').strip()}")
         desc_lines.append(f"予約リンク: {booking_link_title}")
@@ -808,7 +823,7 @@ async def _finalize_confirmed_booking(
             b.start_utc.isoformat(),
             b.end_utc.isoformat(),
             description="\n".join(desc_lines),
-            location=(b.meeting_url or "").strip() or None,
+            location=meeting_url or None,
         )
         customer_cal_ok = ev_c is not None
 
@@ -933,7 +948,7 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
             "start_utc": b.start_utc.isoformat(),
             "end_utc": b.end_utc.isoformat(),
             "customer_name": b.customer_name,
-            "meeting_url": b.meeting_url,
+            "meeting_url": _booking_meeting_url(b, settings),
         },
         "staff": {"name": staff_name},
         "can_cancel_online": allowed,
@@ -1216,7 +1231,7 @@ async def admin_org_summary(
                 "line_user_id": s.line_user_id,
                 "has_google": bool(_staff_google_refresh_token(s, settings)),
                 "google_calendar_id": s.google_calendar_id or "",
-                "google_profile_email": s.google_profile_email,
+                "google_profile_email": _staff_google_profile_email(s, settings),
                 "google_profile_name": s.google_profile_name,
                 "zoom_meeting_url": s.zoom_meeting_url or "",
             }
@@ -2119,7 +2134,7 @@ async def oauth_google_callback(
                 em = (uj.get("email") or "").strip()
                 nm = (uj.get("name") or uj.get("given_name") or "").strip()
                 if em:
-                    staff.google_profile_email = em[:320]
+                    staff.google_profile_email = encrypt_secret(em[:320], settings)
                     staff.email = em[:320]
                 if nm:
                     staff.google_profile_name = nm[:256]
@@ -2133,7 +2148,7 @@ async def oauth_google_callback(
         org_slug=None,
         target_type="staff",
         target_id=staff.id,
-        detail={"email": staff.google_profile_email or staff.email or "", "name": staff.google_profile_name or staff.name or ""},
+        detail={"email": _staff_google_profile_email(staff, settings) or staff.email or "", "name": staff.google_profile_name or staff.name or ""},
     )
     await db.commit()
     return RedirectResponse(

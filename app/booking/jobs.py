@@ -9,7 +9,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.booking.db_models import Booking, BookingOrg, BookingService, CustomerProfile, StaffMember
-from app.booking.email_booking import EMAIL_DISABLED_REASON, send_customer_confirmation_email, send_simple_mail
+from app.booking.email_booking import (
+    EMAIL_DISABLED_REASON,
+    booking_meeting_url_value,
+    send_customer_confirmation_email,
+    send_simple_mail,
+)
 from app.booking.line_notify import send_line_push
 from app.config import Settings, get_settings
 from app.db import get_session_factory
@@ -95,8 +100,9 @@ async def _send_reminders(session: AsyncSession, settings: Settings) -> None:
                 f"予約のリマインドです（約{settings.booking_reminder_hours_before}時間前）。\n"
                 f"{start.isoformat()}\n変更・キャンセル: {url}\n"
             )
-            if b.meeting_url:
-                body += f"会議 URL: {b.meeting_url}\n"
+            meeting_url = booking_meeting_url_value(b, settings)
+            if meeting_url:
+                body += f"会議 URL: {meeting_url}\n"
             sent = await send_simple_mail(
                 settings,
                 [b.customer_email],

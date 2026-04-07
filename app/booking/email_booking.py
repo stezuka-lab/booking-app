@@ -12,6 +12,7 @@ from app.booking.calendar_title import format_calendar_event_title
 from app.booking.db_models import Booking, BookingOrg, StaffMember
 from app.booking.routing_service import availability_zone
 from app.config import Settings
+from app.security.crypto import decrypt_secret
 
 logger = logging.getLogger(__name__)
 
@@ -23,6 +24,10 @@ DEFAULT_EMAIL_SETTINGS: dict[str, Any] = {
     "confirmation_intro_ja": "",
     "confirmation_footer_ja": "",
 }
+
+
+def booking_meeting_url_value(booking: Booking, settings: Settings) -> str:
+    return (decrypt_secret(getattr(booking, "meeting_url", None), settings) or "").strip()
 
 
 def merge_email_settings(raw: Any) -> dict[str, Any]:
@@ -103,7 +108,7 @@ def build_booking_confirmation_email_body(
     """件名と本文（プレーンテキスト）。"""
     em = merge_email_settings(email_settings)
     when = format_booking_datetime_range_ja(org, booking.start_utc, booking.end_utc)
-    meet_url = (booking.meeting_url or "").strip()
+    meet_url = booking_meeting_url_value(booking, settings)
     link_title = (booking_link_title or "").strip() or "予約"
 
     lines: list[str] = []
@@ -135,6 +140,7 @@ def build_booking_confirmation_email_body(
 
 
 def build_staff_notification_email_body(
+    settings: Settings,
     org: BookingOrg,
     booking: Booking,
     booking_link_title: str,
@@ -143,13 +149,14 @@ def build_staff_notification_email_body(
     post_booking_message: str = "",
 ) -> tuple[str, str]:
     link_title = (booking_link_title or "").strip() or "予約"
+    meet_url = booking_meeting_url_value(booking, settings)
     staff_lines = [
         f"新規予約: {booking.customer_name} <{booking.customer_email}>",
         f"予約リンク: {link_title}",
         f"日時: {format_booking_datetime_range_ja(org, booking.start_utc, booking.end_utc)}",
     ]
-    if booking.meeting_url:
-        staff_lines.append(f"Zoom URL: {booking.meeting_url}")
+    if meet_url:
+        staff_lines.append(f"Zoom URL: {meet_url}")
     staff_lines.append(f"確認・変更: {manage_url}")
     extra = (post_booking_message or "").strip()
     if extra:
@@ -248,6 +255,7 @@ async def send_staff_notification_email(
     if not bool(em.get("send_staff_notification", True)) or not staff.email:
         return False, EMAIL_DISABLED_REASON
     subject, body = build_staff_notification_email_body(
+        settings,
         org,
         booking,
         booking_link_title,
