@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import json
+import logging
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -19,6 +20,8 @@ from app.booking.calendar_google import freebusy_busy_intervals
 from app.booking.db_models import Booking, BookingOrg, BookingService, PublicBookingLink, StaffMember
 from app.config import Settings
 from app.security.crypto import decrypt_secret
+
+logger = logging.getLogger(__name__)
 
 # 予約開始時刻の既定刻み（分）。実際の刻みは min(この値, 所要時間) とし、所要より粗い刻みで枠を落とさない。
 BOOKING_SLOT_STEP_MINUTES = 30
@@ -347,7 +350,10 @@ async def db_booking_busy_intervals_for_staff(
     rows = list((await session.scalars(q)).all())
     out: list[tuple[datetime, datetime]] = []
     for b in rows:
-        out.append((b.start_utc, b.end_utc))
+        try:
+            out.append((to_utc_aware(b.start_utc), to_utc_aware(b.end_utc)))
+        except Exception:
+            logger.exception("Skipping malformed booking interval in busy union: booking_id=%s", getattr(b, "id", None))
     return merge_intervals(out)
 
 
@@ -458,7 +464,13 @@ async def _db_booking_intervals_for_staff(
     if exclude_booking_id is not None:
         q = q.where(Booking.id != exclude_booking_id)
     rows = list((await session.scalars(q)).all())
-    return [(to_utc_aware(b.start_utc), to_utc_aware(b.end_utc)) for b in rows]
+    out: list[tuple[datetime, datetime]] = []
+    for b in rows:
+        try:
+            out.append((to_utc_aware(b.start_utc), to_utc_aware(b.end_utc)))
+        except Exception:
+            logger.exception("Skipping malformed booking interval in staff free check: booking_id=%s", getattr(b, "id", None))
+    return out
 
 
 async def staff_is_free(
@@ -715,19 +727,28 @@ async def available_slots_for_link(
             cur_u = cur.astimezone(timezone.utc)
             seg_u = seg_end.astimezone(timezone.utc)
             if cur_u >= rs_utc and seg_u <= re_utc + AVAILABILITY_RANGE_END_SLACK:
-                picked = await pick_staff_for_slot(
-                    session,
-                    org,
-                    link_staff_ids,
-                    service,
-                    cur_u,
-                    seg_u,
-                    settings,
-                    link_priority_overrides=link_priority_overrides,
-                    buffer_minutes_override=buffer_minutes_override,
-                    google_busy_map=gmap,
-                    dry_run=True,
-                )
+                try:
+                    picked = await pick_staff_for_slot(
+                        session,
+                        org,
+                        link_staff_ids,
+                        service,
+                        cur_u,
+                        seg_u,
+                        settings,
+                        link_priority_overrides=link_priority_overrides,
+                        buffer_minutes_override=buffer_minutes_override,
+                        google_busy_map=gmap,
+                        dry_run=True,
+                    )
+                except Exception:
+                    logger.exception(
+                        "Skipping slot after availability evaluation error: org_id=%s start=%s end=%s",
+                        getattr(org, "id", None),
+                        cur_u.isoformat(),
+                        seg_u.isoformat(),
+                    )
+                    picked = None
                 if picked:
                     out.append(
                         {

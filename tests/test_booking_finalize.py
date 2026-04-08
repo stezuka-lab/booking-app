@@ -88,6 +88,41 @@ def test_public_availability_survives_busy_union_failure(client, monkeypatch) ->
     assert body.get("availability_error") in (None, "")
 
 
+def test_public_availability_survives_single_slot_pick_failure(client, monkeypatch) -> None:
+    import app.booking.routing_service as routing_service
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    token = (health.json().get("booking_demo") or {}).get("token")
+    assert token
+
+    original = routing_service.pick_staff_for_slot
+    state = {"calls": 0}
+
+    async def flaky(*args, **kwargs):
+        state["calls"] += 1
+        if state["calls"] == 1:
+            raise RuntimeError("slot-eval boom")
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(routing_service, "pick_staff_for_slot", flaky)
+
+    now = datetime.now(timezone.utc)
+    response = client.get(
+        f"/api/booking/links/{token}/availability",
+        params={
+            "from_ts": now.isoformat(),
+            "to_ts": (now + timedelta(days=7)).isoformat(),
+            "service_id": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.get("availability_error") in (None, "")
+    assert isinstance(body.get("slots"), list)
+
+
 def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch) -> None:
     import app.booking.router as booking_router
 
