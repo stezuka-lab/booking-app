@@ -710,42 +710,6 @@
         const t = new Date(s.start_utc);
         return t >= day0 && t < day1;
       });
-      (function placeReceptionBandsExcludingBusy() {
-        /* この曜日に API 予約枠が1件も無いときは帯を出さない（隙間≠予約可の誤認防止） */
-        if (!daySlots.length) {
-          return;
-        }
-        const sh = parseHm(metaAvailability.start || '08:00');
-        const eh = parseHm(metaAvailability.end || '22:00');
-        const startMin = sh.h * 60 + sh.m;
-        const endMin = eh.h * 60 + eh.m;
-        const durMin = (function () {
-          const d = lastAvail && lastAvail.service_duration_minutes;
-          const n = typeof d === 'number' ? d : parseInt(d, 10);
-          return Number.isFinite(n) && n > 0 ? n : 30;
-        })();
-        const lastStartMin = endMin - durMin;
-        if (lastStartMin < startMin) return;
-        const startFrac = sh.h + sh.m / 60 - START_H;
-        const endFracHighlight = lastStartMin / 60 - START_H;
-        if (endFracHighlight <= startFrac) return;
-        const recTop = Math.max(0, startFrac * hp);
-        const recBottom = Math.min(endFracHighlight * hp, totalHMain);
-        if (recBottom - recTop <= 4) return;
-        const busyPx = busyDayToPxRanges(dayBusy, day0, day1, totalHMain, hp, START_H);
-        const segments = receptionSegmentsMinusBusy(recTop, recBottom, busyPx);
-        segments.forEach(function (seg) {
-          const h = seg.bottom - seg.top;
-          if (h <= 4) return;
-          const band = document.createElement('div');
-          band.className = 'booking-cal-avail-band';
-          band.setAttribute('aria-hidden', 'true');
-          band.title = '';
-          band.style.top = seg.top + 'px';
-          band.style.height = h + 'px';
-          layer2.appendChild(band);
-        });
-      })();
       placeBusyInLayer(layer2, day0, day1, dayBusy, totalHMain, hp, START_H);
       placeSlotsInLayer(layer2, day0, day1, daySlots, totalHMain, hp, START_H);
       layer2.addEventListener(
