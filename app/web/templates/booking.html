@@ -104,6 +104,9 @@
   let lastAvail = null;
   let lastMeta = null;
   let customerGoogleAccessToken = null;
+  let customerGoogleTokenClient = null;
+  let customerGoogleTokenClientInitError = '';
+  let gsiLoadingPromise = null;
   let selectedBookingStartIso = null;
   /** 直近の GET /availability と同じ FreeBusy 窓（予約 POST でサーバーに渡す） */
   let lastAvailabilityRange = null;
@@ -793,6 +796,13 @@
     if (grow) {
       grow.hidden = !(ggc && ggc.enabled && ggc.client_id);
     }
+    if (ggc && ggc.enabled && ggc.client_id) {
+      ensureCustomerGoogleTokenClient().catch(function (e) {
+        customerGoogleTokenClientInitError = formatGoogleCalendarPermissionError(
+          e && e.message ? e.message : e
+        );
+      });
+    }
     metaAvailability = m.availability_defaults || {};
     cursorDate = startOfLocalDay(new Date());
     const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
@@ -992,65 +1002,103 @@
     openSuccessDialog(j, startIso);
   });
 
-  function loadGsiScript(onload) {
+  function gsiSetupHint() {
+    return lastMeta && lastMeta.go_google_calendar && lastMeta.go_google_calendar.gsi_setup_note_ja
+      ? lastMeta.go_google_calendar.gsi_setup_note_ja
+      : '';
+  }
+
+  function formatGoogleCalendarPermissionError(raw) {
+    const text = String(raw || '').trim();
+    const lower = text.toLowerCase();
+    if (!text) return 'Google カレンダー連携に失敗しました。';
+    if (lower.indexOf('popup') !== -1 && lower.indexOf('closed') !== -1) {
+      return 'Google の許可ポップアップが途中で閉じられました。もう一度お試しください。';
+    }
+    if (lower.indexOf('popup_failed') !== -1 || lower.indexOf('popup blocked') !== -1) {
+      return 'Google の許可ポップアップを開けませんでした。ブラウザのポップアップ許可を確認してください。';
+    }
+    if (lower.indexOf('idpiframe_initialization_failed') !== -1) {
+      return 'Google 認証の初期化に失敗しました。ブラウザ設定または Cookie 制限を確認してください。';
+    }
+    if (lower.indexOf('origin') !== -1 || lower.indexOf('redirect_uri_mismatch') !== -1) {
+      const hint = gsiSetupHint();
+      return 'Google OAuth の設定が一致していません。' + (hint ? '\n' + hint : '');
+    }
+    return text;
+  }
+
+  function loadGsiScript() {
     if (window.google && window.google.accounts && window.google.accounts.oauth2) {
-      onload();
-      return;
+      return Promise.resolve();
     }
-    const existing = document.querySelector('script[data-booking-gsi]');
-    if (existing) {
-      existing.addEventListener('load', onload);
-      return;
+    if (gsiLoadingPromise) return gsiLoadingPromise;
+    gsiLoadingPromise = new Promise(function (resolve, reject) {
+      const existing = document.querySelector('script[data-booking-gsi]');
+      if (existing) {
+        existing.addEventListener('load', function () { resolve(); }, { once: true });
+        existing.addEventListener('error', function () { reject(new Error('gsi_load_failed')); }, { once: true });
+        return;
+      }
+      const s = document.createElement('script');
+      s.src = 'https://accounts.google.com/gsi/client';
+      s.async = true;
+      s.defer = true;
+      s.setAttribute('data-booking-gsi', '1');
+      s.onload = function () { resolve(); };
+      s.onerror = function () { reject(new Error('gsi_load_failed')); };
+      document.head.appendChild(s);
+    });
+    return gsiLoadingPromise;
+  }
+
+  async function ensureCustomerGoogleTokenClient() {
+    if (customerGoogleTokenClient) return customerGoogleTokenClient;
+    const ggc = lastMeta && lastMeta.go_google_calendar;
+    const cid = ggc && ggc.client_id;
+    if (!cid) {
+      throw new Error('Google 連携がサーバーで有効になっていません。');
     }
-    const s = document.createElement('script');
-    s.src = 'https://accounts.google.com/gsi/client';
-    s.async = true;
-    s.defer = true;
-    s.setAttribute('data-booking-gsi', '1');
-    s.onload = onload;
-    document.head.appendChild(s);
+    await loadGsiScript();
+    if (!window.google || !google.accounts || !google.accounts.oauth2) {
+      throw new Error('Google の読み込みに失敗しました。ページを再読み込みしてください。');
+    }
+    customerGoogleTokenClient = google.accounts.oauth2.initTokenClient({
+      client_id: cid,
+      scope: 'https://www.googleapis.com/auth/calendar.events',
+      callback: function (resp) {
+        const msg = document.getElementById('modal-msg');
+        if (resp.error) {
+          if (msg) msg.textContent = formatGoogleCalendarPermissionError(resp.error);
+          return;
+        }
+        customerGoogleAccessToken = resp.access_token;
+        const st = document.getElementById('modal-google-cal-status');
+        if (st) st.textContent = '許可済み';
+        if (msg) msg.textContent = '';
+      },
+      error_callback: function (err) {
+        const msg = document.getElementById('modal-msg');
+        const raw = err && (err.message || err.type) ? String(err.message || err.type) : '認可に失敗しました';
+        if (msg) msg.textContent = formatGoogleCalendarPermissionError(raw);
+      },
+    });
+    customerGoogleTokenClientInitError = '';
+    return customerGoogleTokenClient;
   }
 
   document.getElementById('modal-google-cal-btn').addEventListener('click', function () {
     const msg = document.getElementById('modal-msg');
     msg.textContent = '';
-    const ggc = lastMeta && lastMeta.go_google_calendar;
-    const cid = ggc && ggc.client_id;
-    if (!cid) {
-      msg.textContent = 'Google 連携がサーバーで有効になっていません。';
+    if (customerGoogleTokenClientInitError) {
+      msg.textContent = customerGoogleTokenClientInitError;
       return;
     }
-    loadGsiScript(function () {
-      if (!window.google || !google.accounts || !google.accounts.oauth2) {
-        msg.textContent = 'Google の読み込みに失敗しました。ページを再読み込みしてください。';
-        return;
-      }
-      const gsiHint =
-        lastMeta && lastMeta.go_google_calendar && lastMeta.go_google_calendar.gsi_setup_note_ja
-          ? lastMeta.go_google_calendar.gsi_setup_note_ja
-          : '';
-      const client = google.accounts.oauth2.initTokenClient({
-        client_id: cid,
-        scope: 'https://www.googleapis.com/auth/calendar.events',
-        callback: function (resp) {
-          if (resp.error) {
-            msg.textContent =
-              (resp.error === 'popup_failed' ? 'ポップアップを許可してください。' : resp.error) +
-              (gsiHint ? '\n' + gsiHint : '');
-            return;
-          }
-          customerGoogleAccessToken = resp.access_token;
-          const st = document.getElementById('modal-google-cal-status');
-          if (st) st.textContent = '許可済み';
-        },
-        error_callback: function (err) {
-          msg.textContent =
-            (err && (err.message || err.type) ? String(err.message || err.type) : '認可に失敗しました') +
-            (gsiHint ? '\n' + gsiHint : '');
-        },
-      });
-      client.requestAccessToken();
-    });
+    if (!customerGoogleTokenClient) {
+      msg.textContent = 'Google の許可準備がまだ終わっていません。数秒待ってからもう一度押してください。';
+      return;
+    }
+    customerGoogleTokenClient.requestAccessToken();
   });
 
   dialogEl.addEventListener('click', function (ev) {
