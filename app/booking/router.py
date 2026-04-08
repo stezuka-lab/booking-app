@@ -2708,7 +2708,17 @@ async def oauth_google_callback(
         target_id=staff.id,
         detail={"email": _staff_google_profile_email(staff, settings) or staff.email or "", "name": staff.google_profile_name or staff.name or ""},
     )
+    write_ok, write_err = await verify_calendar_write_access_detailed(
+        _staff_google_refresh_token(staff, settings),
+        staff.google_calendar_id,
+        settings,
+    )
     await db.commit()
+    if not write_ok:
+        return RedirectResponse(
+            url=f"{cal}?google_oauth=err&reason=write_check_failed&detail={urlencode({'d': (write_err or 'Google Calendar write check failed')[:180]})[2:]}",
+            status_code=303,
+        )
     return RedirectResponse(
         url=f"{cal}?google_oauth=ok&staff_id={staff_id}",
         status_code=303,

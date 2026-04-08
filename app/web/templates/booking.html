@@ -47,14 +47,7 @@
     <input id="modal-email" type="email" autocomplete="off" placeholder="example@email.com" class="booking-dialog__input-wide" />
     <label class="field-label" for="modal-company">会社名（任意・カレンダー表示用）</label>
     <input id="modal-company" type="text" autocomplete="off" class="booking-dialog__input-wide" />
-    <div id="modal-google-cal-row" class="booking-google-cal-row" hidden>
-      <p class="muted foot-hint">任意：Google カレンダーにも追加できます。</p>
-      <div class="booking-dialog__actions" style="margin-top: 0.5rem">
-        <button type="button" class="btn secondary" id="modal-google-cal-btn">Google カレンダーに追加する許可</button>
-        <span id="modal-google-cal-status" class="muted" style="margin-left: 0.5rem"></span>
-      </div>
-    </div>
-    <p class="muted foot-hint">確定後、確認メールをお送りします。</p>
+    <p class="muted foot-hint">確定後、確認メールをお送りします。Google カレンダーへの追加は完了画面から行えます。</p>
     <p id="modal-msg" class="err" role="alert"></p>
     <div class="booking-dialog__actions">
       <button type="button" class="btn secondary" id="modal-cancel">閉じる</button>
@@ -104,9 +97,6 @@
   let lastAvail = null;
   let lastMeta = null;
   let customerGoogleAccessToken = null;
-  let customerGoogleTokenClient = null;
-  let customerGoogleTokenClientInitError = '';
-  let gsiLoadingPromise = null;
   let selectedBookingStartIso = null;
   /** 直近の GET /availability と同じ FreeBusy 窓（予約 POST でサーバーに渡す） */
   let lastAvailabilityRange = null;
@@ -424,8 +414,6 @@
     highlightSlot(iso);
     selectedBookingStartIso = iso;
     customerGoogleAccessToken = null;
-    const gst = document.getElementById('modal-google-cal-status');
-    if (gst) gst.textContent = '';
     document.getElementById('modal-datetime-label').textContent = fmtSlot.format(new Date(iso));
     document.getElementById('modal-msg').textContent = '';
     document.getElementById('modal-customer-number').value = '';
@@ -791,18 +779,6 @@
     }
     const m = await r.json();
     lastMeta = m;
-    const ggc = m.go_google_calendar;
-    const grow = document.getElementById('modal-google-cal-row');
-    if (grow) {
-      grow.hidden = !(ggc && ggc.enabled && ggc.client_id);
-    }
-    if (ggc && ggc.enabled && ggc.client_id) {
-      ensureCustomerGoogleTokenClient().catch(function (e) {
-        customerGoogleTokenClientInitError = formatGoogleCalendarPermissionError(
-          e && e.message ? e.message : e
-        );
-      });
-    }
     metaAvailability = m.availability_defaults || {};
     cursorDate = startOfLocalDay(new Date());
     const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
@@ -1000,105 +976,6 @@
     }
     dialogEl.close();
     openSuccessDialog(j, startIso);
-  });
-
-  function gsiSetupHint() {
-    return lastMeta && lastMeta.go_google_calendar && lastMeta.go_google_calendar.gsi_setup_note_ja
-      ? lastMeta.go_google_calendar.gsi_setup_note_ja
-      : '';
-  }
-
-  function formatGoogleCalendarPermissionError(raw) {
-    const text = String(raw || '').trim();
-    const lower = text.toLowerCase();
-    if (!text) return 'Google カレンダー連携に失敗しました。';
-    if (lower.indexOf('popup') !== -1 && lower.indexOf('closed') !== -1) {
-      return 'Google の許可ポップアップが途中で閉じられました。もう一度お試しください。';
-    }
-    if (lower.indexOf('popup_failed') !== -1 || lower.indexOf('popup blocked') !== -1) {
-      return 'Google の許可ポップアップを開けませんでした。ブラウザのポップアップ許可を確認してください。';
-    }
-    if (lower.indexOf('idpiframe_initialization_failed') !== -1) {
-      return 'Google 認証の初期化に失敗しました。ブラウザ設定または Cookie 制限を確認してください。';
-    }
-    if (lower.indexOf('origin') !== -1 || lower.indexOf('redirect_uri_mismatch') !== -1) {
-      const hint = gsiSetupHint();
-      return 'Google OAuth の設定が一致していません。' + (hint ? '\n' + hint : '');
-    }
-    return text;
-  }
-
-  function loadGsiScript() {
-    if (window.google && window.google.accounts && window.google.accounts.oauth2) {
-      return Promise.resolve();
-    }
-    if (gsiLoadingPromise) return gsiLoadingPromise;
-    gsiLoadingPromise = new Promise(function (resolve, reject) {
-      const existing = document.querySelector('script[data-booking-gsi]');
-      if (existing) {
-        existing.addEventListener('load', function () { resolve(); }, { once: true });
-        existing.addEventListener('error', function () { reject(new Error('gsi_load_failed')); }, { once: true });
-        return;
-      }
-      const s = document.createElement('script');
-      s.src = 'https://accounts.google.com/gsi/client';
-      s.async = true;
-      s.defer = true;
-      s.setAttribute('data-booking-gsi', '1');
-      s.onload = function () { resolve(); };
-      s.onerror = function () { reject(new Error('gsi_load_failed')); };
-      document.head.appendChild(s);
-    });
-    return gsiLoadingPromise;
-  }
-
-  async function ensureCustomerGoogleTokenClient() {
-    if (customerGoogleTokenClient) return customerGoogleTokenClient;
-    const ggc = lastMeta && lastMeta.go_google_calendar;
-    const cid = ggc && ggc.client_id;
-    if (!cid) {
-      throw new Error('Google 連携がサーバーで有効になっていません。');
-    }
-    await loadGsiScript();
-    if (!window.google || !google.accounts || !google.accounts.oauth2) {
-      throw new Error('Google の読み込みに失敗しました。ページを再読み込みしてください。');
-    }
-    customerGoogleTokenClient = google.accounts.oauth2.initTokenClient({
-      client_id: cid,
-      scope: 'https://www.googleapis.com/auth/calendar.events',
-      callback: function (resp) {
-        const msg = document.getElementById('modal-msg');
-        if (resp.error) {
-          if (msg) msg.textContent = formatGoogleCalendarPermissionError(resp.error);
-          return;
-        }
-        customerGoogleAccessToken = resp.access_token;
-        const st = document.getElementById('modal-google-cal-status');
-        if (st) st.textContent = '許可済み';
-        if (msg) msg.textContent = '';
-      },
-      error_callback: function (err) {
-        const msg = document.getElementById('modal-msg');
-        const raw = err && (err.message || err.type) ? String(err.message || err.type) : '認可に失敗しました';
-        if (msg) msg.textContent = formatGoogleCalendarPermissionError(raw);
-      },
-    });
-    customerGoogleTokenClientInitError = '';
-    return customerGoogleTokenClient;
-  }
-
-  document.getElementById('modal-google-cal-btn').addEventListener('click', function () {
-    const msg = document.getElementById('modal-msg');
-    msg.textContent = '';
-    if (customerGoogleTokenClientInitError) {
-      msg.textContent = customerGoogleTokenClientInitError;
-      return;
-    }
-    if (!customerGoogleTokenClient) {
-      msg.textContent = 'Google の許可準備がまだ終わっていません。数秒待ってからもう一度押してください。';
-      return;
-    }
-    customerGoogleTokenClient.requestAccessToken();
   });
 
   dialogEl.addEventListener('click', function (ev) {
