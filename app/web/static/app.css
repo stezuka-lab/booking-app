@@ -1035,11 +1035,31 @@ code {
 
 .gcal-col.booking-day-blocked {
   cursor: not-allowed;
-  background: #f8fafc;
+  background:
+    linear-gradient(180deg, rgba(241, 245, 249, 0.94), rgba(226, 232, 240, 0.9)),
+    repeating-linear-gradient(
+      135deg,
+      rgba(148, 163, 184, 0.08) 0,
+      rgba(148, 163, 184, 0.08) 10px,
+      rgba(255, 255, 255, 0) 10px,
+      rgba(255, 255, 255, 0) 20px
+    );
 }
 
 .gcal-col.booking-day-blocked:active {
   box-shadow: none;
+}
+
+.gcal-col.booking-day-blocked .gcal-slot {
+  background:
+    linear-gradient(180deg, rgba(241, 245, 249, 0.72), rgba(226, 232, 240, 0.66)),
+    repeating-linear-gradient(
+      135deg,
+      rgba(148, 163, 184, 0.06) 0,
+      rgba(148, 163, 184, 0.06) 10px,
+      rgba(255, 255, 255, 0) 10px,
+      rgba(255, 255, 255, 0) 20px
+    );
 }
 
 .booking-cal-events-layer .booking-day-blocked-overlay {
@@ -1049,27 +1069,46 @@ code {
   top: 0;
   bottom: 0;
   z-index: 4;
-  background: rgba(248, 250, 252, 0.88);
+  background:
+    linear-gradient(180deg, rgba(248, 250, 252, 0.78), rgba(241, 245, 249, 0.74)),
+    repeating-linear-gradient(
+      135deg,
+      rgba(148, 163, 184, 0.08) 0,
+      rgba(148, 163, 184, 0.08) 10px,
+      rgba(255, 255, 255, 0) 10px,
+      rgba(255, 255, 255, 0) 20px
+    );
   display: flex;
-  align-items: center;
+  align-items: flex-start;
   justify-content: center;
   pointer-events: auto;
   border-radius: 4px;
+  padding-top: 0.9rem;
 }
 
 .booking-day-blocked-label {
-  font-size: 0.78rem;
+  font-size: 0.76rem;
   font-weight: 700;
-  color: #64748b;
-  padding: 0.35rem 0.65rem;
-  border: 1px dashed #94a3b8;
-  border-radius: 6px;
-  background: rgba(255, 255, 255, 0.95);
+  letter-spacing: 0.03em;
+  color: #475569;
+  padding: 0.38rem 0.72rem;
+  border: 1px solid rgba(100, 116, 139, 0.28);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 6px 14px rgba(148, 163, 184, 0.14);
 }
 
 .gcal-head-daycell.booking-head-day-blocked {
-  color: #94a3b8;
-  background: #f1f5f9;
+  color: #64748b;
+  background:
+    linear-gradient(180deg, rgba(241, 245, 249, 0.96), rgba(226, 232, 240, 0.92)),
+    repeating-linear-gradient(
+      135deg,
+      rgba(148, 163, 184, 0.08) 0,
+      rgba(148, 163, 184, 0.08) 10px,
+      rgba(255, 255, 255, 0) 10px,
+      rgba(255, 255, 255, 0) 20px
+    );
 }
 
 .booking-cal-events-layer .booking-slot-choice.cal-event {
