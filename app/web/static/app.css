@@ -1065,22 +1065,24 @@ code {
     );
   display: flex;
   align-items: flex-start;
-  justify-content: center;
+  justify-content: flex-end;
   pointer-events: auto;
   border-radius: 4px;
-  padding-top: 0.9rem;
+  padding: 0.55rem 0.55rem 0 0;
 }
 
 .booking-day-blocked-label {
-  font-size: 0.76rem;
+  font-size: 0.72rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   color: #475569;
-  padding: 0.38rem 0.72rem;
+  padding: 0.24rem 0.56rem;
   border: 1px solid rgba(100, 116, 139, 0.28);
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 6px 14px rgba(148, 163, 184, 0.14);
+  box-shadow: 0 4px 10px rgba(148, 163, 184, 0.12);
+  line-height: 1;
+  white-space: nowrap;
 }
 
 .gcal-head-daycell.booking-head-day-blocked {
