@@ -175,6 +175,8 @@ def _store_cached_public_availability(
     ttl = max(0, int(getattr(settings, "booking_public_availability_cache_sec", 0) or 0))
     if ttl <= 0:
         return
+    if payload.get("availability_error"):
+        return
     key = _public_availability_cache_key(token, from_ts, to_ts, service_id)
     _PUBLIC_AVAILABILITY_CACHE[key] = (
         time_module.monotonic() + ttl,
@@ -908,7 +910,7 @@ async def _create_booking_from_body(
                 400,
                 "この担当はこの予約リンク・区分の対象外です（担当割当・スキル・Google連携をご確認ください）",
             )
-        gmap = await _load_google_busy_map([staff], fb_from, fb_to, settings)
+        gmap, _google_busy_errors = await _load_google_busy_map([staff], fb_from, fb_to, settings)
         if not await staff_is_free(
             db,
             staff,
@@ -946,7 +948,7 @@ async def _create_booking_from_body(
                     buffer_minutes=buf_org,
                 ),
             )
-        gmap = await _load_google_busy_map(staff_list, fb_from, fb_to, settings)
+        gmap, _google_busy_errors = await _load_google_busy_map(staff_list, fb_from, fb_to, settings)
         picked = await pick_staff_for_slot(
             db,
             org,
@@ -1378,7 +1380,7 @@ async def manage_reschedule(
         )
     ws, we = org_calendar_day_bounds_utc(new_start, org)
     _pad = timedelta(days=1)
-    gmap = await _load_google_busy_map([staff], ws - _pad, we + _pad, settings)
+    gmap, _google_busy_errors = await _load_google_busy_map([staff], ws - _pad, we + _pad, settings)
     buf_res = org_buffer_minutes(org, settings)
     if not await staff_is_free(
         db,
