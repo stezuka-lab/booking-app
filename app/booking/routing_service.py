@@ -795,6 +795,7 @@ def fallback_open_hour_slots_for_link(
     *,
     service: BookingService | None,
     link_priority_overrides: dict[str, int] | None = None,
+    extra_blocked_dates: set[date] | None = None,
     max_advance_days_override: int | None = None,
     bookable_until_date_override: date | None = None,
 ) -> tuple[list[dict[str, Any]], int]:
@@ -834,7 +835,9 @@ def fallback_open_hour_slots_for_link(
         if cutoff_date is not None and cur_day > cutoff_date:
             cur_day = cur_day + timedelta(days=1)
             continue
-        if day_is_blocked_for_booking(cur_day, defaults):
+        if day_is_blocked_for_booking(cur_day, defaults) or (
+            extra_blocked_dates and cur_day in extra_blocked_dates
+        ):
             cur_day = cur_day + timedelta(days=1)
             continue
         sh, sm, eh, em = 8, 0, 22, 0

@@ -195,6 +195,40 @@ def test_public_availability_falls_back_to_open_hours_when_slots_empty(client, m
     assert "受付時間ベース" in warning
 
 
+def test_public_availability_fallback_respects_blocked_dates(client, monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    token = (health.json().get("booking_demo") or {}).get("token")
+    assert token
+
+    async def fake_slots(*args, **kwargs):
+        return [], 30, True
+
+    async def fake_busy(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(booking_router, "available_slots_for_link", fake_slots)
+    monkeypatch.setattr(booking_router, "busy_intervals_union_for_link", fake_busy)
+
+    response = client.get(
+        f"/api/booking/links/{token}/availability",
+        params={
+            "from_ts": "2026-04-08T00:00:00+09:00",
+            "to_ts": "2026-04-15T00:00:00+09:00",
+            "service_id": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    blocked = set(body.get("blocked_dates") or [])
+    slots = body.get("slots") or []
+    for slot in slots:
+        assert str(slot.get("start_utc") or "")[:10] not in blocked
+
+
 def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch) -> None:
     import app.booking.router as booking_router
 

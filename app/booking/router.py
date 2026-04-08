@@ -576,6 +576,7 @@ async def link_availability(
                 to_ts,
                 service=service,
                 link_priority_overrides=link_priority_overrides,
+                extra_blocked_dates=lead_blocked,
                 max_advance_days_override=link_max_adv_days,
                 bookable_until_date_override=link_cutoff_date,
             )
