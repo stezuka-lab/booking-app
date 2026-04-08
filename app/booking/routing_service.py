@@ -7,7 +7,7 @@ from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.booking.calendar_policy import day_is_blocked_for_booking
@@ -359,13 +359,19 @@ async def db_booking_busy_intervals_for_staff(
     range_start: datetime,
     range_end: datetime,
 ) -> list[tuple[datetime, datetime]]:
-    """担当の確定・保留予約を [start,end) 区間として返す。"""
+    """担当の予約を [start,end) 区間として返す。
+
+    auto_confirm=true の組織では legacy pending をブロック対象にしない。
+    """
     q = select(Booking).where(
         Booking.staff_id == staff_id,
-        Booking.status.in_(("pending", "confirmed")),
+        or_(
+            Booking.status == "confirmed",
+            and_(Booking.status == "pending", BookingOrg.auto_confirm.is_(False)),
+        ),
         Booking.start_utc < range_end,
         Booking.end_utc > range_start,
-    )
+    ).join(BookingOrg, Booking.org_id == BookingOrg.id)
     rows = list((await session.scalars(q)).all())
     out: list[tuple[datetime, datetime]] = []
     for b in rows:
@@ -483,11 +489,14 @@ async def _db_booking_intervals_for_staff(
     *,
     exclude_booking_id: int | None = None,
 ) -> list[tuple[datetime, datetime]]:
-    """担当の保留・確定予約を区間列として返す（マージ前）。staff_is_free の統合判定用。"""
+    """担当の予約区間列（マージ前）。auto_confirm=true の legacy pending は除外する。"""
     q = select(Booking).where(
         Booking.staff_id == staff_id,
-        Booking.status.in_(("pending", "confirmed")),
-    )
+        or_(
+            Booking.status == "confirmed",
+            and_(Booking.status == "pending", BookingOrg.auto_confirm.is_(False)),
+        ),
+    ).join(BookingOrg, Booking.org_id == BookingOrg.id)
     if exclude_booking_id is not None:
         q = q.where(Booking.id != exclude_booking_id)
     rows = list((await session.scalars(q)).all())

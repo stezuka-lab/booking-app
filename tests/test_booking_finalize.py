@@ -6,6 +6,7 @@ from zoneinfo import ZoneInfo
 from urllib.parse import unquote
 
 from app.booking.db_models import Booking, BookingOrg, StaffMember
+from app.booking.routing_service import db_booking_busy_intervals_for_staff
 from app.booking.router import (
     _delete_staff_calendar_event_if_present,
     _finalize_confirmed_booking,
@@ -119,6 +120,47 @@ def test_release_bookings_with_missing_google_events(monkeypatch) -> None:
     assert released == 1
     assert booking.status == "cancelled"
     assert booking.google_event_id is None
+
+
+def test_db_busy_intervals_ignore_pending_for_auto_confirm_org(client) -> None:
+    from app.db import get_session_factory
+
+    async def run() -> None:
+        Session = get_session_factory()
+        async with Session() as session:
+            org = BookingOrg(
+                name="Auto Org",
+                slug="auto-org-pending-ignore",
+                auto_confirm=True,
+                availability_defaults_json={},
+                cancel_policy_json={},
+            )
+            staff = StaffMember(org=org, name="担当A", email="a@example.com", active=True)
+            session.add_all([org, staff])
+            await session.flush()
+            booking = Booking(
+                org_id=org.id,
+                staff_id=staff.id,
+                service_id=None,
+                start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+                end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+                status="pending",
+                customer_name="Customer",
+                customer_email="customer@example.com",
+                manage_token="pending-ignore",
+            )
+            session.add(booking)
+            await session.commit()
+
+            intervals = await db_booking_busy_intervals_for_staff(
+                session,
+                staff.id,
+                datetime(2030, 1, 1, 0, 0, tzinfo=timezone.utc),
+                datetime(2030, 1, 2, 0, 0, tzinfo=timezone.utc),
+            )
+            assert intervals == []
+
+    asyncio.run(run())
 
 
 def test_public_availability_survives_busy_union_failure(client, monkeypatch) -> None:
