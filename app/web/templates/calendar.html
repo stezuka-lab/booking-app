@@ -52,9 +52,11 @@
   <div class="admin-row align-start wrap" style="margin: 0.85rem 0">
     <div class="admin-field grow">
       <button type="button" class="btn primary" id="btn-add-staff-calendar">担当を追加してカレンダーを連携</button>
+      <button type="button" class="btn secondary" id="btn-run-calendar-diagnostics" style="margin-left:0.65rem">連携診断を実行</button>
     </div>
   </div>
   <div id="cal-staff-table"></div>
+  <div id="cal-diagnostics" class="panel" style="margin-top:1rem" hidden></div>
 </section>
 {% endblock %}
 {% block scripts %}
@@ -335,6 +337,37 @@
     });
   }
 
+  function renderDiagnostics(data) {
+    var box = document.getElementById('cal-diagnostics');
+    if (!box) return;
+    var rows = (data && data.staff) || [];
+    if (!rows.length) {
+      box.hidden = false;
+      box.innerHTML = '<p class="muted">診断対象の担当がいません。</p>';
+      return;
+    }
+    box.hidden = false;
+    box.innerHTML =
+      '<h3 class="cal-h2" style="margin-top:0">Google カレンダー連携の診断</h3>' +
+      '<p class="muted">今後 14 日の FreeBusy 取得を確認しています。error の担当は、Google 連携をやり直してください。</p>' +
+      '<table class="cal-table gcal-staff-table"><thead><tr><th>担当</th><th>状態</th><th>カレンダーID</th><th>busy件数</th><th>エラー</th></tr></thead><tbody>' +
+      rows.map(function (r) {
+        var status = r.status === 'ok'
+          ? '<span class="cal-pill ok">取得OK</span>'
+          : r.status === 'error'
+          ? '<span class="cal-pill err">取得失敗</span>'
+          : '<span class="cal-pill">未連携</span>';
+        return '<tr>' +
+          '<td>' + esc(r.name || '') + '<div class="muted small">' + esc(r.google_profile_email || r.email || '') + '</div></td>' +
+          '<td>' + status + '</td>' +
+          '<td>' + esc(r.google_calendar_id || 'primary') + '</td>' +
+          '<td>' + esc(String(r.busy_interval_count || 0)) + '</td>' +
+          '<td>' + esc(r.error || '—') + '</td>' +
+          '</tr>';
+      }).join('') +
+      '</tbody></table>';
+  }
+
   function loadAll() {
     if (!ensureOrgSelected()) return;
     msgEl.textContent = '';
@@ -425,6 +458,35 @@
       })
       .catch(function (e) {
         setAddStaffButtonEnabled(true);
+        msgEl.textContent = String(e);
+      });
+  });
+
+  document.getElementById('btn-run-calendar-diagnostics').addEventListener('click', function () {
+    if (!ensureOrgSelected()) return;
+    msgEl.textContent = '';
+    var btn = document.getElementById('btn-run-calendar-diagnostics');
+    btn.disabled = true;
+    fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/calendar-diagnostics', {
+      credentials: 'same-origin',
+      headers: headers(),
+    })
+      .then(function (r) {
+        return r.json().then(function (j) {
+          return { r: r, j: j };
+        });
+      })
+      .then(function (x) {
+        btn.disabled = false;
+        if (!x.r.ok) {
+          msgEl.textContent =
+            typeof x.j.detail === 'object' ? JSON.stringify(x.j.detail) : x.j.detail || x.r.statusText;
+          return;
+        }
+        renderDiagnostics(x.j);
+      })
+      .catch(function (e) {
+        btn.disabled = false;
         msgEl.textContent = String(e);
       });
   });

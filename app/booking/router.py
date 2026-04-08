@@ -1575,6 +1575,61 @@ async def admin_org_summary(
     }
 
 
+@router.get("/api/booking/admin/orgs/{slug}/calendar-diagnostics")
+async def admin_calendar_diagnostics(
+    request: Request,
+    slug: str,
+    db: DbSession,
+    settings: SettingsDep,
+    x_admin_secret: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=slug)
+    org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+    if not org:
+        raise HTTPException(404, "org not found")
+    staff = list(
+        (
+            await db.scalars(
+                select(StaffMember).where(
+                    StaffMember.org_id == org.id,
+                    StaffMember.active.is_(True),
+                )
+            )
+        ).all()
+    )
+    now_utc = datetime.now(timezone.utc)
+    until_utc = now_utc + timedelta(days=14)
+    gmap, errors = await _load_google_busy_map(staff, now_utc, until_utc, settings)
+    rows: list[dict[str, Any]] = []
+    for s in staff:
+        refresh_token = (_staff_google_refresh_token(s, settings) or "").strip()
+        busy = list(gmap.get(s.id) or [])
+        err = (errors.get(s.id) or "").strip()
+        rows.append(
+            {
+                "staff_id": s.id,
+                "name": s.name,
+                "email": s.email or "",
+                "google_profile_email": _staff_google_profile_email(s, settings),
+                "google_calendar_id": s.google_calendar_id or "primary",
+                "has_google_refresh_token": bool(refresh_token),
+                "busy_interval_count": len(busy),
+                "busy_sample": [
+                    {"start_utc": a.isoformat(), "end_utc": b.isoformat()}
+                    for a, b in busy[:5]
+                ],
+                "status": "error" if err else ("ok" if refresh_token else "unlinked"),
+                "error": err or None,
+            }
+        )
+    return {
+        "org": {"slug": org.slug, "name": org.name},
+        "window": {"from_utc": now_utc.isoformat(), "to_utc": until_utc.isoformat()},
+        "google_oauth_ready": settings.is_google_oauth_configured(),
+        "staff": rows,
+    }
+
+
 @router.get("/api/booking/admin/orgs/{slug}/bookings")
 async def admin_list_bookings(
     request: Request,
