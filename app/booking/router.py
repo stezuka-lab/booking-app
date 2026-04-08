@@ -99,6 +99,33 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["booking"])
 
 
+def _filter_slots_by_blocked_dates(
+    slots: list[dict[str, Any]],
+    blocked_dates: list[str],
+    org: BookingOrg,
+) -> list[dict[str, Any]]:
+    if not slots or not blocked_dates:
+        return slots
+    blocked = set(blocked_dates)
+    loc_tz = availability_zone(json_object_or_empty(org.availability_defaults_json))
+    out: list[dict[str, Any]] = []
+    for slot in slots:
+        raw_start = slot.get("start_utc")
+        if not raw_start:
+            continue
+        try:
+            start = datetime.fromisoformat(str(raw_start))
+            if start.tzinfo is None:
+                start = start.replace(tzinfo=timezone.utc)
+            local_day = start.astimezone(loc_tz).date().isoformat()
+        except Exception:
+            out.append(slot)
+            continue
+        if local_day not in blocked:
+            out.append(slot)
+    return out
+
+
 def _staff_google_refresh_token(staff: StaffMember | None, settings: Settings) -> str | None:
     if staff is None:
         return None
@@ -587,12 +614,14 @@ async def link_availability(
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
         unlinked_fallback = bool(oauth_on and staff_list and linked_n == 0)
+        blocked_dates = blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts)
+        slots = _filter_slots_by_blocked_dates(slots, blocked_dates, org)
         return {
             "slots": slots,
             "busy_intervals": [
                 {"start_utc": a.isoformat(), "end_utc": b.isoformat()} for a, b in busy_union
             ],
-            "blocked_dates": blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts),
+            "blocked_dates": blocked_dates,
             "slot_minutes": slot_generation_step,
             "service_duration_minutes": duration_min,
             "buffer_minutes": buf_min,
@@ -620,10 +649,11 @@ async def link_availability(
         }
     except Exception:
         logger.exception("Public link availability failed: token=%s org_id=%s", token, org.id)
+        blocked_dates = blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts)
         return {
             "slots": [],
             "busy_intervals": [],
-            "blocked_dates": blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts),
+            "blocked_dates": blocked_dates,
             "slot_minutes": max(1, min(BOOKING_SLOT_STEP_MINUTES, duration_min)),
             "service_duration_minutes": duration_min,
             "buffer_minutes": buf_min,

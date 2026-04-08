@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from urllib.parse import unquote
 
 from app.booking.db_models import Booking, BookingOrg, StaffMember
@@ -225,8 +226,10 @@ def test_public_availability_fallback_respects_blocked_dates(client, monkeypatch
     body = response.json()
     blocked = set(body.get("blocked_dates") or [])
     slots = body.get("slots") or []
+    jst = ZoneInfo("Asia/Tokyo")
     for slot in slots:
-        assert str(slot.get("start_utc") or "")[:10] not in blocked
+        start_utc = datetime.fromisoformat(str(slot.get("start_utc")))
+        assert start_utc.astimezone(jst).date().isoformat() not in blocked
 
 
 def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch) -> None:
