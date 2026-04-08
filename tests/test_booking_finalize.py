@@ -123,6 +123,38 @@ def test_public_availability_survives_single_slot_pick_failure(client, monkeypat
     assert isinstance(body.get("slots"), list)
 
 
+def test_public_availability_survives_malformed_google_busy_interval(client, monkeypatch) -> None:
+    import app.booking.routing_service as routing_service
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    token = (health.json().get("booking_demo") or {}).get("token")
+    assert token
+
+    async def bad_busy_map(*args, **kwargs):
+        staff_list = args[0] if args else []
+        if not staff_list:
+            return {}
+        return {staff_list[0].id: [("bad", "interval")]}
+
+    monkeypatch.setattr(routing_service, "_load_google_busy_map", bad_busy_map)
+
+    now = datetime.now(timezone.utc)
+    response = client.get(
+        f"/api/booking/links/{token}/availability",
+        params={
+            "from_ts": now.isoformat(),
+            "to_ts": (now + timedelta(days=7)).isoformat(),
+            "service_id": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.get("availability_error") in (None, "")
+    assert isinstance(body.get("slots"), list)
+
+
 def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch) -> None:
     import app.booking.router as booking_router
 

@@ -334,6 +334,25 @@ def blocked_iso_dates_in_range_for_link(
     return sorted(merged)
 
 
+def _sanitize_intervals(
+    intervals: list[tuple[datetime, datetime]] | None,
+    *,
+    log_label: str,
+) -> list[tuple[datetime, datetime]]:
+    out: list[tuple[datetime, datetime]] = []
+    for iv in intervals or []:
+        try:
+            start_raw, end_raw = iv
+            start = to_utc_aware(start_raw)
+            end = to_utc_aware(end_raw)
+            if start >= end:
+                continue
+            out.append((start, end))
+        except Exception:
+            logger.exception("Skipping malformed interval: %s", log_label)
+    return out
+
+
 async def db_booking_busy_intervals_for_staff(
     session: AsyncSession,
     staff_id: int,
@@ -372,7 +391,7 @@ async def busy_intervals_union_for_link(
     カレンダー上の「予定あり」は和集合で示す（予約枠の有無は slots を正とする）。"""
     per_staff: list[list[tuple[datetime, datetime]]] = []
     for s in staff_list:
-        gbusy = list(gmap.get(s.id) or [])
+        gbusy = _sanitize_intervals(list(gmap.get(s.id) or []), log_label=f"busy_union google staff={s.id}")
         dbb = await db_booking_busy_intervals_for_staff(session, s.id, range_start, range_end)
         per_staff.append(merge_intervals(gbusy + dbb))
     if not per_staff:
@@ -495,7 +514,7 @@ async def staff_is_free(
         exclude_booking_id=exclude_booking_id,
     )
     gbusy = google_busy_map.get(staff.id) or []
-    g_list = [(to_utc_aware(a), to_utc_aware(b)) for a, b in gbusy]
+    g_list = _sanitize_intervals(list(gbusy), log_label=f"staff_free google staff={staff.id}")
     merged = merge_intervals(db_ivs + g_list)
     return google_calendar_allows_booking(start, end, buf_min, merged)
 
