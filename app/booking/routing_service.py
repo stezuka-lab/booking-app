@@ -770,10 +770,10 @@ async def available_slots_for_link(
                         google_busy_map=gmap,
                         dry_run=True,
                     )
-                except Exception:
+                except Exception as exc:
                     had_slot_errors = True
                     if slot_error_message is None:
-                        slot_error_message = "slot_pick_failed"
+                        slot_error_message = (str(exc).strip() or exc.__class__.__name__)[:500]
                     logger.exception(
                         "Skipping slot after availability evaluation error: org_id=%s start=%s end=%s",
                         getattr(org, "id", None),

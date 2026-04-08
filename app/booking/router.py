@@ -607,16 +607,19 @@ async def link_availability(
             bookable_until_date_override=link_cutoff_date,
         )
         busy_union_failed = False
+        busy_union_error_message = None
         try:
             busy_union = await busy_intervals_union_for_link(db, staff_list, from_ts, to_ts, gmap)
-        except Exception:
+        except Exception as exc:
             busy_union_failed = True
+            busy_union_error_message = (str(exc).strip() or exc.__class__.__name__)[:500]
             logger.exception("Public link busy union failed: token=%s org_id=%s", token, org.id)
             busy_union = []
         availability_debug = {
             "gmap_failed": gmap_failed,
             "google_busy_failed_staff_count": len(google_busy_errors),
             "busy_union_failed": busy_union_failed,
+            "busy_union_error_message": busy_union_error_message,
             "had_slot_errors": had_slot_errors,
             "slot_error_message": slot_error_message,
             "linked_staff_ids": sorted(linked_staff_ids),
@@ -723,6 +726,7 @@ async def link_availability(
                 "gmap_failed": True,
                 "google_busy_failed_staff_count": 0,
                 "busy_union_failed": False,
+                "busy_union_error_message": None,
                 "had_slot_errors": False,
                 "slot_error_message": "availability_exception",
                 "linked_staff_ids": [],
