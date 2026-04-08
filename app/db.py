@@ -6,7 +6,7 @@ from functools import lru_cache
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from sqlalchemy import Text, text
+from sqlalchemy import inspect, text
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
@@ -23,6 +23,58 @@ import app.auth.models  # noqa: E402, F401
 import app.booking.db_models  # noqa: E402, F401
 
 _engine = None
+
+
+SCHEMA_DRIFT_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
+    "booking_orgs": [
+        ("auto_confirm", '"auto_confirm" BOOLEAN NOT NULL DEFAULT 0', '"auto_confirm" BOOLEAN NOT NULL DEFAULT FALSE'),
+        ("ga4_measurement_id", '"ga4_measurement_id" VARCHAR(64)', '"ga4_measurement_id" VARCHAR(64)'),
+        ("email_settings_json", '"email_settings_json" TEXT', '"email_settings_json" JSON'),
+    ],
+    "booking_staff": [
+        ("line_user_id", '"line_user_id" VARCHAR(256)', '"line_user_id" VARCHAR(256)'),
+        ("google_profile_email", '"google_profile_email" VARCHAR(320)', '"google_profile_email" VARCHAR(320)'),
+        ("google_profile_name", '"google_profile_name" VARCHAR(256)', '"google_profile_name" VARCHAR(256)'),
+        ("zoom_meeting_url", '"zoom_meeting_url" TEXT', '"zoom_meeting_url" TEXT'),
+        ("skill_tags", '"skill_tags" VARCHAR(1024) NOT NULL DEFAULT \'\'', '"skill_tags" VARCHAR(1024) NOT NULL DEFAULT \'\''),
+    ],
+    "booking_public_links": [
+        ("service_id", '"service_id" INTEGER', '"service_id" INTEGER'),
+        ("active", '"active" BOOLEAN NOT NULL DEFAULT 1', '"active" BOOLEAN NOT NULL DEFAULT TRUE'),
+        ("block_next_days", '"block_next_days" INTEGER NOT NULL DEFAULT 0', '"block_next_days" INTEGER NOT NULL DEFAULT 0'),
+        ("staff_priority_overrides_json", '"staff_priority_overrides_json" TEXT', '"staff_priority_overrides_json" JSON'),
+        ("buffer_minutes", '"buffer_minutes" INTEGER', '"buffer_minutes" INTEGER'),
+        ("max_advance_booking_days", '"max_advance_booking_days" INTEGER', '"max_advance_booking_days" INTEGER'),
+        ("bookable_until_date", '"bookable_until_date" VARCHAR(10)', '"bookable_until_date" VARCHAR(10)'),
+        ("pre_booking_notice", '"pre_booking_notice" TEXT', '"pre_booking_notice" TEXT'),
+        ("post_booking_message", '"post_booking_message" TEXT', '"post_booking_message" TEXT'),
+    ],
+    "bookings": [
+        ("customer_reminder_sent_at", '"customer_reminder_sent_at" DATETIME', '"customer_reminder_sent_at" TIMESTAMP WITH TIME ZONE'),
+        ("staff_reminder_sent_at", '"staff_reminder_sent_at" DATETIME', '"staff_reminder_sent_at" TIMESTAMP WITH TIME ZONE'),
+        ("last_outreach_at", '"last_outreach_at" DATETIME', '"last_outreach_at" TIMESTAMP WITH TIME ZONE'),
+        ("customer_reminder_1h_sent_at", '"customer_reminder_1h_sent_at" DATETIME', '"customer_reminder_1h_sent_at" TIMESTAMP WITH TIME ZONE'),
+        ("google_calendar_synced_at", '"google_calendar_synced_at" DATETIME', '"google_calendar_synced_at" TIMESTAMP WITH TIME ZONE'),
+        ("google_calendar_sync_error", '"google_calendar_sync_error" TEXT', '"google_calendar_sync_error" TEXT'),
+        ("staff_reminder_1h_sent_at", '"staff_reminder_1h_sent_at" DATETIME', '"staff_reminder_1h_sent_at" TIMESTAMP WITH TIME ZONE'),
+        ("booking_link_title_snapshot", '"booking_link_title_snapshot" VARCHAR(256)', '"booking_link_title_snapshot" VARCHAR(256)'),
+        ("customer_confirmation_email_last_attempt_at", '"customer_confirmation_email_last_attempt_at" DATETIME', '"customer_confirmation_email_last_attempt_at" TIMESTAMP WITH TIME ZONE'),
+        ("customer_confirmation_email_sent_at", '"customer_confirmation_email_sent_at" DATETIME', '"customer_confirmation_email_sent_at" TIMESTAMP WITH TIME ZONE'),
+        ("customer_confirmation_email_error", '"customer_confirmation_email_error" TEXT', '"customer_confirmation_email_error" TEXT'),
+        ("staff_notification_email_last_attempt_at", '"staff_notification_email_last_attempt_at" DATETIME', '"staff_notification_email_last_attempt_at" TIMESTAMP WITH TIME ZONE'),
+        ("staff_notification_email_sent_at", '"staff_notification_email_sent_at" DATETIME', '"staff_notification_email_sent_at" TIMESTAMP WITH TIME ZONE'),
+        ("staff_notification_email_error", '"staff_notification_email_error" TEXT', '"staff_notification_email_error" TEXT'),
+        ("company_name", '"company_name" VARCHAR(256)', '"company_name" VARCHAR(256)'),
+        ("calendar_title_note", '"calendar_title_note" TEXT', '"calendar_title_note" TEXT'),
+        ("staff_display_name", '"staff_display_name" VARCHAR(256)', '"staff_display_name" VARCHAR(256)'),
+    ],
+    "booking_customers": [
+        ("repeat_outreach_sent_at", '"repeat_outreach_sent_at" DATETIME', '"repeat_outreach_sent_at" TIMESTAMP WITH TIME ZONE'),
+    ],
+    "booking_app_users": [
+        ("default_org_slug", '"default_org_slug" VARCHAR(128)', '"default_org_slug" VARCHAR(128)'),
+    ],
+}
 
 
 def _normalize_database_url(raw_url: str) -> tuple[str, dict[str, Any]]:
@@ -81,222 +133,27 @@ async def _sqlite_add_missing_columns() -> None:
     if not str(engine.url).startswith("sqlite"):
         return
     async with engine.begin() as conn:
-        await _ensure_sqlite_column(
-            conn,
-            "booking_orgs",
-            "auto_confirm",
-            '"auto_confirm" BOOLEAN NOT NULL DEFAULT 0',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_orgs",
-            "ga4_measurement_id",
-            '"ga4_measurement_id" VARCHAR(64)',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_orgs",
-            "email_settings_json",
-            '"email_settings_json" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_staff",
-            "line_user_id",
-            '"line_user_id" VARCHAR(256)',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "customer_reminder_sent_at",
-            '"customer_reminder_sent_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "staff_reminder_sent_at",
-            '"staff_reminder_sent_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "last_outreach_at",
-            '"last_outreach_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_customers",
-            "repeat_outreach_sent_at",
-            '"repeat_outreach_sent_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "customer_reminder_1h_sent_at",
-            '"customer_reminder_1h_sent_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "google_calendar_synced_at",
-            '"google_calendar_synced_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "google_calendar_sync_error",
-            '"google_calendar_sync_error" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "staff_reminder_1h_sent_at",
-            '"staff_reminder_1h_sent_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "booking_link_title_snapshot",
-            '"booking_link_title_snapshot" VARCHAR(256)',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "customer_confirmation_email_last_attempt_at",
-            '"customer_confirmation_email_last_attempt_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "customer_confirmation_email_sent_at",
-            '"customer_confirmation_email_sent_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "customer_confirmation_email_error",
-            '"customer_confirmation_email_error" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "staff_notification_email_last_attempt_at",
-            '"staff_notification_email_last_attempt_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "staff_notification_email_sent_at",
-            '"staff_notification_email_sent_at" DATETIME',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "staff_notification_email_error",
-            '"staff_notification_email_error" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_staff",
-            "google_profile_email",
-            '"google_profile_email" VARCHAR(320)',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_staff",
-            "google_profile_name",
-            '"google_profile_name" VARCHAR(256)',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_staff",
-            "zoom_meeting_url",
-            '"zoom_meeting_url" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_staff",
-            "skill_tags",
-            '"skill_tags" VARCHAR(1024) NOT NULL DEFAULT \'\'',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "service_id",
-            '"service_id" INTEGER',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "active",
-            '"active" BOOLEAN NOT NULL DEFAULT 1',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "block_next_days",
-            '"block_next_days" INTEGER NOT NULL DEFAULT 0',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "staff_priority_overrides_json",
-            '"staff_priority_overrides_json" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "buffer_minutes",
-            '"buffer_minutes" INTEGER',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "max_advance_booking_days",
-            '"max_advance_booking_days" INTEGER',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "bookable_until_date",
-            '"bookable_until_date" VARCHAR(10)',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "pre_booking_notice",
-            '"pre_booking_notice" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_public_links",
-            "post_booking_message",
-            '"post_booking_message" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "company_name",
-            '"company_name" VARCHAR(256)',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "calendar_title_note",
-            '"calendar_title_note" TEXT',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "bookings",
-            "staff_display_name",
-            '"staff_display_name" VARCHAR(256)',
-        )
-        await _ensure_sqlite_column(
-            conn,
-            "booking_app_users",
-            "default_org_slug",
-            '"default_org_slug" VARCHAR(128)',
-        )
+        for table, columns in SCHEMA_DRIFT_COLUMNS.items():
+            for column, sqlite_ddl, _postgres_ddl in columns:
+                await _ensure_sqlite_column(conn, table, column, sqlite_ddl)
+
+
+def _postgres_add_missing_columns_sync(sync_conn: Any) -> None:
+    inspector = inspect(sync_conn)
+    for table, columns in SCHEMA_DRIFT_COLUMNS.items():
+        existing = {col["name"] for col in inspector.get_columns(table)}
+        for column, _sqlite_ddl, postgres_ddl in columns:
+            if column in existing:
+                continue
+            sync_conn.execute(text(f'ALTER TABLE "{table}" ADD COLUMN IF NOT EXISTS {postgres_ddl}'))
+
+
+async def _postgres_add_missing_columns() -> None:
+    engine = _get_engine()
+    if not str(engine.url).startswith("postgresql"):
+        return
+    async with engine.begin() as conn:
+        await conn.run_sync(_postgres_add_missing_columns_sync)
 
 
 def _sqlite_rebuild_bookings_nullable_staff_sync(connection: Any) -> None:
@@ -350,6 +207,7 @@ async def init_db() -> None:
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
     await _sqlite_add_missing_columns()
+    await _postgres_add_missing_columns()
     await _sqlite_migrate_bookings_nullable_staff(_get_engine())
 
 
