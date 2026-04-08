@@ -33,6 +33,7 @@ async def run_booking_reminders_and_crm() -> None:
     async with factory() as session:
         try:
             await _retry_customer_confirmation_emails(session, settings)
+            await _retry_staff_calendar_syncs(session, settings)
             await _send_reminders(session, settings)
             await _repeat_outreach(session, settings)
             await session.commit()
@@ -78,6 +79,37 @@ async def _retry_customer_confirmation_emails(session: AsyncSession, settings: S
             b.customer_confirmation_email_error = None
         elif err:
             b.customer_confirmation_email_error = str(err)[:500]
+
+
+async def _retry_staff_calendar_syncs(session: AsyncSession, settings: Settings) -> None:
+    now = datetime.now(timezone.utc)
+    cutoff = now - timedelta(days=1)
+    q = await session.scalars(
+        select(Booking).where(
+            Booking.status == "confirmed",
+            Booking.google_event_id.is_(None),
+            Booking.start_utc >= cutoff,
+        )
+    )
+    from app.booking.router import _sync_booking_to_staff_calendar
+
+    for b in q.all():
+        org = await session.get(BookingOrg, b.org_id)
+        staff = await session.get(StaffMember, b.staff_id) if b.staff_id is not None else None
+        if not org or not staff:
+            continue
+        svc = await session.get(BookingService, b.service_id) if b.service_id else None
+        link_title = (b.booking_link_title_snapshot or "").strip() or (svc.name if svc else "予約")
+        service_name = svc.name if svc else "予約"
+        await _sync_booking_to_staff_calendar(
+            session,
+            settings,
+            b,
+            staff,
+            org,
+            service_name=service_name,
+            booking_link_title=link_title,
+        )
 
 
 async def _send_reminders(session: AsyncSession, settings: Settings) -> None:
