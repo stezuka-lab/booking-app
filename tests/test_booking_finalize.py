@@ -170,7 +170,7 @@ def test_public_availability_falls_back_to_open_hours_when_slots_empty(client, m
     assert token
 
     async def fake_slots(*args, **kwargs):
-        return [], 30, True
+        return [], 30, True, "slot_pick_failed"
 
     async def fake_busy(*args, **kwargs):
         return []
@@ -205,7 +205,7 @@ def test_public_availability_fallback_respects_blocked_dates(client, monkeypatch
     assert token
 
     async def fake_slots(*args, **kwargs):
-        return [], 30, True
+        return [], 30, True, "slot_pick_failed"
 
     async def fake_busy(*args, **kwargs):
         return []

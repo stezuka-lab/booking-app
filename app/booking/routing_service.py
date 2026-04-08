@@ -682,7 +682,7 @@ async def available_slots_for_link(
     buffer_minutes_override: int | None = None,
     max_advance_days_override: int | None = None,
     bookable_until_date_override: date | None = None,
-) -> tuple[list[dict], int, bool]:
+) -> tuple[list[dict], int, bool, str | None]:
     defaults = json_object_or_empty(org.availability_defaults_json)
     if service:
         dur_minutes = max(1, int(service.duration_minutes))
@@ -713,6 +713,7 @@ async def available_slots_for_link(
 
     out: list[dict] = []
     had_slot_errors = False
+    slot_error_message: str | None = None
     rs_local = rs_utc.astimezone(loc_tz)
     re_local = re_utc.astimezone(loc_tz)
     cur_day = rs_local.date()
@@ -771,6 +772,8 @@ async def available_slots_for_link(
                     )
                 except Exception:
                     had_slot_errors = True
+                    if slot_error_message is None:
+                        slot_error_message = "slot_pick_failed"
                     logger.exception(
                         "Skipping slot after availability evaluation error: org_id=%s start=%s end=%s",
                         getattr(org, "id", None),
@@ -792,7 +795,7 @@ async def available_slots_for_link(
             cur += step
         cur_day = cur_day + timedelta(days=1)
 
-    return out, step_minutes, had_slot_errors
+    return out, step_minutes, had_slot_errors, slot_error_message
 
 
 def fallback_open_hour_slots_for_link(

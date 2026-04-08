@@ -589,7 +589,7 @@ async def link_availability(
             gmap = {}
             google_busy_errors = {}
         lead_blocked = link_lead_blocked_dates(org, link)
-        slots, slot_generation_step, had_slot_errors = await available_slots_for_link(
+        slots, slot_generation_step, had_slot_errors, slot_error_message = await available_slots_for_link(
             db,
             org,
             staff_ids,
@@ -613,6 +613,15 @@ async def link_availability(
             busy_union_failed = True
             logger.exception("Public link busy union failed: token=%s org_id=%s", token, org.id)
             busy_union = []
+        availability_debug = {
+            "gmap_failed": gmap_failed,
+            "google_busy_failed_staff_count": len(google_busy_errors),
+            "busy_union_failed": busy_union_failed,
+            "had_slot_errors": had_slot_errors,
+            "slot_error_message": slot_error_message,
+            "linked_staff_ids": sorted(linked_staff_ids),
+            "effective_staff_ids": [int(getattr(s, "id")) for s in staff_list],
+        }
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
         allow_open_hours_fallback = (linked_n == 0)
@@ -683,6 +692,7 @@ async def link_availability(
                     else None
                 ),
             },
+            "availability_debug": availability_debug,
         }
     except Exception:
         logger.exception("Public link availability failed: token=%s org_id=%s", token, org.id)
@@ -708,6 +718,15 @@ async def link_availability(
                 "google_linked_staff_count": 0,
                 "unlinked_fallback_active": False,
                 "warning_ja": None,
+            },
+            "availability_debug": {
+                "gmap_failed": True,
+                "google_busy_failed_staff_count": 0,
+                "busy_union_failed": False,
+                "had_slot_errors": False,
+                "slot_error_message": "availability_exception",
+                "linked_staff_ids": [],
+                "effective_staff_ids": [],
             },
         }
 
