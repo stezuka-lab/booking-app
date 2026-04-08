@@ -447,26 +447,34 @@ async def _load_google_busy_map(
     window_start: datetime,
     window_end: datetime,
     settings: Settings,
-) -> dict[int, list[tuple[datetime, datetime]]]:
+) -> tuple[dict[int, list[tuple[datetime, datetime]]], dict[int, str]]:
     """担当 id ごとに必ずキーを返す。トークンが無い担当は []（未連携＝Google 上は空き扱い）。"""
     tmin = window_start.isoformat()
     tmax = window_end.isoformat()
 
-    async def load_for_staff(s: StaffMember) -> tuple[int, list[tuple[datetime, datetime]]]:
+    async def load_for_staff(
+        s: StaffMember,
+    ) -> tuple[int, list[tuple[datetime, datetime]], str | None]:
         refresh_token = decrypt_secret(s.google_refresh_token, settings)
         if not refresh_token:
-            return s.id, []
-        intervals = await freebusy_busy_intervals(
-            refresh_token,
-            s.google_calendar_id,
-            tmin,
-            tmax,
-            settings,
-        )
-        return s.id, list(intervals) if intervals else []
+            return s.id, [], None
+        try:
+            intervals = await freebusy_busy_intervals(
+                refresh_token,
+                s.google_calendar_id,
+                tmin,
+                tmax,
+                settings,
+            )
+            return s.id, list(intervals) if intervals else [], None
+        except Exception as exc:
+            logger.exception("Google FreeBusy failed for staff_id=%s", s.id)
+            return s.id, [], (str(exc).strip() or exc.__class__.__name__)[:500]
 
     pairs = await asyncio.gather(*(load_for_staff(s) for s in staff_list))
-    return {staff_id: intervals for staff_id, intervals in pairs}
+    gmap = {staff_id: intervals for staff_id, intervals, _err in pairs}
+    errors = {staff_id: err for staff_id, _intervals, err in pairs if err}
+    return gmap, errors
 
 
 async def _db_booking_intervals_for_staff(
@@ -571,7 +579,7 @@ async def pick_staff_for_slot(
     else:
         ws, we = org_calendar_day_bounds_utc(start, org)
         pad = timedelta(days=1)
-        gmap = await _load_google_busy_map(staff_list, ws - pad, we + pad, settings)
+        gmap, _google_busy_errors = await _load_google_busy_map(staff_list, ws - pad, we + pad, settings)
     free: list[StaffMember] = []
     for s in staff_list:
         if await staff_is_free(session, s, start, end, settings, gmap, buffer_minutes=buf_min):
@@ -694,7 +702,7 @@ async def available_slots_for_link(
         staff_list = await eligible_staff(session, org, link_staff_ids, service, settings)
     if google_busy_map is None:
         _gpad = timedelta(hours=2)
-        gmap = await _load_google_busy_map(
+        gmap, _google_busy_errors = await _load_google_busy_map(
             staff_list,
             rs_utc - _gpad,
             re_utc + _gpad,

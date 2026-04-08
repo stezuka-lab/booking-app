@@ -128,7 +128,7 @@ def freebusy_busy_intervals_sync(
     time_max_iso: str,
     settings: Settings,
 ) -> list[tuple[datetime, datetime]]:
-    """Google FreeBusy で busy 区間を返す。失敗時は空リスト。"""
+    """Google FreeBusy で busy 区間を返す。失敗時は例外を送出。"""
     from googleapiclient.discovery import build
 
     try:
@@ -151,9 +151,9 @@ def freebusy_busy_intervals_sync(
                 continue
             out.append((_parse_google_time(start_s), _parse_google_time(end_s)))
         return out
-    except Exception:
+    except Exception as exc:
         logger.exception("Google FreeBusy failed")
-        return []
+        raise RuntimeError(str(exc).strip() or exc.__class__.__name__) from exc
 
 
 def _parse_google_time(s: str) -> datetime:

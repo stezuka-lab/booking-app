@@ -232,6 +232,30 @@ def test_public_availability_fallback_respects_blocked_dates(client, monkeypatch
         assert start_utc.astimezone(jst).date().isoformat() not in blocked
 
 
+def test_load_google_busy_map_reports_per_staff_errors(monkeypatch) -> None:
+    import app.booking.routing_service as routing_service
+
+    settings = get_settings()
+    staff = StaffMember(id=10, name="担当", google_refresh_token=encrypt_secret("rtok", settings))
+
+    async def fake_freebusy(*args, **kwargs):
+        raise RuntimeError("google boom")
+
+    monkeypatch.setattr(routing_service, "freebusy_busy_intervals", fake_freebusy)
+
+    gmap, errors = asyncio.run(
+        routing_service._load_google_busy_map(
+            [staff],
+            datetime(2026, 4, 8, tzinfo=timezone.utc),
+            datetime(2026, 4, 9, tzinfo=timezone.utc),
+            settings,
+        )
+    )
+
+    assert gmap == {10: []}
+    assert errors == {10: "google boom"}
+
+
 def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch) -> None:
     import app.booking.router as booking_router
 

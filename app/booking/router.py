@@ -561,14 +561,33 @@ async def link_availability(
         staff_list = await eligible_staff(db, org, staff_ids, service, settings)
         fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
+        linked_staff_ids = {
+            s.id for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip()
+        }
         _gpad = timedelta(hours=2)
         gmap_failed = False
+        google_busy_errors: dict[int, str] = {}
         try:
-            gmap = await _load_google_busy_map(staff_list, fts - _gpad, tts + _gpad, settings)
+            gmap, google_busy_errors = await _load_google_busy_map(
+                staff_list,
+                fts - _gpad,
+                tts + _gpad,
+                settings,
+            )
+            failed_linked_staff_ids = set(google_busy_errors).intersection(linked_staff_ids)
+            if failed_linked_staff_ids:
+                gmap_failed = True
+                staff_list = [s for s in staff_list if s.id not in failed_linked_staff_ids]
+                staff_ids = [sid for sid in staff_ids if sid not in failed_linked_staff_ids]
+                link_priority_overrides = _normalize_link_priority_overrides(
+                    link_priority_overrides,
+                    staff_ids,
+                )
         except Exception:
             gmap_failed = True
             logger.exception("Public link Google busy load failed: token=%s org_id=%s", token, org.id)
             gmap = {}
+            google_busy_errors = {}
         lead_blocked = link_lead_blocked_dates(org, link)
         slots, slot_generation_step, had_slot_errors = await available_slots_for_link(
             db,
@@ -594,8 +613,17 @@ async def link_availability(
             busy_union_failed = True
             logger.exception("Public link busy union failed: token=%s org_id=%s", token, org.id)
             busy_union = []
+        oauth_on = settings.is_google_oauth_configured()
+        linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
+        allow_open_hours_fallback = (linked_n == 0)
         fallback_open_hours_used = False
-        if not slots and staff_list and not busy_union and (gmap_failed or busy_union_failed or had_slot_errors):
+        if (
+            not slots
+            and staff_list
+            and not busy_union
+            and allow_open_hours_fallback
+            and (gmap_failed or busy_union_failed or had_slot_errors)
+        ):
             fallback_slots, fallback_step = fallback_open_hour_slots_for_link(
                 org,
                 staff_list,
@@ -611,11 +639,12 @@ async def link_availability(
                 slots = fallback_slots
                 slot_generation_step = fallback_step
                 fallback_open_hours_used = True
-        oauth_on = settings.is_google_oauth_configured()
-        linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
         unlinked_fallback = bool(oauth_on and staff_list and linked_n == 0)
         blocked_dates = blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts)
         slots = _filter_slots_by_blocked_dates(slots, blocked_dates, org)
+        availability_error = None
+        if not slots and linked_staff_ids and (gmap_failed or busy_union_failed or had_slot_errors):
+            availability_error = "Google カレンダーの予定を確認できませんでした。担当のカレンダー認証または連携状態を確認してください。"
         return {
             "slots": slots,
             "busy_intervals": [
@@ -628,6 +657,7 @@ async def link_availability(
             "max_advance_booking_days": link_max_adv_days,
             "bookable_until_date": link_cutoff_date.isoformat() if link_cutoff_date else None,
             "eligible_staff_count": len(staff_list),
+            "availability_error": availability_error,
             "scheduling_hints": scheduling_hints_json(
                 duration_min,
                 buf_min,
@@ -636,8 +666,15 @@ async def link_availability(
             "calendar_integration": {
                 "oauth_configured": oauth_on,
                 "google_linked_staff_count": linked_n,
+                "google_busy_failed_staff_count": len(google_busy_errors),
                 "unlinked_fallback_active": unlinked_fallback,
                 "warning_ja": (
+                    "Google カレンダーの予定を確認できなかった担当がいるため、その担当は空き表示から除外しています。"
+                    if google_busy_errors and staff_list
+                    else
+                    "Google カレンダーの予定を確認できませんでした。担当のカレンダー認証または連携状態を確認してください。"
+                    if linked_staff_ids and (gmap_failed or busy_union_failed or had_slot_errors) and not slots
+                    else
                     "カレンダーの空き情報を安全に読み切れなかったため、受付時間ベースの候補枠を表示しています。予約確定時に最終確認します。"
                     if fallback_open_hours_used
                     else
