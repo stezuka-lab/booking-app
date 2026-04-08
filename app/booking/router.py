@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import copy
 import json
 import logging
 import secrets
@@ -98,6 +99,8 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(tags=["booking"])
 
+_PUBLIC_AVAILABILITY_CACHE: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
+
 
 def _filter_slots_by_blocked_dates(
     slots: list[dict[str, Any]],
@@ -124,6 +127,68 @@ def _filter_slots_by_blocked_dates(
         if local_day not in blocked:
             out.append(slot)
     return out
+
+
+def _public_availability_cache_key(
+    token: str,
+    from_ts: datetime,
+    to_ts: datetime,
+    service_id: int | None,
+) -> tuple[str, str, str, str]:
+    return (
+        token,
+        from_ts.isoformat(),
+        to_ts.isoformat(),
+        "" if service_id is None else str(int(service_id)),
+    )
+
+
+def _get_cached_public_availability(
+    token: str,
+    from_ts: datetime,
+    to_ts: datetime,
+    service_id: int | None,
+    settings: Settings,
+) -> dict[str, Any] | None:
+    ttl = max(0, int(getattr(settings, "booking_public_availability_cache_sec", 0) or 0))
+    if ttl <= 0:
+        return None
+    key = _public_availability_cache_key(token, from_ts, to_ts, service_id)
+    cached = _PUBLIC_AVAILABILITY_CACHE.get(key)
+    if not cached:
+        return None
+    expires_at, payload = cached
+    if expires_at <= time_module.monotonic():
+        _PUBLIC_AVAILABILITY_CACHE.pop(key, None)
+        return None
+    return copy.deepcopy(payload)
+
+
+def _store_cached_public_availability(
+    token: str,
+    from_ts: datetime,
+    to_ts: datetime,
+    service_id: int | None,
+    payload: dict[str, Any],
+    settings: Settings,
+) -> None:
+    ttl = max(0, int(getattr(settings, "booking_public_availability_cache_sec", 0) or 0))
+    if ttl <= 0:
+        return
+    key = _public_availability_cache_key(token, from_ts, to_ts, service_id)
+    _PUBLIC_AVAILABILITY_CACHE[key] = (
+        time_module.monotonic() + ttl,
+        copy.deepcopy(payload),
+    )
+
+
+def _clear_public_availability_cache(token: str | None = None) -> None:
+    if token is None:
+        _PUBLIC_AVAILABILITY_CACHE.clear()
+        return
+    doomed = [key for key in _PUBLIC_AVAILABILITY_CACHE if key[0] == token]
+    for key in doomed:
+        _PUBLIC_AVAILABILITY_CACHE.pop(key, None)
 
 
 def _staff_google_refresh_token(staff: StaffMember | None, settings: Settings) -> str | None:
@@ -527,6 +592,10 @@ async def link_availability(
     to_ts: datetime,
     service_id: int | None = None,
 ) -> dict[str, Any]:
+    cached_payload = _get_cached_public_availability(token, from_ts, to_ts, service_id, settings)
+    if cached_payload is not None:
+        cached_payload["cached"] = True
+        return cached_payload
     link = await db.scalar(select(PublicBookingLink).where(PublicBookingLink.token == token))
     if not link:
         raise HTTPException(404, "link not found")
@@ -657,7 +726,7 @@ async def link_availability(
         availability_error = None
         if not slots and linked_staff_ids and (gmap_failed or busy_union_failed or had_slot_errors):
             availability_error = "Google カレンダーの予定を確認できませんでした。担当のカレンダー認証または連携状態を確認してください。"
-        return {
+        response_payload = {
             "slots": slots,
             "busy_intervals": [
                 {"start_utc": a.isoformat(), "end_utc": b.isoformat()} for a, b in busy_union
@@ -697,10 +766,13 @@ async def link_availability(
             },
             "availability_debug": availability_debug,
         }
+        _store_cached_public_availability(token, from_ts, to_ts, service_id, response_payload, settings)
+        response_payload["cached"] = False
+        return response_payload
     except Exception:
         logger.exception("Public link availability failed: token=%s org_id=%s", token, org.id)
         blocked_dates = blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts)
-        return {
+        response_payload = {
             "slots": [],
             "busy_intervals": [],
             "blocked_dates": blocked_dates,
@@ -733,6 +805,9 @@ async def link_availability(
                 "effective_staff_ids": [],
             },
         }
+        _store_cached_public_availability(token, from_ts, to_ts, service_id, response_payload, settings)
+        response_payload["cached"] = False
+        return response_payload
 
 
 async def _create_booking_from_body(
@@ -1019,6 +1094,7 @@ async def book_appointment(
     )
     b, staff, customer_cal, booking_link_title, post_booking_message = await _create_booking_from_body(token, body, db, settings)
     await db.commit()
+    _clear_public_availability_cache(token)
     org = await db.get(BookingOrg, b.org_id)
     svc = await db.get(BookingService, b.service_id) if b.service_id else None
     service_name = svc.name if svc else "予約"
@@ -1200,6 +1276,7 @@ async def book_with_files(
             )
         )
     await db.commit()
+    _clear_public_availability_cache(token)
     org = await db.get(BookingOrg, b.org_id)
     svc = await db.get(BookingService, b.service_id) if b.service_id else None
     service_name = svc.name if svc else "予約"
@@ -1258,6 +1335,7 @@ async def manage_cancel(manage_token: str, db: DbSession, settings: SettingsDep)
     b.cancelled_at = datetime.now(timezone.utc)
     await _delete_staff_calendar_event_if_present(b, staff, settings)
     await db.commit()
+    _clear_public_availability_cache()
     return {"ok": True, "status": b.status}
 
 
@@ -1333,6 +1411,7 @@ async def manage_reschedule(
             settings,
         )
     await db.commit()
+    _clear_public_availability_cache()
     return {"ok": True, "start_utc": b.start_utc.isoformat(), "end_utc": b.end_utc.isoformat()}
 
 
@@ -2092,6 +2171,7 @@ async def admin_add_link(
     )
     await db.commit()
     await db.refresh(link)
+    _clear_public_availability_cache(token)
     base = settings.public_base_url_value()
     app_path = f"{base}/app/booking/{token}"
     return {
@@ -2182,6 +2262,7 @@ async def admin_patch_link(
         detail={"title": link.title, "service_id": link.service_id, "active": link.active},
     )
     await db.commit()
+    _clear_public_availability_cache(link.token)
     base = settings.public_base_url_value()
     valid_staff_ids = await _resolve_valid_link_staff_ids(
         db,
@@ -2243,6 +2324,7 @@ async def admin_delete_link(
     )
     await db.execute(delete(PublicBookingLink).where(PublicBookingLink.id == link_id))
     await db.commit()
+    _clear_public_availability_cache(link.token)
     return {"ok": True}
 
 
