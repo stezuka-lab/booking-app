@@ -349,20 +349,27 @@
     box.hidden = false;
     box.innerHTML =
       '<h3 class="cal-h2" style="margin-top:0">Google カレンダー連携の診断</h3>' +
-      '<p class="muted">今後 14 日の FreeBusy 取得を確認しています。error の担当は、Google 連携をやり直してください。</p>' +
-      '<table class="cal-table gcal-staff-table"><thead><tr><th>担当</th><th>状態</th><th>カレンダーID</th><th>busy件数</th><th>エラー</th></tr></thead><tbody>' +
+      '<p class="muted">今後 14 日の FreeBusy 取得に加えて、必要なら予定の作成・削除も診断しています。write error は、予定の読み取りはできても予定作成権限で失敗している状態です。</p>' +
+      '<table class="cal-table gcal-staff-table"><thead><tr><th>担当</th><th>FreeBusy</th><th>書き込み</th><th>カレンダーID</th><th>busy件数</th><th>エラー</th></tr></thead><tbody>' +
       rows.map(function (r) {
         var status = r.status === 'ok'
           ? '<span class="cal-pill ok">取得OK</span>'
           : r.status === 'error'
           ? '<span class="cal-pill err">取得失敗</span>'
           : '<span class="cal-pill">未連携</span>';
+        var writeStatus = r.write_status === 'ok'
+          ? '<span class="cal-pill ok">書込OK</span>'
+          : r.write_status === 'error'
+          ? '<span class="cal-pill err">書込失敗</span>'
+          : '<span class="cal-pill">未実行</span>';
+        var errorText = r.error || r.write_error || '—';
         return '<tr>' +
           '<td>' + esc(r.name || '') + '<div class="muted small">' + esc(r.google_profile_email || r.email || '') + '</div></td>' +
           '<td>' + status + '</td>' +
+          '<td>' + writeStatus + '</td>' +
           '<td>' + esc(r.google_calendar_id || 'primary') + '</td>' +
           '<td>' + esc(String(r.busy_interval_count || 0)) + '</td>' +
-          '<td>' + esc(r.error || '—') + '</td>' +
+          '<td>' + esc(errorText) + '</td>' +
           '</tr>';
       }).join('') +
       '</tbody></table>';
@@ -467,7 +474,7 @@
     msgEl.textContent = '';
     var btn = document.getElementById('btn-run-calendar-diagnostics');
     btn.disabled = true;
-    fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/calendar-diagnostics', {
+    fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/calendar-diagnostics?include_write_check=true', {
       credentials: 'same-origin',
       headers: headers(),
     })

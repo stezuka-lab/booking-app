@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any
 
 import httpx
@@ -300,6 +300,46 @@ async def delete_event_for_booking(
         )
     except Exception:
         logger.exception("Google Calendar delete failed")
+
+
+async def verify_calendar_write_access_detailed(
+    refresh_token: str | None,
+    calendar_id: str | None,
+    settings: Settings,
+) -> tuple[bool, str | None]:
+    """書き込み権限の診断用。短い予定を作成して即削除する。"""
+    if not refresh_token:
+        return False, "担当のGoogleカレンダー連携が未設定です"
+    start = datetime.now(timezone.utc) + timedelta(minutes=10)
+    end = start + timedelta(minutes=5)
+    ev: dict[str, Any] | None = None
+    try:
+        ev = await asyncio.to_thread(
+            create_calendar_event_sync,
+            refresh_token,
+            calendar_id or "primary",
+            "[診断] Booking App calendar write check",
+            start.isoformat(),
+            end.isoformat(),
+            settings,
+            with_meet=False,
+            attendees_emails=None,
+            description="diagnostic event created by booking app; safe to delete",
+            location=None,
+        )
+        event_id = (ev or {}).get("id")
+        if event_id:
+            await asyncio.to_thread(
+                delete_calendar_event_sync,
+                refresh_token,
+                calendar_id or "primary",
+                event_id,
+                settings,
+            )
+        return True, None
+    except Exception as exc:
+        logger.exception("Google Calendar write verification failed")
+        return False, (str(exc).strip() or exc.__class__.__name__)[:500]
 
 
 async def insert_customer_primary_calendar_with_access_token(

@@ -690,3 +690,58 @@ def test_sync_booking_to_staff_calendar_records_error(monkeypatch) -> None:
     assert booking.google_event_id is None
     assert booking.google_calendar_synced_at is None
     assert booking.google_calendar_sync_error == "sync failed"
+
+
+def test_sync_booking_to_staff_calendar_retries_once(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    calls = {"count": 0}
+
+    class DummySession:
+        async def flush(self) -> None:
+            return None
+
+    async def fake_create_event_for_booking_detailed(*args, **kwargs):
+        calls["count"] += 1
+        if calls["count"] == 1:
+            return None, "temporary sync failure"
+        return {"id": "evt-retry"}, None
+
+    async def fake_sleep(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
+    monkeypatch.setattr(booking_router.asyncio, "sleep", fake_sleep)
+
+    org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
+    staff = StaffMember(org_id=1, name="担当A", email="staff-a@example.com", google_refresh_token="refresh-token")
+    booking = Booking(
+        org_id=1,
+        staff_id=1,
+        service_id=1,
+        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        meeting_provider="none",
+        manage_token="manage-token",
+    )
+
+    ok = asyncio.run(
+        _sync_booking_to_staff_calendar(
+            DummySession(),
+            settings,
+            booking,
+            staff,
+            org,
+            service_name="初回相談",
+            booking_link_title="初回予約リンク",
+        )
+    )
+
+    assert ok is True
+    assert calls["count"] == 2
+    assert booking.google_event_id == "evt-retry"
+    assert booking.google_calendar_sync_error is None

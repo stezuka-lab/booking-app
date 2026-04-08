@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import copy
 import json
 import logging
@@ -26,6 +27,7 @@ from app.booking.calendar_google import (
     delete_event_for_booking,
     insert_customer_primary_calendar_with_access_token,
     patch_event_for_booking,
+    verify_calendar_write_access_detailed,
 )
 from app.booking.db_models import (
     Booking,
@@ -307,8 +309,9 @@ async def _sync_booking_to_staff_calendar(
             settings,
         )
         booking.google_event_id = None
+    refresh_token = _staff_google_refresh_token(staff, settings)
     ev, cal_err = await create_event_for_booking_detailed(
-        _staff_google_refresh_token(staff, settings),
+        refresh_token,
         staff.google_calendar_id,
         summary,
         booking.start_utc.isoformat(),
@@ -319,6 +322,24 @@ async def _sync_booking_to_staff_calendar(
         description="\n".join(lines),
         location=meeting_url or None,
     )
+    if not ev and refresh_token and cal_err:
+        await asyncio.sleep(0.35)
+        ev, retry_err = await create_event_for_booking_detailed(
+            refresh_token,
+            staff.google_calendar_id,
+            summary,
+            booking.start_utc.isoformat(),
+            booking.end_utc.isoformat(),
+            settings,
+            with_meet=meet,
+            attendees_emails=None,
+            description="\n".join(lines),
+            location=meeting_url or None,
+        )
+        if ev:
+            cal_err = None
+        elif retry_err:
+            cal_err = retry_err
     if ev:
         booking.google_event_id = ev.get("id")
         booking.google_calendar_synced_at = datetime.now(timezone.utc)
@@ -1685,6 +1706,7 @@ async def admin_calendar_diagnostics(
     slug: str,
     db: DbSession,
     settings: SettingsDep,
+    include_write_check: bool = False,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=slug)
@@ -1709,6 +1731,14 @@ async def admin_calendar_diagnostics(
         refresh_token = (_staff_google_refresh_token(s, settings) or "").strip()
         busy = list(gmap.get(s.id) or [])
         err = (errors.get(s.id) or "").strip()
+        write_ok = None
+        write_error = None
+        if include_write_check and refresh_token and not err:
+            write_ok, write_error = await verify_calendar_write_access_detailed(
+                refresh_token,
+                s.google_calendar_id,
+                settings,
+            )
         rows.append(
             {
                 "staff_id": s.id,
@@ -1724,6 +1754,10 @@ async def admin_calendar_diagnostics(
                 ],
                 "status": "error" if err else ("ok" if refresh_token else "unlinked"),
                 "error": err or None,
+                "write_status": (
+                    "ok" if write_ok is True else "error" if write_ok is False else "skipped"
+                ),
+                "write_error": write_error,
             }
         )
     return {
