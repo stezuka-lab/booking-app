@@ -42,6 +42,10 @@ def test_booking_endpoint_survives_finalize_failure(client, monkeypatch) -> None
         raise RuntimeError("boom")
 
     monkeypatch.setattr(booking_router, "_finalize_confirmed_booking", boom)
+    async def always_free(*args, **kwargs):
+        return True
+
+    monkeypatch.setattr(booking_router, "staff_is_free", always_free)
     response = client.post(
         f"/api/booking/links/{token}/book",
         json={
@@ -153,6 +157,42 @@ def test_public_availability_survives_malformed_google_busy_interval(client, mon
     body = response.json()
     assert body.get("availability_error") in (None, "")
     assert isinstance(body.get("slots"), list)
+
+
+def test_public_availability_falls_back_to_open_hours_when_slots_empty(client, monkeypatch) -> None:
+    import app.booking.router as booking_router
+    import app.booking.routing_service as routing_service
+
+    health = client.get("/health")
+    assert health.status_code == 200
+    token = (health.json().get("booking_demo") or {}).get("token")
+    assert token
+
+    async def fake_slots(*args, **kwargs):
+        return [], 30, True
+
+    async def fake_busy(*args, **kwargs):
+        return []
+
+    monkeypatch.setattr(booking_router, "available_slots_for_link", fake_slots)
+    monkeypatch.setattr(booking_router, "busy_intervals_union_for_link", fake_busy)
+
+    now = datetime.now(timezone.utc)
+    response = client.get(
+        f"/api/booking/links/{token}/availability",
+        params={
+            "from_ts": now.isoformat(),
+            "to_ts": (now + timedelta(days=7)).isoformat(),
+            "service_id": 1,
+        },
+    )
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body.get("availability_error") in (None, "")
+    assert body.get("slots")
+    warning = (((body.get("calendar_integration") or {}).get("warning_ja")) or "")
+    assert "受付時間ベース" in warning
 
 
 def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch) -> None:

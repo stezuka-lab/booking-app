@@ -674,7 +674,7 @@ async def available_slots_for_link(
     buffer_minutes_override: int | None = None,
     max_advance_days_override: int | None = None,
     bookable_until_date_override: date | None = None,
-) -> tuple[list[dict], int]:
+) -> tuple[list[dict], int, bool]:
     defaults = json_object_or_empty(org.availability_defaults_json)
     if service:
         dur_minutes = max(1, int(service.duration_minutes))
@@ -704,6 +704,7 @@ async def available_slots_for_link(
         gmap = google_busy_map
 
     out: list[dict] = []
+    had_slot_errors = False
     rs_local = rs_utc.astimezone(loc_tz)
     re_local = re_utc.astimezone(loc_tz)
     cur_day = rs_local.date()
@@ -761,6 +762,7 @@ async def available_slots_for_link(
                         dry_run=True,
                     )
                 except Exception:
+                    had_slot_errors = True
                     logger.exception(
                         "Skipping slot after availability evaluation error: org_id=%s start=%s end=%s",
                         getattr(org, "id", None),
@@ -782,4 +784,85 @@ async def available_slots_for_link(
             cur += step
         cur_day = cur_day + timedelta(days=1)
 
+    return out, step_minutes, had_slot_errors
+
+
+def fallback_open_hour_slots_for_link(
+    org: BookingOrg,
+    staff_list: list[StaffMember],
+    range_start: datetime,
+    range_end: datetime,
+    *,
+    service: BookingService | None,
+    link_priority_overrides: dict[str, int] | None = None,
+    max_advance_days_override: int | None = None,
+    bookable_until_date_override: date | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    defaults = json_object_or_empty(org.availability_defaults_json)
+    if service:
+        dur_minutes = max(1, int(service.duration_minutes))
+    else:
+        dur_minutes = availability_defaults_positive_int(defaults, "duration", BOOKING_SLOT_STEP_MINUTES)
+    step_minutes = max(1, min(BOOKING_SLOT_STEP_MINUTES, dur_minutes))
+    duration = timedelta(minutes=dur_minutes)
+    loc_tz = availability_zone(defaults)
+    rs_utc = range_start if range_start.tzinfo else range_start.replace(tzinfo=timezone.utc)
+    re_utc = range_end if range_end.tzinfo else range_end.replace(tzinfo=timezone.utc)
+    rs_local = rs_utc.astimezone(loc_tz)
+    re_local = re_utc.astimezone(loc_tz)
+    cur_day = rs_local.date()
+    end_day = re_local.date()
+    if max_advance_days_override is not None:
+        max_adv = max(0, int(max_advance_days_override))
+    else:
+        max_adv = max(0, int(defaults.get("max_advance_booking_days") or 0))
+    today_org = datetime.now(loc_tz).date()
+    last_bookable: date | None = (today_org + timedelta(days=max_adv)) if max_adv > 0 else None
+    cutoff_date = bookable_until_date_override
+    ranked_staff = sorted(
+        staff_list,
+        key=lambda s: (link_priority_rank_for_staff(s, link_priority_overrides), s.id),
+    )
+    if not ranked_staff:
+        return [], step_minutes
+    chosen = ranked_staff[0]
+    out: list[dict[str, Any]] = []
+    while cur_day <= end_day:
+        if last_bookable is not None and cur_day > last_bookable:
+            cur_day = cur_day + timedelta(days=1)
+            continue
+        if cutoff_date is not None and cur_day > cutoff_date:
+            cur_day = cur_day + timedelta(days=1)
+            continue
+        if day_is_blocked_for_booking(cur_day, defaults):
+            cur_day = cur_day + timedelta(days=1)
+            continue
+        sh, sm, eh, em = 8, 0, 22, 0
+        start_s = defaults.get("start", "08:00")
+        end_s = defaults.get("end", "22:00")
+        try:
+            sh, sm = map(int, str(start_s).split(":")[:2])
+            eh, em = map(int, str(end_s).split(":")[:2])
+        except ValueError:
+            pass
+        day_start = datetime.combine(cur_day, time(hour=sh, minute=sm), tzinfo=loc_tz)
+        day_end_bound = datetime.combine(cur_day, time(hour=eh, minute=em), tzinfo=loc_tz)
+        step = timedelta(minutes=step_minutes)
+        cur = day_start
+        while cur + duration <= day_end_bound:
+            seg_end = cur + duration
+            cur_u = cur.astimezone(timezone.utc)
+            seg_u = seg_end.astimezone(timezone.utc)
+            if cur_u >= rs_utc and seg_u <= re_utc + AVAILABILITY_RANGE_END_SLACK:
+                out.append(
+                    {
+                        "start_utc": cur_u.isoformat(),
+                        "end_utc": seg_u.isoformat(),
+                        "slot_minutes": step_minutes,
+                        "staff_id": chosen.id,
+                        "staff_name": (chosen.name or "").strip() or None,
+                    }
+                )
+            cur += step
+        cur_day = cur_day + timedelta(days=1)
     return out, step_minutes

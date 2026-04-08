@@ -57,6 +57,7 @@ from app.booking.routing_service import (
     booking_conflict_detail_json,
     busy_intervals_union_for_link,
     eligible_staff,
+    fallback_open_hour_slots_for_link,
     link_bookable_until_date,
     link_buffer_minutes,
     org_buffer_minutes,
@@ -534,13 +535,15 @@ async def link_availability(
         fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
         _gpad = timedelta(hours=2)
+        gmap_failed = False
         try:
             gmap = await _load_google_busy_map(staff_list, fts - _gpad, tts + _gpad, settings)
         except Exception:
+            gmap_failed = True
             logger.exception("Public link Google busy load failed: token=%s org_id=%s", token, org.id)
             gmap = {}
         lead_blocked = link_lead_blocked_dates(org, link)
-        slots, slot_generation_step = await available_slots_for_link(
+        slots, slot_generation_step, had_slot_errors = await available_slots_for_link(
             db,
             org,
             staff_ids,
@@ -557,11 +560,29 @@ async def link_availability(
             max_advance_days_override=link_max_adv_days,
             bookable_until_date_override=link_cutoff_date,
         )
+        busy_union_failed = False
         try:
             busy_union = await busy_intervals_union_for_link(db, staff_list, from_ts, to_ts, gmap)
         except Exception:
+            busy_union_failed = True
             logger.exception("Public link busy union failed: token=%s org_id=%s", token, org.id)
             busy_union = []
+        fallback_open_hours_used = False
+        if not slots and staff_list and not busy_union and (gmap_failed or busy_union_failed or had_slot_errors):
+            fallback_slots, fallback_step = fallback_open_hour_slots_for_link(
+                org,
+                staff_list,
+                from_ts,
+                to_ts,
+                service=service,
+                link_priority_overrides=link_priority_overrides,
+                max_advance_days_override=link_max_adv_days,
+                bookable_until_date_override=link_cutoff_date,
+            )
+            if fallback_slots:
+                slots = fallback_slots
+                slot_generation_step = fallback_step
+                fallback_open_hours_used = True
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
         unlinked_fallback = bool(oauth_on and staff_list and linked_n == 0)
@@ -587,6 +608,9 @@ async def link_availability(
                 "google_linked_staff_count": linked_n,
                 "unlinked_fallback_active": unlinked_fallback,
                 "warning_ja": (
+                    "カレンダーの空き情報を安全に読み切れなかったため、受付時間ベースの候補枠を表示しています。予約確定時に最終確認します。"
+                    if fallback_open_hours_used
+                    else
                     "Google カレンダーが誰も連携していないため、空きはシステム上すべて空きとして枠を出しています。本番運用では各担当の Google 連携を完了してください。"
                     if unlinked_fallback
                     else None
