@@ -1065,22 +1065,22 @@ code {
     );
   display: flex;
   align-items: flex-start;
-  justify-content: flex-end;
+  justify-content: flex-start;
   pointer-events: auto;
   border-radius: 4px;
-  padding: 0.55rem 0.55rem 0 0;
+  padding: 1.15rem 0 0 0.55rem;
 }
 
 .booking-day-blocked-label {
-  font-size: 0.72rem;
+  font-size: 0.68rem;
   font-weight: 700;
   letter-spacing: 0.03em;
   color: #475569;
-  padding: 0.24rem 0.56rem;
+  padding: 0.22rem 0.5rem;
   border: 1px solid rgba(100, 116, 139, 0.28);
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.96);
-  box-shadow: 0 4px 10px rgba(148, 163, 184, 0.12);
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 6px rgba(148, 163, 184, 0.1);
   line-height: 1;
   white-space: nowrap;
 }
@@ -1106,21 +1106,19 @@ code {
   text-align: center;
   font: inherit;
   font-weight: 600;
-  border: 1px solid rgba(27, 94, 32, 0.16);
-  background: linear-gradient(180deg, #ecfdf3, #d8f6df);
+  border: 1px solid rgba(27, 94, 32, 0.18);
+  background: linear-gradient(180deg, rgba(236, 253, 243, 0.98), rgba(217, 246, 224, 0.94));
   color: #0f3b1c;
-  border-left: 4px solid #1f7a3d;
-  box-shadow: 0 3px 10px rgba(31, 122, 61, 0.12);
-  padding: 0.22rem 0.35rem;
+  border-left: 3px solid #1f7a3d;
+  box-shadow: 0 2px 6px rgba(31, 122, 61, 0.1);
+  padding: 0.24rem 0.4rem;
   overflow: hidden;
   pointer-events: auto;
   z-index: 8;
   touch-action: manipulation;
   box-sizing: border-box;
   gap: 0.12rem;
-  border-radius: 12px;
-  outline: 1px solid rgba(255, 255, 255, 0.7);
-  outline-offset: -1px;
+  border-radius: 10px;
 }
 
 .booking-cal-events-layer .booking-slot-choice .cal-ev-time {
@@ -1166,9 +1164,9 @@ code {
 }
 
 .booking-cal-events-layer .booking-slot-choice.is-short-slot {
-  padding: 0.12rem 0.45rem;
-  border-radius: 999px;
-  gap: 0;
+  padding: 0.16rem 0.4rem;
+  border-radius: 10px;
+  gap: 0.08rem;
 }
 
 .booking-cal-events-layer .booking-slot-choice.is-short-slot .cal-ev-time {
@@ -1196,7 +1194,8 @@ code {
 .booking-cal-events-layer .booking-slot-choice:hover {
   background: linear-gradient(180deg, #dff7e8, #c7efd2);
   z-index: 10;
-  transform: translateY(-1px);
+  transform: none;
+  box-shadow: 0 4px 12px rgba(31, 122, 61, 0.14);
 }
 
 .booking-cal-events-layer .booking-slot-choice.selected {
