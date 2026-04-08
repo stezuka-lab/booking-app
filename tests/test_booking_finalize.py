@@ -124,13 +124,14 @@ def test_release_bookings_with_missing_google_events(monkeypatch) -> None:
 
 def test_db_busy_intervals_ignore_pending_for_auto_confirm_org(client) -> None:
     from app.db import get_session_factory
+    import secrets
 
     async def run() -> None:
         Session = get_session_factory()
         async with Session() as session:
             org = BookingOrg(
                 name="Auto Org",
-                slug="auto-org-pending-ignore",
+                slug=f"auto-org-pending-ignore-{secrets.token_hex(4)}",
                 auto_confirm=True,
                 availability_defaults_json={},
                 cancel_policy_json={},

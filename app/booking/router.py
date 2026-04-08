@@ -60,6 +60,7 @@ from app.booking.routing_service import (
     link_lead_blocked_dates,
     booking_conflict_detail_json,
     busy_intervals_union_for_link,
+    db_booking_busy_intervals_for_staff,
     eligible_staff,
     fallback_open_hour_slots_for_link,
     link_bookable_until_date,
@@ -764,6 +765,21 @@ async def link_availability(
             busy_union_error_message = (str(exc).strip() or exc.__class__.__name__)[:500]
             logger.exception("Public link busy union failed: token=%s org_id=%s", token, org.id)
             busy_union = []
+        google_busy_count = 0
+        db_busy_count = 0
+        try:
+            for s in staff_list:
+                google_busy_count += len(gmap.get(s.id) or [])
+                db_busy_count += len(
+                    await db_booking_busy_intervals_for_staff(
+                        db,
+                        s.id,
+                        from_ts,
+                        to_ts,
+                    )
+                )
+        except Exception:
+            logger.exception("Public link busy source diagnostics failed: token=%s org_id=%s", token, org.id)
         availability_debug = {
             "gmap_failed": gmap_failed,
             "google_busy_failed_staff_count": len(google_busy_errors),
@@ -774,6 +790,8 @@ async def link_availability(
             "linked_staff_ids": sorted(linked_staff_ids),
             "effective_staff_ids": [int(getattr(s, "id")) for s in staff_list],
             "released_missing_google_events": released_count,
+            "google_busy_count": google_busy_count,
+            "db_busy_count": db_busy_count,
         }
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
