@@ -302,6 +302,49 @@ async def delete_event_for_booking(
         logger.exception("Google Calendar delete failed")
 
 
+def get_calendar_event_status_sync(
+    refresh_token: str,
+    calendar_id: str,
+    event_id: str,
+    settings: Settings,
+) -> tuple[bool | None, str | None]:
+    """eventId の存在確認。True=存在, False=404で消失, None=判定失敗。"""
+    from googleapiclient.discovery import build
+    from googleapiclient.errors import HttpError
+
+    creds = _credentials_from_refresh(refresh_token, settings)
+    service = build("calendar", "v3", credentials=creds, cache_discovery=False)
+    try:
+        service.events().get(calendarId=calendar_id or "primary", eventId=event_id).execute()
+        return True, None
+    except HttpError as exc:
+        status = getattr(getattr(exc, "resp", None), "status", None)
+        if status == 404:
+            return False, None
+        logger.exception("Google Calendar get failed")
+        return None, (str(exc).strip() or exc.__class__.__name__)[:500]
+    except Exception as exc:
+        logger.exception("Google Calendar get failed")
+        return None, (str(exc).strip() or exc.__class__.__name__)[:500]
+
+
+async def get_calendar_event_status(
+    refresh_token: str | None,
+    calendar_id: str | None,
+    event_id: str | None,
+    settings: Settings,
+) -> tuple[bool | None, str | None]:
+    if not refresh_token or not event_id:
+        return None, "missing_token_or_event_id"
+    return await asyncio.to_thread(
+        get_calendar_event_status_sync,
+        refresh_token,
+        calendar_id or "primary",
+        event_id,
+        settings,
+    )
+
+
 async def verify_calendar_write_access_detailed(
     refresh_token: str | None,
     calendar_id: str | None,

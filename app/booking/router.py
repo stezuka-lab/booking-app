@@ -25,6 +25,7 @@ from app.booking.calendar_google import (
     create_event_for_booking,
     create_event_for_booking_detailed,
     delete_event_for_booking,
+    get_calendar_event_status,
     insert_customer_primary_calendar_with_access_token,
     patch_event_for_booking,
     verify_calendar_write_access_detailed,
@@ -193,6 +194,55 @@ def _clear_public_availability_cache(token: str | None = None) -> None:
     doomed = [key for key in _PUBLIC_AVAILABILITY_CACHE if key[0] == token]
     for key in doomed:
         _PUBLIC_AVAILABILITY_CACHE.pop(key, None)
+
+
+async def _release_bookings_with_missing_google_events(
+    db: AsyncSession,
+    settings: Settings,
+    staff_list: list[StaffMember],
+    range_start: datetime,
+    range_end: datetime,
+) -> int:
+    if not staff_list:
+        return 0
+    staff_map = {s.id: s for s in staff_list}
+    q = select(Booking).where(
+        Booking.staff_id.in_(list(staff_map)),
+        Booking.status == "confirmed",
+        Booking.google_event_id.is_not(None),
+        Booking.start_utc < range_end,
+        Booking.end_utc > range_start,
+    )
+    rows = list((await db.scalars(q)).all())
+    released = 0
+    for b in rows:
+        event_id = (b.google_event_id or "").strip()
+        staff = staff_map.get(int(b.staff_id or 0))
+        if not event_id or not staff:
+            continue
+        exists, err = await get_calendar_event_status(
+            _staff_google_refresh_token(staff, settings),
+            staff.google_calendar_id,
+            event_id,
+            settings,
+        )
+        if exists is False:
+            b.status = "cancelled"
+            b.cancelled_at = datetime.now(timezone.utc)
+            b.google_event_id = None
+            b.google_calendar_synced_at = None
+            b.google_calendar_sync_error = "Googleカレンダー上で予定が削除されたため自動で解放しました"
+            released += 1
+        elif err:
+            logger.warning(
+                "Google event existence check failed booking_id=%s staff_id=%s err=%s",
+                b.id,
+                getattr(staff, "id", None),
+                err,
+            )
+    if released:
+        await db.flush()
+    return released
 
 
 def _staff_google_refresh_token(staff: StaffMember | None, settings: Settings) -> str | None:
@@ -653,6 +703,13 @@ async def link_availability(
         staff_list = await eligible_staff(db, org, staff_ids, service, settings)
         fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
+        released_count = await _release_bookings_with_missing_google_events(
+            db,
+            settings,
+            staff_list,
+            fts,
+            tts,
+        )
         linked_staff_ids = {
             s.id for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip()
         }
@@ -716,6 +773,7 @@ async def link_availability(
             "slot_error_message": slot_error_message,
             "linked_staff_ids": sorted(linked_staff_ids),
             "effective_staff_ids": [int(getattr(s, "id")) for s in staff_list],
+            "released_missing_google_events": released_count,
         }
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
@@ -869,6 +927,14 @@ async def _create_booking_from_body(
     start = body.start_utc
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
+    staff_probe_list = await eligible_staff(db, org, staff_ids, service, settings)
+    await _release_bookings_with_missing_google_events(
+        db,
+        settings,
+        staff_probe_list,
+        start - timedelta(days=1),
+        start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
+    )
     end = start + timedelta(minutes=service.duration_minutes)
 
     defaults_avail = json_object_or_empty(org.availability_defaults_json)

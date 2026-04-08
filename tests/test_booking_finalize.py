@@ -10,6 +10,7 @@ from app.booking.router import (
     _delete_staff_calendar_event_if_present,
     _finalize_confirmed_booking,
     _public_booking_response,
+    _release_bookings_with_missing_google_events,
     _sync_booking_to_staff_calendar,
 )
 from app.booking.email_booking import build_booking_confirmation_email_body
@@ -62,6 +63,62 @@ def test_booking_endpoint_survives_finalize_failure(client, monkeypatch) -> None
     body = response.json()
     assert body["status"] == "confirmed"
     assert body["customer_calendar_added"] is False
+
+
+def test_release_bookings_with_missing_google_events(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    staff = StaffMember(
+        id=4,
+        org_id=1,
+        name="担当A",
+        google_refresh_token=encrypt_secret("refresh-token", settings),
+        google_calendar_id="primary",
+    )
+    booking = Booking(
+        id=99,
+        org_id=1,
+        staff_id=4,
+        service_id=1,
+        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        google_event_id="evt-missing",
+        manage_token="manage-token",
+    )
+
+    class DummySession:
+        async def scalars(self, _query):
+            class Result:
+                def all(self_inner):
+                    return [booking]
+
+            return Result()
+
+        async def flush(self):
+            return None
+
+    async def fake_event_status(*args, **kwargs):
+        return False, None
+
+    monkeypatch.setattr(booking_router, "get_calendar_event_status", fake_event_status)
+
+    released = asyncio.run(
+        _release_bookings_with_missing_google_events(
+            DummySession(),
+            settings,
+            [staff],
+            datetime(2030, 1, 1, 0, 0, tzinfo=timezone.utc),
+            datetime(2030, 1, 2, 0, 0, tzinfo=timezone.utc),
+        )
+    )
+
+    assert released == 1
+    assert booking.status == "cancelled"
+    assert booking.google_event_id is None
 
 
 def test_public_availability_survives_busy_union_failure(client, monkeypatch) -> None:
