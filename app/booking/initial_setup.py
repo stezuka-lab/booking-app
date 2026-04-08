@@ -37,6 +37,10 @@ def default_form_fields() -> list[dict[str, object]]:
 
 
 async def ensure_org_initial_setup(session: AsyncSession, org: BookingOrg) -> None:
+    # 公開予約は即時確定を前提にしているため、既存組織もここで補正する。
+    if org.auto_confirm is not True:
+        org.auto_confirm = True
+
     first_service = await session.scalar(
         select(BookingService)
         .where(BookingService.org_id == org.id)

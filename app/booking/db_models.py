@@ -37,8 +37,8 @@ class BookingOrg(Base):
     cancel_policy_json: Mapped[Any] = mapped_column(JSON, default=dict)
     # 営業時間など {"timezone":"Asia/Tokyo","start":"08:00","end":"22:00"}（開始刻みは API 定数、長さは予約区分の所要時間）
     availability_defaults_json: Mapped[Any] = mapped_column(JSON, default=dict)
-    # True なら即時 confirmed。False で管理者承認まで pending。
-    auto_confirm: Mapped[bool] = mapped_column(Boolean, default=False)
+    # True なら即時 confirmed。現在の運用では即時確定を既定とする。
+    auto_confirm: Mapped[bool] = mapped_column(Boolean, default=True)
     # GA4 / 計測
     ga4_measurement_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
     # 予約完了メール（顧客・担当）の ON/OFF と文面

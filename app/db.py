@@ -27,7 +27,7 @@ _engine = None
 
 SCHEMA_DRIFT_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
     "booking_orgs": [
-        ("auto_confirm", '"auto_confirm" BOOLEAN NOT NULL DEFAULT 0', '"auto_confirm" BOOLEAN NOT NULL DEFAULT FALSE'),
+        ("auto_confirm", '"auto_confirm" BOOLEAN NOT NULL DEFAULT 1', '"auto_confirm" BOOLEAN NOT NULL DEFAULT TRUE'),
         ("ga4_measurement_id", '"ga4_measurement_id" VARCHAR(64)', '"ga4_measurement_id" VARCHAR(64)'),
         ("email_settings_json", '"email_settings_json" TEXT', '"email_settings_json" JSON'),
     ],
@@ -156,6 +156,15 @@ async def _postgres_add_missing_columns() -> None:
         await conn.run_sync(_postgres_add_missing_columns_sync)
 
 
+async def _normalize_org_auto_confirm() -> None:
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        if str(engine.url).startswith("sqlite"):
+            await conn.execute(text('UPDATE "booking_orgs" SET "auto_confirm" = 1 WHERE COALESCE("auto_confirm", 0) = 0'))
+        elif str(engine.url).startswith("postgresql"):
+            await conn.execute(text('UPDATE "booking_orgs" SET "auto_confirm" = TRUE WHERE COALESCE("auto_confirm", FALSE) = FALSE'))
+
+
 def _sqlite_rebuild_bookings_nullable_staff_sync(connection: Any) -> None:
     """staff_id を NULL 可・ON DELETE SET NULL にしたテーブルへ移行（既存 SQLite）。"""
     from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
@@ -208,6 +217,7 @@ async def init_db() -> None:
         await conn.run_sync(Base.metadata.create_all)
     await _sqlite_add_missing_columns()
     await _postgres_add_missing_columns()
+    await _normalize_org_auto_confirm()
     await _sqlite_migrate_bookings_nullable_staff(_get_engine())
 
 

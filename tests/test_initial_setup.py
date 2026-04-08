@@ -62,10 +62,11 @@ def test_ensure_org_initial_setup_adds_service_and_form_when_missing() -> None:
         def add(self, row):
             added.append(row)
 
-    org = BookingOrg(id=10, name="Test Org", slug="test-org")
+    org = BookingOrg(id=10, name="Test Org", slug="test-org", auto_confirm=False)
 
     asyncio.run(ensure_org_initial_setup(DummySession(), org))
 
+    assert org.auto_confirm is True
     assert any(isinstance(row, BookingService) and row.name == "初回相談" for row in added)
     assert any(
         isinstance(row, BookingFormDefinition)

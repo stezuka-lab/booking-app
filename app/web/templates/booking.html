@@ -422,8 +422,13 @@
   }
 
   function openSuccessDialog(data, startIso) {
+    var isConfirmed = !data || !data.status || data.status === 'confirmed';
+    document.getElementById('booking-success-title').textContent = isConfirmed
+      ? '予約が完了しました'
+      : '予約を受け付けました';
     document.getElementById('success-link-title').textContent =
-      (data && data.link_title ? data.link_title : '予約') + ' の予約が完了しました';
+      (data && data.link_title ? data.link_title : '予約') +
+      (isConfirmed ? ' の予約が完了しました' : ' の予約を受け付けました');
     document.getElementById('success-datetime').textContent =
       '日時: ' + fmtSlot.format(new Date(startIso));
     var staffEl = document.getElementById('success-staff');
@@ -448,14 +453,14 @@
     var googleRow = document.getElementById('success-google-row');
     var googleLink = document.getElementById('success-google-link');
     var calNote = document.getElementById('success-customer-cal-note');
-    if (data && data.google_calendar_add_url) {
+    if (isConfirmed && data && data.google_calendar_add_url) {
       googleRow.hidden = false;
       googleLink.href = data.google_calendar_add_url;
       calNote.hidden = !data.customer_calendar_added;
     } else {
-      googleRow.hidden = !data.customer_calendar_added;
+      googleRow.hidden = true;
       googleLink.href = '#';
-      calNote.hidden = !data.customer_calendar_added;
+      calNote.hidden = true;
     }
     var successMsgRow = document.getElementById('success-message-row');
     var successMsgText = document.getElementById('success-message-text');
@@ -466,6 +471,8 @@
       successMsgRow.hidden = true;
       successMsgText.textContent = '';
     }
+    var msgEl = document.getElementById('modal-msg');
+    if (msgEl) msgEl.textContent = '';
     successDialogEl.showModal();
     document.getElementById('modal-customer-number').value = '';
     document.getElementById('modal-name').value = '';

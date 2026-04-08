@@ -83,6 +83,7 @@ async def _materialize_org_assignment(
         name=name_stripped,
         slug=slug,
         routing_mode="priority",
+        auto_confirm=True,
         cancel_policy_json=default_org_cancel_policy(),
         availability_defaults_json=default_org_availability_defaults(),
     )

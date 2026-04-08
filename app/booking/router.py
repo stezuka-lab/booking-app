@@ -1451,6 +1451,7 @@ async def admin_create_org(
         name=body.name,
         slug=body.slug,
         routing_mode=body.routing_mode,
+        auto_confirm=True,
         cancel_policy_json=default_org_cancel_policy(),
         availability_defaults_json=default_org_availability_defaults(),
     )
