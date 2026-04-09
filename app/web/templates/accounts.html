@@ -82,6 +82,31 @@
     </div>
   </section>
 
+  <section class="panel admin-section" id="audit-panel">
+    <div class="panel-header-actions">
+      <div>
+        <h2 class="panel-title">監査ログ</h2>
+        <p class="muted panel-hint">ユーザー管理や認証まわりの重要操作を直近 200 件まで確認できます。</p>
+      </div>
+      <button type="button" class="btn secondary" id="btn-refresh-audit">更新</button>
+    </div>
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>日時</th>
+            <th>操作</th>
+            <th>実行者</th>
+            <th>組織</th>
+            <th>対象</th>
+            <th>詳細</th>
+          </tr>
+        </thead>
+        <tbody id="audit-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
   {% else %}
   <p class="page-lead muted">予約設定は <a href="/app/settings">設定</a> から開けます。</p>
   <section class="panel admin-section">
@@ -144,6 +169,46 @@
       return 'slug は英小文字・数字・ハイフンのみです。日本語は「組織名」へ。';
     }
     return '';
+  }
+
+  function fmtJst(iso) {
+    if (!iso) return '—';
+    try {
+      return new Intl.DateTimeFormat('ja-JP', {
+        year: 'numeric',
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Tokyo',
+      }).format(new Date(iso));
+    } catch (e) {
+      return String(iso);
+    }
+  }
+
+  function formatAuditTarget(row) {
+    var parts = [];
+    if (row.target_type) parts.push(String(row.target_type));
+    if (row.target_id != null && row.target_id !== '') parts.push('#' + String(row.target_id));
+    return parts.length ? parts.join(' ') : '—';
+  }
+
+  function formatAuditDetail(detail) {
+    if (!detail || typeof detail !== 'object') return '—';
+    var entries = Object.keys(detail).slice(0, 6).map(function (k) {
+      var v = detail[k];
+      if (v == null || v === '') return null;
+      if (typeof v === 'object') {
+        try {
+          v = JSON.stringify(v);
+        } catch (e) {
+          v = String(v);
+        }
+      }
+      return '<div>' + esc(k) + ': ' + esc(String(v)) + '</div>';
+    }).filter(Boolean);
+    return entries.length ? '<div class="audit-log-detail-list">' + entries.join('') + '</div>' : '—';
   }
 
   async function getOrgJson(path) {
@@ -365,6 +430,62 @@
     });
   }
 
+  async function loadAuditLogs() {
+    setMsg('');
+    const r = await fetch('/api/auth/admin/audit-logs', { credentials: 'same-origin' });
+    const j = await r.json().catch(function () {
+      return {};
+    });
+    if (!r.ok) {
+      setMsg(formatApiError(j) || r.statusText, 'err');
+      return;
+    }
+    const tb = document.getElementById('audit-tbody');
+    tb.innerHTML = '';
+    const logs = j.logs || [];
+    if (!logs.length) {
+      const tr = document.createElement('tr');
+      const td = document.createElement('td');
+      td.colSpan = 6;
+      td.className = 'muted';
+      td.textContent = '監査ログはまだありません。';
+      tr.appendChild(td);
+      tb.appendChild(tr);
+      return;
+    }
+    logs.forEach(function (row) {
+      const tr = document.createElement('tr');
+
+      const tdWhen = document.createElement('td');
+      tdWhen.innerHTML = '<div>' + esc(fmtJst(row.created_at)) + '</div>' +
+        '<div class="muted small">' + esc(row.ip_address || 'IP なし') + '</div>';
+
+      const tdAction = document.createElement('td');
+      tdAction.innerHTML = '<code class="audit-log-action">' + esc(row.action || '—') + '</code>';
+
+      const tdActor = document.createElement('td');
+      tdActor.innerHTML = '<div>' + esc(row.actor_username || 'system') + '</div>' +
+        '<div class="muted small">' + esc(row.actor_role || '—') + '</div>';
+
+      const tdOrg = document.createElement('td');
+      tdOrg.textContent = row.org_slug || '—';
+
+      const tdTarget = document.createElement('td');
+      tdTarget.textContent = formatAuditTarget(row);
+
+      const tdDetail = document.createElement('td');
+      tdDetail.innerHTML = formatAuditDetail(row.detail || {});
+
+      tr.appendChild(tdWhen);
+      tr.appendChild(tdAction);
+      tr.appendChild(tdActor);
+      tr.appendChild(tdOrg);
+      tr.appendChild(tdTarget);
+      tr.appendChild(tdDetail);
+      tb.appendChild(tr);
+    });
+  }
+
   document.getElementById('btn-create-user').addEventListener('click', async function () {
     setMsg('');
     const pw = document.getElementById('new-password').value;
@@ -408,7 +529,11 @@
     await loadUsers();
   });
 
-  loadUsers().catch(function () {});
+  document.getElementById('btn-refresh-audit').addEventListener('click', function () {
+    loadAuditLogs().catch(function () {});
+  });
+
+  Promise.all([loadUsers(), loadAuditLogs()]).catch(function () {});
   {% endif %}
 })();
 </script>

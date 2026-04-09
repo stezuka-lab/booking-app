@@ -2165,6 +2165,20 @@ body {
   color: #64748b;
 }
 
+.audit-log-action {
+  display: inline-block;
+  white-space: nowrap;
+  font-size: 0.8rem;
+}
+
+.audit-log-detail-list {
+  display: grid;
+  gap: 0.2rem;
+  min-width: 16rem;
+  font-size: 0.84rem;
+  line-height: 1.45;
+}
+
 .admin-reason-list {
   display: grid;
   gap: 0.35rem;

@@ -74,6 +74,19 @@ def test_admin_template_defines_esc_helper() -> None:
     assert "function esc(" in tpl
 
 
+def test_accounts_template_has_audit_logs_section() -> None:
+    tpl = (Path(__file__).resolve().parents[1] / "app" / "web" / "templates" / "accounts.html").read_text(encoding="utf-8")
+    assert "監査ログ" in tpl
+    assert "audit-tbody" in tpl
+
+
+def test_backup_assets_exist() -> None:
+    root = Path(__file__).resolve().parents[1]
+    assert (root / "docs" / "BACKUP.md").exists()
+    assert (root / "scripts" / "backup_postgres.ps1").exists()
+    assert (root / "scripts" / "restore_postgres.ps1").exists()
+
+
 def test_calendar_page(client: TestClient) -> None:
     r = client.get("/app/calendar", follow_redirects=False)
     assert r.status_code == 302
