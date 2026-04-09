@@ -246,6 +246,80 @@ async def _release_bookings_with_missing_google_events(
     return released
 
 
+def _interval_overlaps_any(
+    start_utc: datetime,
+    end_utc: datetime,
+    intervals: list[tuple[datetime, datetime]],
+) -> bool:
+    for a, b in intervals:
+        aa = a if a.tzinfo else a.replace(tzinfo=timezone.utc)
+        bb = b if b.tzinfo else b.replace(tzinfo=timezone.utc)
+        if start_utc < bb and end_utc > aa:
+            return True
+    return False
+
+
+async def _release_unsynced_orphan_bookings(
+    db: AsyncSession,
+    settings: Settings,
+    staff_list: list[StaffMember],
+    range_start: datetime,
+    range_end: datetime,
+    google_busy_map: dict[int, list[tuple[datetime, datetime]]],
+    google_busy_errors: dict[int, str],
+    *,
+    min_age_minutes: int = 10,
+) -> int:
+    if not staff_list:
+        return 0
+    staff_map = {s.id: s for s in staff_list}
+    now_utc = datetime.now(timezone.utc)
+    q = (
+        select(Booking)
+        .join(BookingOrg, Booking.org_id == BookingOrg.id)
+        .where(
+            Booking.staff_id.in_(list(staff_map)),
+            Booking.status == "confirmed",
+            Booking.google_event_id.is_(None),
+            Booking.start_utc < range_end,
+            Booking.end_utc > range_start,
+            BookingOrg.auto_confirm.is_(True),
+        )
+    )
+    rows = list((await db.scalars(q)).all())
+    released = 0
+    min_age = timedelta(minutes=max(1, int(min_age_minutes or 10)))
+    for b in rows:
+        staff = staff_map.get(int(b.staff_id or 0))
+        if not staff:
+            continue
+        if staff.id in google_busy_errors:
+            continue
+        created_at = b.created_at if getattr(b, "created_at", None) else None
+        created_at_utc = (
+            created_at if created_at and created_at.tzinfo else created_at.replace(tzinfo=timezone.utc)
+            if created_at
+            else None
+        )
+        if created_at_utc and (now_utc - created_at_utc) < min_age:
+            continue
+        if not (b.google_calendar_sync_error or "").strip() and not created_at_utc:
+            continue
+        start_utc = b.start_utc if b.start_utc.tzinfo else b.start_utc.replace(tzinfo=timezone.utc)
+        end_utc = b.end_utc if b.end_utc.tzinfo else b.end_utc.replace(tzinfo=timezone.utc)
+        current_busy = google_busy_map.get(staff.id) or []
+        if _interval_overlaps_any(start_utc, end_utc, current_busy):
+            continue
+        b.status = "cancelled"
+        b.cancelled_at = now_utc
+        b.google_calendar_synced_at = None
+        b.google_calendar_sync_error = "Googleカレンダーに予定が存在しない未同期予約を自動で解放しました"
+        released += 1
+    if released:
+        await db.flush()
+    return released
+
+
 def _staff_google_refresh_token(staff: StaffMember | None, settings: Settings) -> str | None:
     if staff is None:
         return None
@@ -704,13 +778,6 @@ async def link_availability(
         staff_list = await eligible_staff(db, org, staff_ids, service, settings)
         fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
-        released_count = await _release_bookings_with_missing_google_events(
-            db,
-            settings,
-            staff_list,
-            fts,
-            tts,
-        )
         linked_staff_ids = {
             s.id for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip()
         }
@@ -738,6 +805,22 @@ async def link_availability(
             logger.exception("Public link Google busy load failed: token=%s org_id=%s", token, org.id)
             gmap = {}
             google_busy_errors = {}
+        released_count = await _release_bookings_with_missing_google_events(
+            db,
+            settings,
+            staff_list,
+            fts,
+            tts,
+        )
+        released_count += await _release_unsynced_orphan_bookings(
+            db,
+            settings,
+            staff_list,
+            fts,
+            tts,
+            gmap,
+            google_busy_errors,
+        )
         lead_blocked = link_lead_blocked_dates(org, link)
         slots, slot_generation_step, had_slot_errors, slot_error_message = await available_slots_for_link(
             db,
@@ -946,12 +1029,27 @@ async def _create_booking_from_body(
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     staff_probe_list = await eligible_staff(db, org, staff_ids, service, settings)
+    gmap_probe, gmap_probe_errors = await _load_google_busy_map(
+        staff_probe_list,
+        start - timedelta(days=1),
+        start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
+        settings,
+    )
     await _release_bookings_with_missing_google_events(
         db,
         settings,
         staff_probe_list,
         start - timedelta(days=1),
         start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
+    )
+    await _release_unsynced_orphan_bookings(
+        db,
+        settings,
+        staff_probe_list,
+        start - timedelta(days=1),
+        start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
+        gmap_probe,
+        gmap_probe_errors,
     )
     end = start + timedelta(minutes=service.duration_minutes)
 
