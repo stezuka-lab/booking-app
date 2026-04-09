@@ -388,6 +388,8 @@ async def busy_intervals_union_for_link(
     range_start: datetime,
     range_end: datetime,
     gmap: dict[int, list[tuple[datetime, datetime]]],
+    *,
+    db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
 ) -> list[tuple[datetime, datetime]]:
     """各担当の Google+DB の埋まりの和集合（いずれかが埋まっている時間）。
 
@@ -398,7 +400,10 @@ async def busy_intervals_union_for_link(
     per_staff: list[list[tuple[datetime, datetime]]] = []
     for s in staff_list:
         gbusy = _sanitize_intervals(list(gmap.get(s.id) or []), log_label=f"busy_union google staff={s.id}")
-        dbb = await db_booking_busy_intervals_for_staff(session, s.id, range_start, range_end)
+        if db_busy_map is not None:
+            dbb = list(db_busy_map.get(s.id) or [])
+        else:
+            dbb = await db_booking_busy_intervals_for_staff(session, s.id, range_start, range_end)
         per_staff.append(merge_intervals(gbusy + dbb))
     if not per_staff:
         return []
@@ -561,23 +566,27 @@ async def staff_is_free(
     exclude_booking_id: int | None = None,
     buffer_minutes: int | None = None,
     db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
+    merged_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
 ) -> bool:
     buf_min = max(
         0,
         int(buffer_minutes) if buffer_minutes is not None else 0,
     )
     # DB と Google をマージし、google_calendar_allows_booking で一括判定（buf=0 は重なりのみ）。
-    if db_busy_map is not None:
-        db_ivs = list(db_busy_map.get(staff.id) or [])
+    if merged_busy_map is not None:
+        merged = list(merged_busy_map.get(staff.id) or [])
     else:
-        db_ivs = await _db_booking_intervals_for_staff(
-            session,
-            staff.id,
-            exclude_booking_id=exclude_booking_id,
-        )
-    gbusy = google_busy_map.get(staff.id) or []
-    g_list = _sanitize_intervals(list(gbusy), log_label=f"staff_free google staff={staff.id}")
-    merged = merge_intervals(db_ivs + g_list)
+        if db_busy_map is not None:
+            db_ivs = list(db_busy_map.get(staff.id) or [])
+        else:
+            db_ivs = await _db_booking_intervals_for_staff(
+                session,
+                staff.id,
+                exclude_booking_id=exclude_booking_id,
+            )
+        gbusy = google_busy_map.get(staff.id) or []
+        g_list = _sanitize_intervals(list(gbusy), log_label=f"staff_free google staff={staff.id}")
+        merged = merge_intervals(db_ivs + g_list)
     return google_calendar_allows_booking(start, end, buf_min, merged)
 
 
@@ -618,6 +627,7 @@ async def pick_staff_for_slot(
     buffer_minutes_override: int | None = None,
     google_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
+    merged_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     dry_run: bool = False,
 ) -> StaffMember | None:
     """担当のうち、この枠が Google+DB 的に取れる人を列挙し、優先度またはラウンドロビンで1名を返す。"""
@@ -632,9 +642,8 @@ async def pick_staff_for_slot(
     if google_busy_map is not None:
         gmap = google_busy_map
     else:
-        ws, we = org_calendar_day_bounds_utc(start, org)
-        pad = timedelta(days=1)
-        gmap, _google_busy_errors = await _load_google_busy_map(staff_list, ws - pad, we + pad, settings)
+        pad = timedelta(minutes=max(0, buf_min))
+        gmap, _google_busy_errors = await _load_google_busy_map(staff_list, start - pad, end + pad, settings)
     free: list[StaffMember] = []
     for s in staff_list:
         if await staff_is_free(
@@ -646,6 +655,7 @@ async def pick_staff_for_slot(
             gmap,
             buffer_minutes=buf_min,
             db_busy_map=db_busy_map,
+            merged_busy_map=merged_busy_map,
         ):
             free.append(s)
     if not free:
@@ -741,6 +751,7 @@ async def available_slots_for_link(
     *,
     staff_list: list[StaffMember] | None = None,
     google_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
+    db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     extra_blocked_dates: set[date] | None = None,
     link_priority_overrides: dict[str, int] | None = None,
     buffer_minutes_override: int | None = None,
@@ -765,7 +776,7 @@ async def available_slots_for_link(
     if staff_list is None:
         staff_list = await eligible_staff(session, org, link_staff_ids, service, settings)
     if google_busy_map is None:
-        _gpad = timedelta(hours=2)
+        _gpad = timedelta(minutes=max(0, buffer_minutes_override if buffer_minutes_override is not None else org_buffer_minutes(org, settings)))
         gmap, _google_busy_errors = await _load_google_busy_map(
             staff_list,
             rs_utc - _gpad,
@@ -774,12 +785,20 @@ async def available_slots_for_link(
         )
     else:
         gmap = google_busy_map
-    db_busy_map = await _db_booking_intervals_map_for_staff(
-        session,
-        [int(s.id) for s in staff_list],
-        rs_utc,
-        re_utc + AVAILABILITY_RANGE_END_SLACK,
-    )
+    if db_busy_map is None:
+        db_busy_map = await _db_booking_intervals_map_for_staff(
+            session,
+            [int(s.id) for s in staff_list],
+            rs_utc,
+            re_utc + AVAILABILITY_RANGE_END_SLACK,
+        )
+    merged_busy_map = {
+        int(s.id): merge_intervals(
+            list(db_busy_map.get(int(s.id)) or [])
+            + _sanitize_intervals(list(gmap.get(int(s.id)) or []), log_label=f"slot_merged google staff={s.id}")
+        )
+        for s in staff_list
+    }
 
     out: list[dict] = []
     had_slot_errors = False
@@ -839,6 +858,7 @@ async def available_slots_for_link(
                         buffer_minutes_override=buffer_minutes_override,
                         google_busy_map=gmap,
                         db_busy_map=db_busy_map,
+                        merged_busy_map=merged_busy_map,
                         dry_run=True,
                     )
                 except Exception as exc:

@@ -51,7 +51,9 @@ from app.booking.line_notify import notify_staff_line_booking
 from app.booking.rate_limit import check_public_booking_rate_limit
 from app.booking.policies import can_change_or_cancel_online
 from app.booking.routing_service import (
+    AVAILABILITY_RANGE_END_SLACK,
     BOOKING_SLOT_STEP_MINUTES,
+    _db_booking_intervals_map_for_staff,
     _load_google_busy_map,
     availability_defaults_positive_int,
     availability_zone,
@@ -104,6 +106,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["booking"])
 
 _PUBLIC_AVAILABILITY_CACHE: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
+
+
+def _coerce_google_busy_result(
+    result: Any,
+) -> tuple[dict[int, list[tuple[datetime, datetime]]], dict[int, str]]:
+    if isinstance(result, tuple) and len(result) == 2:
+        gmap, errors = result
+        return dict(gmap or {}), dict(errors or {})
+    if isinstance(result, dict):
+        return dict(result), {}
+    return {}, {}
 
 
 def _filter_slots_by_blocked_dates(
@@ -219,11 +232,13 @@ async def _reconcile_staff_calendar_blocks(
     gmap = google_busy_map
     gerr = dict(google_busy_errors or {})
     if gmap is None:
-        gmap, gerr = await _load_google_busy_map(
-            staff_list,
-            range_start,
-            range_end,
-            settings,
+        gmap, gerr = _coerce_google_busy_result(
+            await _load_google_busy_map(
+                staff_list,
+                range_start,
+                range_end,
+                settings,
+            )
         )
     released_missing = await _release_bookings_with_missing_google_events(
         db,
@@ -954,15 +969,17 @@ async def link_availability(
         linked_staff_ids = {
             s.id for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip()
         }
-        _gpad = timedelta(hours=2)
+        _gpad = timedelta(minutes=max(0, buf_min))
         gmap_failed = False
         google_busy_errors: dict[int, str] = {}
         try:
-            gmap, google_busy_errors = await _load_google_busy_map(
-                staff_list,
-                fts - _gpad,
-                tts + _gpad,
-                settings,
+            gmap, google_busy_errors = _coerce_google_busy_result(
+                await _load_google_busy_map(
+                    staff_list,
+                    fts - _gpad,
+                    tts + _gpad,
+                    settings,
+                )
             )
             failed_linked_staff_ids = set(google_busy_errors).intersection(linked_staff_ids)
             if failed_linked_staff_ids:
@@ -988,6 +1005,12 @@ async def link_availability(
             google_busy_errors=google_busy_errors,
         )
         released_count = int(reconcile.get("released_total") or 0)
+        db_busy_map = await _db_booking_intervals_map_for_staff(
+            db,
+            [int(s.id) for s in staff_list],
+            fts,
+            tts + AVAILABILITY_RANGE_END_SLACK,
+        )
         lead_blocked = link_lead_blocked_dates(org, link)
         slots, slot_generation_step, had_slot_errors, slot_error_message = await available_slots_for_link(
             db,
@@ -1000,6 +1023,7 @@ async def link_availability(
             slot_minutes=None,
             staff_list=staff_list,
             google_busy_map=gmap,
+            db_busy_map=db_busy_map,
             extra_blocked_dates=lead_blocked,
             link_priority_overrides=link_priority_overrides,
             buffer_minutes_override=buf_min,
@@ -1009,26 +1033,25 @@ async def link_availability(
         busy_union_failed = False
         busy_union_error_message = None
         try:
-            busy_union = await busy_intervals_union_for_link(db, staff_list, from_ts, to_ts, gmap)
+            busy_union = await busy_intervals_union_for_link(
+                db,
+                staff_list,
+                from_ts,
+                to_ts,
+                gmap,
+                db_busy_map=db_busy_map,
+            )
         except Exception as exc:
             busy_union_failed = True
             busy_union_error_message = (str(exc).strip() or exc.__class__.__name__)[:500]
             logger.exception("Public link busy union failed: token=%s org_id=%s", token, org.id)
             busy_union = []
         google_busy_count = 0
-        db_busy_count = 0
+        db_busy_count = sum(len(v) for v in db_busy_map.values())
         db_busy_details: list[dict[str, Any]] = []
         try:
             for s in staff_list:
                 google_busy_count += len(gmap.get(s.id) or [])
-                db_busy_count += len(
-                    await db_booking_busy_intervals_for_staff(
-                        db,
-                        s.id,
-                        from_ts,
-                        to_ts,
-                    )
-                )
             db_busy_details = await _debug_db_busy_booking_details(db, staff_ids, fts, tts)
         except Exception:
             logger.exception("Public link busy source diagnostics failed: token=%s org_id=%s", token, org.id)
@@ -1199,11 +1222,13 @@ async def _create_booking_from_body(
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     staff_probe_list = await eligible_staff(db, org, staff_ids, service, settings)
-    gmap_probe, gmap_probe_errors = await _load_google_busy_map(
-        staff_probe_list,
-        start - timedelta(days=1),
-        start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
-        settings,
+    gmap_probe, gmap_probe_errors = _coerce_google_busy_result(
+        await _load_google_busy_map(
+            staff_probe_list,
+            start - timedelta(days=1),
+            start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
+            settings,
+        )
     )
     await _release_bookings_with_missing_google_events(
         db,
@@ -1267,8 +1292,9 @@ async def _create_booking_from_body(
         fb_from = start - timedelta(days=7)
         fb_to = start + timedelta(days=7)
     # 予約開始・終了が FreeBusy の窓ぴったりだと欠けることがあるため必ず含める
-    fb_from = min(fb_from, start - timedelta(hours=2))
-    fb_to = max(fb_to, end + timedelta(hours=2))
+    fb_pad = timedelta(minutes=max(0, buf_org))
+    fb_from = min(fb_from, start - fb_pad)
+    fb_to = max(fb_to, end + fb_pad)
     if fb_from >= fb_to:
         fb_to = fb_from + timedelta(seconds=1)
 
@@ -1283,7 +1309,9 @@ async def _create_booking_from_body(
                 400,
                 "この担当はこの予約リンク・区分の対象外です（担当割当・スキル・Google連携をご確認ください）",
             )
-        gmap, _google_busy_errors = await _load_google_busy_map([staff], fb_from, fb_to, settings)
+        gmap, _google_busy_errors = _coerce_google_busy_result(
+            await _load_google_busy_map([staff], fb_from, fb_to, settings)
+        )
         if not await staff_is_free(
             db,
             staff,
@@ -1321,7 +1349,9 @@ async def _create_booking_from_body(
                     buffer_minutes=buf_org,
                 ),
             )
-        gmap, _google_busy_errors = await _load_google_busy_map(staff_list, fb_from, fb_to, settings)
+        gmap, _google_busy_errors = _coerce_google_busy_result(
+            await _load_google_busy_map(staff_list, fb_from, fb_to, settings)
+        )
         picked = await pick_staff_for_slot(
             db,
             org,
@@ -1753,7 +1783,9 @@ async def manage_reschedule(
         )
     ws, we = org_calendar_day_bounds_utc(new_start, org)
     _pad = timedelta(days=1)
-    gmap, _google_busy_errors = await _load_google_busy_map([staff], ws - _pad, we + _pad, settings)
+    gmap, _google_busy_errors = _coerce_google_busy_result(
+        await _load_google_busy_map([staff], ws - _pad, we + _pad, settings)
+    )
     buf_res = org_buffer_minutes(org, settings)
     if not await staff_is_free(
         db,
@@ -2078,7 +2110,9 @@ async def admin_calendar_diagnostics(
     )
     now_utc = datetime.now(timezone.utc)
     until_utc = now_utc + timedelta(days=14)
-    gmap, errors = await _load_google_busy_map(staff, now_utc, until_utc, settings)
+    gmap, errors = _coerce_google_busy_result(
+        await _load_google_busy_map(staff, now_utc, until_utc, settings)
+    )
     rows: list[dict[str, Any]] = []
     for s in staff:
         refresh_token = (_staff_google_refresh_token(s, settings) or "").strip()
