@@ -74,6 +74,7 @@ class Settings(BaseSettings):
     booking_public_rate_limit_window_sec: int = 3600
     booking_public_rate_limit_max_requests: int = 40
     booking_public_availability_cache_sec: int = 0
+    db_startup_maintenance_timeout_sec: int = 20
     api_docs_enabled: bool = True
     # DB にユーザーが 1 人もいないときだけ 1 回だけ作成（初期管理者）
     booking_bootstrap_admin_user: str = ""

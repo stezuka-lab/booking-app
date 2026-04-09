@@ -2,16 +2,20 @@
 
 from __future__ import annotations
 
+import asyncio
 from functools import lru_cache
+import logging
 from typing import Any
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from sqlalchemy import inspect, text
+from sqlalchemy import text
 from sqlalchemy.schema import CreateTable
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase
 
 from app.config import get_settings
+
+logger = logging.getLogger(__name__)
 
 
 class Base(DeclarativeBase):
@@ -139,9 +143,40 @@ async def _sqlite_add_missing_columns() -> None:
 
 
 def _postgres_add_missing_columns_sync(sync_conn: Any) -> None:
-    inspector = inspect(sync_conn)
+    table_names = set(
+        sync_conn.execute(
+            text(
+                """
+                SELECT table_name
+                FROM information_schema.tables
+                WHERE table_schema = current_schema()
+                """
+            )
+        ).scalars()
+    )
+    target_tables = [table for table in SCHEMA_DRIFT_COLUMNS if table in table_names]
+    if not target_tables:
+        return
+    params = {f"table_{idx}": table for idx, table in enumerate(target_tables)}
+    in_sql = ", ".join(f":table_{idx}" for idx, _table in enumerate(target_tables))
+    rows = sync_conn.execute(
+        text(
+            f"""
+            SELECT table_name, column_name
+            FROM information_schema.columns
+            WHERE table_schema = current_schema()
+              AND table_name IN ({in_sql})
+            """
+        ),
+        params,
+    ).fetchall()
+    existing_by_table: dict[str, set[str]] = {table: set() for table in target_tables}
+    for table_name, column_name in rows:
+        existing_by_table.setdefault(str(table_name), set()).add(str(column_name))
     for table, columns in SCHEMA_DRIFT_COLUMNS.items():
-        existing = {col["name"] for col in inspector.get_columns(table)}
+        if table not in existing_by_table:
+            continue
+        existing = existing_by_table[table]
         for column, _sqlite_ddl, postgres_ddl in columns:
             if column in existing:
                 continue
@@ -160,9 +195,16 @@ async def _normalize_org_auto_confirm() -> None:
     engine = _get_engine()
     async with engine.begin() as conn:
         if str(engine.url).startswith("sqlite"):
-            await conn.execute(text('UPDATE "booking_orgs" SET "auto_confirm" = 1 WHERE COALESCE("auto_confirm", 0) = 0'))
+            await conn.execute(
+                text('UPDATE "booking_orgs" SET "auto_confirm" = 1 WHERE COALESCE("auto_confirm", 0) = 0')
+            )
         elif str(engine.url).startswith("postgresql"):
-            await conn.execute(text('UPDATE "booking_orgs" SET "auto_confirm" = TRUE WHERE COALESCE("auto_confirm", FALSE) = FALSE'))
+            await conn.execute(
+                text(
+                    'UPDATE "booking_orgs" SET "auto_confirm" = TRUE '
+                    'WHERE COALESCE("auto_confirm", FALSE) = FALSE'
+                )
+            )
 
 
 def _sqlite_rebuild_bookings_nullable_staff_sync(connection: Any) -> None:
@@ -213,12 +255,34 @@ async def _sqlite_migrate_bookings_nullable_staff(engine: Any) -> None:
 
 async def init_db() -> None:
     engine = _get_engine()
+    settings = get_settings()
+    logger.info("DB init: create_all start")
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-    await _sqlite_add_missing_columns()
-    await _postgres_add_missing_columns()
-    await _normalize_org_auto_confirm()
-    await _sqlite_migrate_bookings_nullable_staff(_get_engine())
+    logger.info("DB init: create_all done")
+    maintenance_timeout = max(1, int(settings.db_startup_maintenance_timeout_sec or 20))
+
+    async def _run_maintenance() -> None:
+        logger.info("DB init: sqlite drift check start")
+        await _sqlite_add_missing_columns()
+        logger.info("DB init: sqlite drift check done")
+        logger.info("DB init: postgres drift check start")
+        await _postgres_add_missing_columns()
+        logger.info("DB init: postgres drift check done")
+        logger.info("DB init: auto_confirm normalize start")
+        await _normalize_org_auto_confirm()
+        logger.info("DB init: auto_confirm normalize done")
+        logger.info("DB init: sqlite staff migration start")
+        await _sqlite_migrate_bookings_nullable_staff(engine)
+        logger.info("DB init: sqlite staff migration done")
+
+    try:
+        await asyncio.wait_for(_run_maintenance(), timeout=maintenance_timeout)
+    except asyncio.TimeoutError:
+        logger.warning(
+            "DB init maintenance timed out after %ss; continuing startup with runtime schema as-is.",
+            maintenance_timeout,
+        )
 
 
 @lru_cache
