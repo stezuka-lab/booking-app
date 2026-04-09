@@ -281,6 +281,7 @@ async def _release_unsynced_orphan_bookings(
             Booking.staff_id.in_(list(staff_map)),
             Booking.status == "confirmed",
             Booking.google_event_id.is_(None),
+            Booking.google_calendar_synced_at.is_(None),
             Booking.start_utc < range_end,
             Booking.end_utc > range_start,
             BookingOrg.auto_confirm.is_(True),
@@ -303,7 +304,7 @@ async def _release_unsynced_orphan_bookings(
         )
         if created_at_utc and (now_utc - created_at_utc) < min_age:
             continue
-        if not (b.google_calendar_sync_error or "").strip() and not created_at_utc:
+        if not created_at_utc:
             continue
         start_utc = b.start_utc if b.start_utc.tzinfo else b.start_utc.replace(tzinfo=timezone.utc)
         end_utc = b.end_utc if b.end_utc.tzinfo else b.end_utc.replace(tzinfo=timezone.utc)
@@ -313,7 +314,11 @@ async def _release_unsynced_orphan_bookings(
         b.status = "cancelled"
         b.cancelled_at = now_utc
         b.google_calendar_synced_at = None
-        b.google_calendar_sync_error = "Googleカレンダーに予定が存在しない未同期予約を自動で解放しました"
+        existing_reason = (b.google_calendar_sync_error or "").strip()
+        b.google_calendar_sync_error = (
+            existing_reason
+            or "Googleカレンダーに反映されていない古い予約を自動で解放しました"
+        )
         released += 1
     if released:
         await db.flush()
