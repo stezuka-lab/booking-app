@@ -259,6 +259,46 @@ def _interval_overlaps_any(
     return False
 
 
+async def _debug_db_busy_booking_details(
+    db: AsyncSession,
+    staff_ids: list[int],
+    range_start: datetime,
+    range_end: datetime,
+) -> list[dict[str, Any]]:
+    if not staff_ids:
+        return []
+    q = (
+        select(Booking)
+        .where(
+            Booking.staff_id.in_(staff_ids),
+            Booking.status.in_(("pending", "confirmed")),
+            Booking.start_utc < range_end,
+            Booking.end_utc > range_start,
+        )
+        .order_by(Booking.start_utc.asc(), Booking.id.asc())
+        .limit(10)
+    )
+    rows = list((await db.scalars(q)).all())
+    out: list[dict[str, Any]] = []
+    for b in rows:
+        out.append(
+            {
+                "booking_id": b.id,
+                "staff_id": b.staff_id,
+                "status": b.status,
+                "start_utc": b.start_utc.isoformat() if b.start_utc else None,
+                "end_utc": b.end_utc.isoformat() if b.end_utc else None,
+                "google_event_id_present": bool((b.google_event_id or "").strip()),
+                "google_calendar_synced_at": (
+                    b.google_calendar_synced_at.isoformat() if b.google_calendar_synced_at else None
+                ),
+                "google_calendar_sync_error": b.google_calendar_sync_error,
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+            }
+        )
+    return out
+
+
 async def _release_unsynced_orphan_bookings(
     db: AsyncSession,
     settings: Settings,
@@ -855,6 +895,7 @@ async def link_availability(
             busy_union = []
         google_busy_count = 0
         db_busy_count = 0
+        db_busy_details: list[dict[str, Any]] = []
         try:
             for s in staff_list:
                 google_busy_count += len(gmap.get(s.id) or [])
@@ -866,6 +907,7 @@ async def link_availability(
                         to_ts,
                     )
                 )
+            db_busy_details = await _debug_db_busy_booking_details(db, staff_ids, fts, tts)
         except Exception:
             logger.exception("Public link busy source diagnostics failed: token=%s org_id=%s", token, org.id)
         availability_debug = {
@@ -880,6 +922,7 @@ async def link_availability(
             "released_missing_google_events": released_count,
             "google_busy_count": google_busy_count,
             "db_busy_count": db_busy_count,
+            "db_busy_details": db_busy_details,
         }
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
