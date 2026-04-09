@@ -1,6 +1,6 @@
 # Windows では make が無い場合があります。そのときは START.md の手順か run_dev.bat を使ってください。
 
-.PHONY: install test run docker
+.PHONY: install test run docker migrate stamp-baseline
 
 install:
 	python -m pip install -r requirements.txt
@@ -13,3 +13,9 @@ run:
 
 docker:
 	docker compose up --build
+
+migrate:
+	alembic upgrade head
+
+stamp-baseline:
+	alembic stamp 0001_baseline

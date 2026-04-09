@@ -13,6 +13,7 @@
 5. 本番 DB は `Postgres` を推奨します。`asyncpg` は依存関係に追加済みです。
 6. 無料サーバー系は `python -m app.serve` で起動できます。`PORT` を自動で拾います。
 7. 顧客情報を扱う本番環境では `BOOKING_DATA_ENCRYPTION_KEY` を設定してください。Google 連携トークンの暗号化保存に使います。
+8. DB 変更履歴は `Alembic` で管理できます。手順は [`docs/MIGRATIONS.md`](./docs/MIGRATIONS.md) を参照してください。
 
 ## 起動
 
@@ -25,6 +26,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 - **Free PaaS**: `Procfile` / `render.yaml` / `python -m app.serve`
 - **Docker**: `docker compose up --build`
 - **テスト**: `python -m pytest -q`
+- **Migration**: `alembic upgrade head`
 
 ## API（抜粋）
 

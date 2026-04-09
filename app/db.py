@@ -106,6 +106,16 @@ def _normalize_database_url(raw_url: str) -> tuple[str, dict[str, Any]]:
     return normalized, connect_args
 
 
+def database_url_for_alembic(raw_url: str) -> str:
+    """Alembic が使える同期ドライバ URL へ正規化する。"""
+    url = (raw_url or "").strip()
+    if url.startswith("sqlite+aiosqlite://"):
+        return "sqlite://" + url[len("sqlite+aiosqlite://") :]
+    if url.startswith("postgresql+asyncpg://"):
+        return "postgresql+psycopg://" + url[len("postgresql+asyncpg://") :]
+    return url
+
+
 def _get_engine():
     global _engine
     if _engine is None:
