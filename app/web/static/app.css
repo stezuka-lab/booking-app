@@ -1324,6 +1324,18 @@ code {
   font-size: 0.88rem;
 }
 
+.panel-header-actions {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.75rem;
+}
+
+.panel-header-actions .panel-title {
+  margin-bottom: 0.35rem;
+}
+
 .booking-summary-list {
   display: grid;
   gap: 0.7rem;

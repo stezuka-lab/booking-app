@@ -197,6 +197,69 @@ def _clear_public_availability_cache(token: str | None = None) -> None:
         _PUBLIC_AVAILABILITY_CACHE.pop(key, None)
 
 
+async def _reconcile_staff_calendar_blocks(
+    db: AsyncSession,
+    settings: Settings,
+    staff_list: list[StaffMember],
+    range_start: datetime,
+    range_end: datetime,
+    *,
+    google_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
+    google_busy_errors: dict[int, str] | None = None,
+) -> dict[str, Any]:
+    if not staff_list:
+        return {
+            "released_total": 0,
+            "released_missing_google_events": 0,
+            "released_unsynced_orphans": 0,
+            "released_stale_synced": 0,
+            "google_busy_errors": {},
+            "google_busy_map": {},
+        }
+    gmap = google_busy_map
+    gerr = dict(google_busy_errors or {})
+    if gmap is None:
+        gmap, gerr = await _load_google_busy_map(
+            staff_list,
+            range_start,
+            range_end,
+            settings,
+        )
+    released_missing = await _release_bookings_with_missing_google_events(
+        db,
+        settings,
+        staff_list,
+        range_start,
+        range_end,
+    )
+    released_orphans = await _release_unsynced_orphan_bookings(
+        db,
+        settings,
+        staff_list,
+        range_start,
+        range_end,
+        gmap,
+        gerr,
+    )
+    released_stale = await _release_stale_synced_bookings_without_google_busy(
+        db,
+        settings,
+        staff_list,
+        range_start,
+        range_end,
+        gmap,
+        gerr,
+    )
+    return {
+        "released_total": int(released_missing + released_orphans + released_stale),
+        "released_missing_google_events": int(released_missing),
+        "released_unsynced_orphans": int(released_orphans),
+        "released_stale_synced": int(released_stale),
+        "google_busy_errors": gerr,
+        "google_busy_map": gmap,
+    }
+
+
 async def _release_bookings_with_missing_google_events(
     db: AsyncSession,
     settings: Settings,
@@ -915,31 +978,16 @@ async def link_availability(
             logger.exception("Public link Google busy load failed: token=%s org_id=%s", token, org.id)
             gmap = {}
             google_busy_errors = {}
-        released_count = await _release_bookings_with_missing_google_events(
+        reconcile = await _reconcile_staff_calendar_blocks(
             db,
             settings,
             staff_list,
             fts,
             tts,
+            google_busy_map=gmap,
+            google_busy_errors=google_busy_errors,
         )
-        released_count += await _release_unsynced_orphan_bookings(
-            db,
-            settings,
-            staff_list,
-            fts,
-            tts,
-            gmap,
-            google_busy_errors,
-        )
-        released_count += await _release_stale_synced_bookings_without_google_busy(
-            db,
-            settings,
-            staff_list,
-            fts,
-            tts,
-            gmap,
-            google_busy_errors,
-        )
+        released_count = int(reconcile.get("released_total") or 0)
         lead_blocked = link_lead_blocked_dates(org, link)
         slots, slot_generation_step, had_slot_errors, slot_error_message = await available_slots_for_link(
             db,
@@ -1164,23 +1212,14 @@ async def _create_booking_from_body(
         start - timedelta(days=1),
         start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
     )
-    await _release_unsynced_orphan_bookings(
+    await _reconcile_staff_calendar_blocks(
         db,
         settings,
         staff_probe_list,
         start - timedelta(days=1),
         start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
-        gmap_probe,
-        gmap_probe_errors,
-    )
-    await _release_stale_synced_bookings_without_google_busy(
-        db,
-        settings,
-        staff_probe_list,
-        start - timedelta(days=1),
-        start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
-        gmap_probe,
-        gmap_probe_errors,
+        google_busy_map=gmap_probe,
+        google_busy_errors=gmap_probe_errors,
     )
     end = start + timedelta(minutes=service.duration_minutes)
 
@@ -2079,6 +2118,65 @@ async def admin_calendar_diagnostics(
         "window": {"from_utc": now_utc.isoformat(), "to_utc": until_utc.isoformat()},
         "google_oauth_ready": settings.is_google_oauth_configured(),
         "staff": rows,
+    }
+
+
+@router.post("/api/booking/admin/orgs/{slug}/reconcile-calendar-blocks")
+async def admin_reconcile_calendar_blocks(
+    request: Request,
+    slug: str,
+    db: DbSession,
+    settings: SettingsDep,
+    x_admin_secret: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=slug)
+    org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+    if not org:
+        raise HTTPException(404, "org not found")
+    staff = list(
+        (
+            await db.scalars(
+                select(StaffMember).where(
+                    StaffMember.org_id == org.id,
+                    StaffMember.active.is_(True),
+                )
+            )
+        ).all()
+    )
+    now_utc = datetime.now(timezone.utc)
+    from_utc = now_utc - timedelta(days=30)
+    to_utc = now_utc + timedelta(days=120)
+    reconcile = await _reconcile_staff_calendar_blocks(
+        db,
+        settings,
+        staff,
+        from_utc,
+        to_utc,
+    )
+    await write_audit_log(
+        db,
+        request,
+        action="booking.calendar_blocks_reconciled",
+        org_slug=org.slug,
+        target_type="booking_org",
+        target_id=org.id,
+        detail={
+            "released_total": reconcile["released_total"],
+            "released_missing_google_events": reconcile["released_missing_google_events"],
+            "released_unsynced_orphans": reconcile["released_unsynced_orphans"],
+            "released_stale_synced": reconcile["released_stale_synced"],
+        },
+    )
+    await db.commit()
+    return {
+        "ok": True,
+        "org": {"slug": org.slug, "name": org.name},
+        "window": {"from_utc": from_utc.isoformat(), "to_utc": to_utc.isoformat()},
+        "released_total": reconcile["released_total"],
+        "released_missing_google_events": reconcile["released_missing_google_events"],
+        "released_unsynced_orphans": reconcile["released_unsynced_orphans"],
+        "released_stale_synced": reconcile["released_stale_synced"],
+        "google_busy_error_staff_count": len(reconcile["google_busy_errors"]),
     }
 
 

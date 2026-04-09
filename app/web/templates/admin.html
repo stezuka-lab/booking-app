@@ -132,8 +132,13 @@
   </section>
 
   <section class="panel admin-section" id="bookings-panel" hidden>
-    <h2 class="panel-title">最近の予約と同期状態</h2>
-    <p class="muted panel-hint">直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。</p>
+    <div class="panel-header-actions">
+      <div>
+        <h2 class="panel-title">最近の予約と同期状態</h2>
+        <p class="muted panel-hint">直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。</p>
+      </div>
+      <button type="button" class="btn secondary" id="btn-reconcile-calendar-blocks">今すぐ整合性を回復</button>
+    </div>
     <div class="table-wrap">
       <table class="admin-table">
         <thead>
@@ -273,6 +278,33 @@
     document.getElementById('services-panel').hidden = !show;
     document.getElementById('links-panel').hidden = !show;
     document.getElementById('bookings-panel').hidden = !show;
+  }
+
+  async function reconcileCalendarBlocks() {
+    if (!ensureOrgSelected()) return;
+    setMsg('Google カレンダーとの整合性を確認しています…');
+    try {
+      const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/reconcile-calendar-blocks', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: headersJson(),
+      });
+      const j = await r.json().catch(function () { return {}; });
+      if (!r.ok) {
+        throw new Error((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText);
+      }
+      const released = Number(j.released_total || 0);
+      const detail = [
+        'missing=' + Number(j.released_missing_google_events || 0),
+        'orphan=' + Number(j.released_unsynced_orphans || 0),
+        'stale=' + Number(j.released_stale_synced || 0),
+      ].join(', ');
+      setMsg('整合性回復が完了しました。解放件数: ' + released + ' (' + detail + ')', 'ok');
+      await Promise.all([loadSummary(), loadBookings()]);
+      setTimeout(function () { setMsg(''); }, 3500);
+    } catch (e) {
+      setMsg(String(e), 'err');
+    }
   }
 
   function fmtJst(iso) {
@@ -942,6 +974,7 @@
     ev.preventDefault();
     document.getElementById('link-diagnostics-dialog').close();
   });
+  document.getElementById('btn-reconcile-calendar-blocks').addEventListener('click', reconcileCalendarBlocks);
 
   document.getElementById('edit-campaign-save').addEventListener('click', async function () {
     setMsg('');
