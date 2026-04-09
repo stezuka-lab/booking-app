@@ -253,6 +253,15 @@
   let campaignSummary = null;
   let currentBookings = [];
 
+  function esc(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function setMsg(text, kind) {
     msg.textContent = text || '';
     msg.className = 'admin-msg' + (kind ? ' ' + kind : '');

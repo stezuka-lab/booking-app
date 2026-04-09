@@ -2,6 +2,7 @@
 
 import pytest
 from fastapi.testclient import TestClient
+from pathlib import Path
 
 from app.config import get_settings
 
@@ -66,6 +67,11 @@ def test_web_app_settings_page(client: TestClient) -> None:
     r = client.get("/app/settings", follow_redirects=False)
     assert r.status_code == 302
     assert "/app/login" in (r.headers.get("location") or "")
+
+
+def test_admin_template_defines_esc_helper() -> None:
+    tpl = (Path(__file__).resolve().parents[1] / "app" / "web" / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert "function esc(" in tpl
 
 
 def test_calendar_page(client: TestClient) -> None:
