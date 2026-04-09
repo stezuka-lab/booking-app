@@ -131,6 +131,28 @@
     </div>
   </section>
 
+  <section class="panel admin-section" id="bookings-panel" hidden>
+    <h2 class="panel-title">最近の予約と同期状態</h2>
+    <p class="muted panel-hint">直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。</p>
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>日時</th>
+            <th>予約内容</th>
+            <th>担当</th>
+            <th>予約状態</th>
+            <th>Google同期</th>
+            <th>通知</th>
+            <th>理由</th>
+            <th></th>
+          </tr>
+        </thead>
+        <tbody id="bookings-tbody"></tbody>
+      </table>
+    </div>
+  </section>
+
   <p id="admin-msg" class="admin-msg" role="alert"></p>
 
   {% if viewer_is_admin | default(false) %}
@@ -205,6 +227,17 @@
     </div>
   </div>
 </dialog>
+
+<dialog class="booking-dialog" id="link-diagnostics-dialog" aria-labelledby="link-diagnostics-title">
+  <div class="booking-dialog__panel" style="max-width: 40rem">
+    <h2 class="booking-dialog__title" id="link-diagnostics-title">予約ブロック診断</h2>
+    <p class="muted" id="link-diagnostics-lead">公開予約ページで何が空きを塞いでいるかを表示します。</p>
+    <div id="link-diagnostics-body"></div>
+    <div class="booking-dialog__actions">
+      <button type="button" class="btn primary" id="link-diagnostics-close">閉じる</button>
+    </div>
+  </div>
+</dialog>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -213,6 +246,7 @@
   const msg = document.getElementById('admin-msg');
   const out = document.getElementById('admin-out');
   let campaignSummary = null;
+  let currentBookings = [];
 
   function setMsg(text, kind) {
     msg.textContent = text || '';
@@ -238,6 +272,48 @@
     document.getElementById('link-create-panel').hidden = !show;
     document.getElementById('services-panel').hidden = !show;
     document.getElementById('links-panel').hidden = !show;
+    document.getElementById('bookings-panel').hidden = !show;
+  }
+
+  function fmtJst(iso) {
+    if (!iso) return '—';
+    try {
+      return new Intl.DateTimeFormat('ja-JP', {
+        month: 'numeric',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+        timeZone: 'Asia/Tokyo',
+      }).format(new Date(iso));
+    } catch (e) {
+      return String(iso);
+    }
+  }
+
+  function badgeHtml(text, kind) {
+    return '<span class="admin-status-badge' + (kind ? ' ' + kind : '') + '">' + esc(text) + '</span>';
+  }
+
+  function syncBadgeHtml(b) {
+    if (b.status !== 'confirmed') return badgeHtml('対象外', 'muted');
+    if (b.google_calendar_synced_at) return badgeHtml('同期済み', 'ok');
+    if (b.google_calendar_sync_error) return badgeHtml('未同期', 'err');
+    return badgeHtml('未同期', 'warn');
+  }
+
+  function notificationBadgeHtml(sentAt, errorText) {
+    if (sentAt) return badgeHtml('送信済み', 'ok');
+    if (errorText) return badgeHtml('失敗', 'err');
+    return badgeHtml('未送信', 'muted');
+  }
+
+  function bookingStatusHtml(status) {
+    var label = status || '—';
+    var kind = 'muted';
+    if (status === 'confirmed') kind = 'ok';
+    else if (status === 'pending') kind = 'warn';
+    else if (status === 'cancelled' || status === 'rejected') kind = 'err';
+    return badgeHtml(label, kind);
   }
 
   function staffNamesForIds(data, ids) {
@@ -544,9 +620,17 @@
       b2.target = '_blank';
       b2.rel = 'noopener noreferrer';
       b2.textContent = '開く';
+      const bDiag = document.createElement('button');
+      bDiag.type = 'button';
+      bDiag.className = 'btn sm secondary';
+      bDiag.textContent = '診断';
+      bDiag.addEventListener('click', function () {
+        openLinkDiagnostics(l);
+      });
       tdA.appendChild(b0);
       tdA.appendChild(bToggle);
       tdA.appendChild(b1);
+      tdA.appendChild(bDiag);
       tdA.appendChild(b2);
       tr.appendChild(tdT);
       tr.appendChild(tdCat);
@@ -560,6 +644,168 @@
 
     showLinkPanels(true);
     if (out) out.textContent = JSON.stringify(data, null, 2);
+  }
+
+  function renderBookings(data) {
+    currentBookings = (data && data.bookings) || [];
+    var tbody = document.getElementById('bookings-tbody');
+    tbody.innerHTML = '';
+    if (!currentBookings.length) {
+      var trEmpty = document.createElement('tr');
+      var tdEmpty = document.createElement('td');
+      tdEmpty.colSpan = 8;
+      tdEmpty.className = 'muted';
+      tdEmpty.textContent = 'まだ予約はありません。';
+      trEmpty.appendChild(tdEmpty);
+      tbody.appendChild(trEmpty);
+      return;
+    }
+    currentBookings.forEach(function (b) {
+      var tr = document.createElement('tr');
+
+      var tdWhen = document.createElement('td');
+      tdWhen.innerHTML =
+        '<div>' + esc(fmtJst(b.start_utc)) + '</div>' +
+        '<div class="muted small">〜 ' + esc(fmtJst(b.end_utc)) + '</div>';
+
+      var tdBooking = document.createElement('td');
+      tdBooking.innerHTML =
+        '<div>' + esc(b.booking_link_title_snapshot || '予約') + '</div>' +
+        '<div class="muted small">' + esc(b.customer_name || '—') + '</div>';
+
+      var tdStaff = document.createElement('td');
+      tdStaff.textContent = b.staff_display_name || (b.staff_id != null ? 'id ' + b.staff_id : '—');
+
+      var tdStatus = document.createElement('td');
+      tdStatus.innerHTML = bookingStatusHtml(b.status);
+
+      var tdSync = document.createElement('td');
+      tdSync.innerHTML = syncBadgeHtml(b);
+      if (b.google_calendar_synced_at) {
+        tdSync.innerHTML += '<div class="muted small">' + esc(fmtJst(b.google_calendar_synced_at)) + '</div>';
+      }
+
+      var tdNotify = document.createElement('td');
+      tdNotify.innerHTML =
+        '<div>' + notificationBadgeHtml(b.customer_confirmation_email_sent_at, b.customer_confirmation_email_error) + '</div>' +
+        '<div style="margin-top:0.25rem">' + notificationBadgeHtml(b.staff_notification_email_sent_at, b.staff_notification_email_error) + '</div>';
+
+      var tdReason = document.createElement('td');
+      var reasons = [];
+      if (b.google_calendar_sync_error) reasons.push('同期: ' + b.google_calendar_sync_error);
+      if (b.customer_confirmation_email_error) reasons.push('顧客通知: ' + b.customer_confirmation_email_error);
+      if (b.staff_notification_email_error) reasons.push('担当通知: ' + b.staff_notification_email_error);
+      tdReason.innerHTML = reasons.length
+        ? '<div class="admin-reason-list">' + reasons.map(function (r) { return '<div>' + esc(r) + '</div>'; }).join('') + '</div>'
+        : '<span class="muted">—</span>';
+
+      var tdAction = document.createElement('td');
+      tdAction.className = 'cal-td-actions';
+      if (b.status === 'confirmed') {
+        var btn = document.createElement('button');
+        btn.type = 'button';
+        btn.className = 'btn sm secondary';
+        btn.textContent = '再同期';
+        btn.addEventListener('click', function () {
+          resyncBookingCalendar(b.id);
+        });
+        tdAction.appendChild(btn);
+      } else {
+        tdAction.innerHTML = '<span class="muted">—</span>';
+      }
+
+      tr.appendChild(tdWhen);
+      tr.appendChild(tdBooking);
+      tr.appendChild(tdStaff);
+      tr.appendChild(tdStatus);
+      tr.appendChild(tdSync);
+      tr.appendChild(tdNotify);
+      tr.appendChild(tdReason);
+      tr.appendChild(tdAction);
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function loadBookings() {
+    if (!ensureOrgSelected()) return;
+    var data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/bookings?limit=50');
+    if (data) renderBookings(data);
+  }
+
+  async function resyncBookingCalendar(bookingId) {
+    setMsg('');
+    try {
+      const r = await fetch('/api/booking/admin/bookings/' + encodeURIComponent(String(bookingId)) + '/resync-calendar', {
+        method: 'POST',
+        credentials: 'same-origin',
+        headers: headersJson(),
+      });
+      const j = await r.json().catch(function () { return {}; });
+      if (!r.ok) {
+        throw new Error((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText);
+      }
+      setMsg(j.ok ? 'カレンダーを再同期しました。' : '再同期に失敗しました。', j.ok ? 'ok' : 'err');
+      await loadBookings();
+    } catch (e) {
+      setMsg(String(e), 'err');
+    }
+  }
+
+  async function openLinkDiagnostics(link) {
+    setMsg('');
+    var box = document.getElementById('link-diagnostics-body');
+    var lead = document.getElementById('link-diagnostics-lead');
+    box.innerHTML = '<p class="muted">診断を読み込んでいます…</p>';
+    lead.textContent = (link.title || '予約リンク') + ' のブロック理由を確認しています。';
+    document.getElementById('link-diagnostics-dialog').showModal();
+    try {
+      var from = new Date();
+      from.setHours(0, 0, 0, 0);
+      var to = new Date(from);
+      to.setDate(to.getDate() + 7);
+      to.setMilliseconds(-1);
+      var q = new URLSearchParams({
+        from_ts: from.toISOString(),
+        to_ts: to.toISOString(),
+      });
+      if (link.service_id != null) q.set('service_id', String(link.service_id));
+      var token = (link.public_url || '').split('/').pop() || '';
+      var r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/availability?' + q.toString());
+      var j = await r.json().catch(function () { return {}; });
+      if (!r.ok) {
+        throw new Error((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText);
+      }
+      var dbg = j.availability_debug || {};
+      var details = dbg.db_busy_details || [];
+      box.innerHTML =
+        '<div class="summary-cards">' +
+          '<div class="summary-card"><h3>Google busy</h3><p>' + esc(String(dbg.google_busy_count || 0)) + '件</p></div>' +
+          '<div class="summary-card"><h3>DBブロック</h3><p>' + esc(String(dbg.db_busy_count || 0)) + '件</p></div>' +
+          '<div class="summary-card"><h3>自動解放</h3><p>' + esc(String(dbg.released_missing_google_events || 0)) + '件</p></div>' +
+        '</div>' +
+        (j.blocked_dates && j.blocked_dates.length
+          ? '<p class="muted" style="margin-top:1rem">予約不可日: ' + esc(j.blocked_dates.join(' / ')) + '</p>'
+          : '') +
+        (j.availability_error
+          ? '<p class="err" style="margin-top:0.75rem">' + esc(j.availability_error) + '</p>'
+          : '') +
+        (details.length
+          ? '<div class="table-wrap" style="margin-top:1rem"><table class="admin-table"><thead><tr><th>ID</th><th>担当</th><th>状態</th><th>日時</th><th>同期</th><th>理由</th></tr></thead><tbody>' +
+              details.map(function (d) {
+                return '<tr>' +
+                  '<td>' + esc(String(d.booking_id || '—')) + '</td>' +
+                  '<td>' + esc(String(d.staff_id || '—')) + '</td>' +
+                  '<td>' + esc(d.status || '—') + '</td>' +
+                  '<td><div>' + esc(fmtJst(d.start_utc)) + '</div><div class="muted small">〜 ' + esc(fmtJst(d.end_utc)) + '</div></td>' +
+                  '<td>' + (d.google_calendar_synced_at ? badgeHtml('同期済み', 'ok') : badgeHtml('未同期', 'warn')) + '</td>' +
+                  '<td>' + esc(d.google_calendar_sync_error || '—') + '</td>' +
+                '</tr>';
+              }).join('') +
+            '</tbody></table></div>'
+          : '<p class="muted" style="margin-top:1rem">この期間に DB 側のブロック予約は見つかりませんでした。</p>');
+    } catch (e) {
+      box.innerHTML = '<p class="err">' + esc(String(e)) + '</p>';
+    }
   }
 
   async function getJson(path) {
@@ -689,6 +935,14 @@
     document.getElementById('edit-campaign-dialog').close();
   });
 
+  document.getElementById('link-diagnostics-close').addEventListener('click', function () {
+    document.getElementById('link-diagnostics-dialog').close();
+  });
+  document.getElementById('link-diagnostics-dialog').addEventListener('cancel', function (ev) {
+    ev.preventDefault();
+    document.getElementById('link-diagnostics-dialog').close();
+  });
+
   document.getElementById('edit-campaign-save').addEventListener('click', async function () {
     setMsg('');
     const idStr = document.getElementById('edit-campaign-id').value.trim();
@@ -759,7 +1013,7 @@
   function bootAdminPage() {
     if (appViewer.authenticated && appViewer.user && appViewer.user.default_org_slug) {
       currentOrgSlug = appViewer.user.default_org_slug;
-      loadSummary().catch(function () {});
+      Promise.all([loadSummary(), loadBookings()]).catch(function () {});
       return;
     }
     if (!(appViewer && appViewer.authenticated)) {
@@ -770,7 +1024,7 @@
       window.__loadAuthMe().then(function (live) {
         if (live && live.authenticated && live.user && live.user.default_org_slug) {
           currentOrgSlug = live.user.default_org_slug;
-          loadSummary().catch(function () {});
+          Promise.all([loadSummary(), loadBookings()]).catch(function () {});
         } else {
           showLinkPanels(false);
           setMsg('このアカウントに組織が設定されていません。管理者に組織を割り当ててもらってください。', 'err');
