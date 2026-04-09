@@ -102,7 +102,11 @@
             <th>詳細</th>
           </tr>
         </thead>
-        <tbody id="audit-tbody"></tbody>
+        <tbody id="audit-tbody">
+          <tr>
+            <td colspan="6" class="muted">監査ログを読み込んでいます…</td>
+          </tr>
+        </tbody>
       </table>
     </div>
   </section>
@@ -432,58 +436,67 @@
 
   async function loadAuditLogs() {
     setMsg('');
-    const r = await fetch('/api/auth/admin/audit-logs', { credentials: 'same-origin' });
-    const j = await r.json().catch(function () {
-      return {};
-    });
-    if (!r.ok) {
-      setMsg(formatApiError(j) || r.statusText, 'err');
-      return;
-    }
     const tb = document.getElementById('audit-tbody');
-    tb.innerHTML = '';
-    const logs = j.logs || [];
-    if (!logs.length) {
-      const tr = document.createElement('tr');
-      const td = document.createElement('td');
-      td.colSpan = 6;
-      td.className = 'muted';
-      td.textContent = '監査ログはまだありません。';
-      tr.appendChild(td);
-      tb.appendChild(tr);
-      return;
+    tb.innerHTML = '<tr><td colspan="6" class="muted">監査ログを読み込んでいます…</td></tr>';
+    try {
+      const r = await fetch('/api/auth/admin/audit-logs', { credentials: 'same-origin' });
+      const j = await r.json().catch(function () {
+        return {};
+      });
+      if (!r.ok) {
+        const errText = formatApiError(j) || r.statusText;
+        setMsg(errText, 'err');
+        tb.innerHTML = '<tr><td colspan="6" class="err">監査ログの取得に失敗しました: ' + esc(errText) + '</td></tr>';
+        return;
+      }
+      tb.innerHTML = '';
+      const logs = j.logs || [];
+      if (!logs.length) {
+        const tr = document.createElement('tr');
+        const td = document.createElement('td');
+        td.colSpan = 6;
+        td.className = 'muted';
+        td.textContent = '監査ログはまだありません。監査ログ機能を追加した後の操作から記録されます。';
+        tr.appendChild(td);
+        tb.appendChild(tr);
+        return;
+      }
+      logs.forEach(function (row) {
+        const tr = document.createElement('tr');
+
+        const tdWhen = document.createElement('td');
+        tdWhen.innerHTML = '<div>' + esc(fmtJst(row.created_at)) + '</div>' +
+          '<div class="muted small">' + esc(row.ip_address || 'IP なし') + '</div>';
+
+        const tdAction = document.createElement('td');
+        tdAction.innerHTML = '<code class="audit-log-action">' + esc(row.action || '—') + '</code>';
+
+        const tdActor = document.createElement('td');
+        tdActor.innerHTML = '<div>' + esc(row.actor_username || 'system') + '</div>' +
+          '<div class="muted small">' + esc(row.actor_role || '—') + '</div>';
+
+        const tdOrg = document.createElement('td');
+        tdOrg.textContent = row.org_slug || '—';
+
+        const tdTarget = document.createElement('td');
+        tdTarget.textContent = formatAuditTarget(row);
+
+        const tdDetail = document.createElement('td');
+        tdDetail.innerHTML = formatAuditDetail(row.detail || {});
+
+        tr.appendChild(tdWhen);
+        tr.appendChild(tdAction);
+        tr.appendChild(tdActor);
+        tr.appendChild(tdOrg);
+        tr.appendChild(tdTarget);
+        tr.appendChild(tdDetail);
+        tb.appendChild(tr);
+      });
+    } catch (e) {
+      const errText = String(e);
+      setMsg(errText, 'err');
+      tb.innerHTML = '<tr><td colspan="6" class="err">監査ログの取得に失敗しました: ' + esc(errText) + '</td></tr>';
     }
-    logs.forEach(function (row) {
-      const tr = document.createElement('tr');
-
-      const tdWhen = document.createElement('td');
-      tdWhen.innerHTML = '<div>' + esc(fmtJst(row.created_at)) + '</div>' +
-        '<div class="muted small">' + esc(row.ip_address || 'IP なし') + '</div>';
-
-      const tdAction = document.createElement('td');
-      tdAction.innerHTML = '<code class="audit-log-action">' + esc(row.action || '—') + '</code>';
-
-      const tdActor = document.createElement('td');
-      tdActor.innerHTML = '<div>' + esc(row.actor_username || 'system') + '</div>' +
-        '<div class="muted small">' + esc(row.actor_role || '—') + '</div>';
-
-      const tdOrg = document.createElement('td');
-      tdOrg.textContent = row.org_slug || '—';
-
-      const tdTarget = document.createElement('td');
-      tdTarget.textContent = formatAuditTarget(row);
-
-      const tdDetail = document.createElement('td');
-      tdDetail.innerHTML = formatAuditDetail(row.detail || {});
-
-      tr.appendChild(tdWhen);
-      tr.appendChild(tdAction);
-      tr.appendChild(tdActor);
-      tr.appendChild(tdOrg);
-      tr.appendChild(tdTarget);
-      tr.appendChild(tdDetail);
-      tb.appendChild(tr);
-    });
   }
 
   document.getElementById('btn-create-user').addEventListener('click', async function () {

@@ -78,6 +78,7 @@ def test_accounts_template_has_audit_logs_section() -> None:
     tpl = (Path(__file__).resolve().parents[1] / "app" / "web" / "templates" / "accounts.html").read_text(encoding="utf-8")
     assert "監査ログ" in tpl
     assert "audit-tbody" in tpl
+    assert "監査ログを読み込んでいます" in tpl
 
 
 def test_backup_assets_exist() -> None:
