@@ -897,6 +897,18 @@ code {
   padding: 0.35rem;
 }
 
+.booking-cal-wrap.gcal-wrap {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: none;
+}
+
+.booking-cal-wrap.gcal-wrap::-webkit-scrollbar {
+  width: 0;
+  height: 0;
+}
+
 .booking-cal-wrap .gcal-body-week,
 .booking-cal-wrap .gcal-body-day {
   padding-bottom: 0.5rem;
@@ -1102,8 +1114,9 @@ code {
 .gcal-head-daycell.booking-head-day-blocked::after {
   content: "予約不可";
   position: absolute;
-  right: 0.35rem;
-  top: 0.24rem;
+  left: 50%;
+  top: 0.16rem;
+  transform: translateX(-50%);
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -1118,6 +1131,52 @@ code {
   line-height: 1;
   white-space: nowrap;
   z-index: 2;
+}
+
+.gcal-head-daycell.booking-head-day-blocked .gcal-dom {
+  margin-top: 0.7rem;
+}
+
+.booking-cal-col-grid {
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc(var(--booking-hour-px) - 1px),
+      #e8eaed calc(var(--booking-hour-px) - 1px),
+      #e8eaed var(--booking-hour-px)
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc((var(--booking-hour-px) / 2) - 1px),
+      rgba(232, 234, 237, 0.7) calc((var(--booking-hour-px) / 2) - 1px),
+      rgba(232, 234, 237, 0.7) calc(var(--booking-hour-px) / 2),
+      transparent calc(var(--booking-hour-px) / 2),
+      transparent var(--booking-hour-px)
+    ),
+    linear-gradient(to bottom, #fff 0%, #fff 100%);
+}
+
+.booking-cal-col-grid.is-today {
+  background:
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc(var(--booking-hour-px) - 1px),
+      #d7e3f4 calc(var(--booking-hour-px) - 1px),
+      #d7e3f4 var(--booking-hour-px)
+    ),
+    repeating-linear-gradient(
+      to bottom,
+      transparent 0,
+      transparent calc((var(--booking-hour-px) / 2) - 1px),
+      rgba(215, 227, 244, 0.75) calc((var(--booking-hour-px) / 2) - 1px),
+      rgba(215, 227, 244, 0.75) calc(var(--booking-hour-px) / 2),
+      transparent calc(var(--booking-hour-px) / 2),
+      transparent var(--booking-hour-px)
+    ),
+    linear-gradient(to bottom, rgba(26, 115, 232, 0.04), rgba(26, 115, 232, 0.04));
 }
 
 .booking-cal-events-layer .booking-slot-choice.cal-event {
@@ -2541,6 +2600,18 @@ button.cal-title-builder-remove,
   background: #fff;
   max-height: min(85vh, 960px);
   overflow: auto;
+}
+
+.booking-cal-wrap.gcal-wrap {
+  max-height: none;
+  overflow-x: auto;
+  overflow-y: visible;
+  scrollbar-width: none;
+}
+
+.booking-cal-wrap.gcal-wrap::-webkit-scrollbar {
+  width: 0;
+  height: 0;
 }
 
 .gcal-wrap-day {
