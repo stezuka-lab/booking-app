@@ -12,6 +12,7 @@ from app.booking.router import (
     _finalize_confirmed_booking,
     _public_booking_response,
     _release_bookings_with_missing_google_events,
+    _release_stale_synced_bookings_without_google_busy,
     _release_unsynced_orphan_bookings,
     _sync_booking_to_staff_calendar,
 )
@@ -269,6 +270,61 @@ def test_release_unsynced_orphan_bookings_without_error_text(monkeypatch) -> Non
     assert released == 1
     assert booking.status == "cancelled"
     assert "自動で解放しました" in (booking.google_calendar_sync_error or "")
+
+
+def test_release_stale_synced_bookings_without_google_busy(monkeypatch) -> None:
+    settings = get_settings()
+    staff = StaffMember(
+        id=6,
+        org_id=1,
+        name="手塚眞司",
+        google_refresh_token=encrypt_secret("refresh-token", settings),
+        google_calendar_id="primary",
+    )
+    booking = Booking(
+        id=103,
+        org_id=1,
+        staff_id=6,
+        service_id=1,
+        start_utc=datetime(2030, 1, 3, 7, 30, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 3, 8, 30, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        google_event_id="evt-stale",
+        google_calendar_synced_at=datetime(2025, 12, 31, 0, 0, tzinfo=timezone.utc),
+        google_calendar_sync_error=None,
+        created_at=datetime(2025, 12, 31, 0, 0, tzinfo=timezone.utc),
+        manage_token="stale-synced-token",
+    )
+
+    class DummySession:
+        async def scalars(self, _query):
+            class Result:
+                def all(self_inner):
+                    return [booking]
+
+            return Result()
+
+        async def flush(self):
+            return None
+
+    released = asyncio.run(
+        _release_stale_synced_bookings_without_google_busy(
+            DummySession(),
+            settings,
+            [staff],
+            datetime(2030, 1, 3, 0, 0, tzinfo=timezone.utc),
+            datetime(2030, 1, 4, 0, 0, tzinfo=timezone.utc),
+            {6: []},
+            {},
+        )
+    )
+
+    assert released == 1
+    assert booking.status == "cancelled"
+    assert booking.google_event_id is None
+    assert "自動で解放" in (booking.google_calendar_sync_error or "")
 
 
 def test_public_availability_survives_busy_union_failure(client, monkeypatch) -> None:
