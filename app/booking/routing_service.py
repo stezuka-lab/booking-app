@@ -509,6 +509,47 @@ async def _db_booking_intervals_for_staff(
     return out
 
 
+async def _db_booking_intervals_map_for_staff(
+    session: AsyncSession,
+    staff_ids: list[int],
+    range_start: datetime,
+    range_end: datetime,
+    *,
+    exclude_booking_id: int | None = None,
+) -> dict[int, list[tuple[datetime, datetime]]]:
+    """担当ごとの予約区間を一括取得する。auto_confirm=true の legacy pending は除外する。"""
+    ids = [int(sid) for sid in staff_ids if sid is not None]
+    if not ids:
+        return {}
+    q = (
+        select(Booking)
+        .join(BookingOrg, Booking.org_id == BookingOrg.id)
+        .where(
+            Booking.staff_id.in_(ids),
+            or_(
+                Booking.status == "confirmed",
+                and_(Booking.status == "pending", BookingOrg.auto_confirm.is_(False)),
+            ),
+            Booking.start_utc < range_end,
+            Booking.end_utc > range_start,
+        )
+    )
+    if exclude_booking_id is not None:
+        q = q.where(Booking.id != exclude_booking_id)
+    rows = list((await session.scalars(q)).all())
+    out: dict[int, list[tuple[datetime, datetime]]] = {sid: [] for sid in ids}
+    for b in rows:
+        try:
+            sid = int(b.staff_id or 0)
+            out.setdefault(sid, []).append((to_utc_aware(b.start_utc), to_utc_aware(b.end_utc)))
+        except Exception:
+            logger.exception(
+                "Skipping malformed booking interval in bulk staff free check: booking_id=%s",
+                getattr(b, "id", None),
+            )
+    return {sid: merge_intervals(iv) for sid, iv in out.items()}
+
+
 async def staff_is_free(
     session: AsyncSession,
     staff: StaffMember,
@@ -519,17 +560,21 @@ async def staff_is_free(
     *,
     exclude_booking_id: int | None = None,
     buffer_minutes: int | None = None,
+    db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
 ) -> bool:
     buf_min = max(
         0,
         int(buffer_minutes) if buffer_minutes is not None else 0,
     )
     # DB と Google をマージし、google_calendar_allows_booking で一括判定（buf=0 は重なりのみ）。
-    db_ivs = await _db_booking_intervals_for_staff(
-        session,
-        staff.id,
-        exclude_booking_id=exclude_booking_id,
-    )
+    if db_busy_map is not None:
+        db_ivs = list(db_busy_map.get(staff.id) or [])
+    else:
+        db_ivs = await _db_booking_intervals_for_staff(
+            session,
+            staff.id,
+            exclude_booking_id=exclude_booking_id,
+        )
     gbusy = google_busy_map.get(staff.id) or []
     g_list = _sanitize_intervals(list(gbusy), log_label=f"staff_free google staff={staff.id}")
     merged = merge_intervals(db_ivs + g_list)
@@ -572,6 +617,7 @@ async def pick_staff_for_slot(
     link_priority_overrides: dict[str, int] | None = None,
     buffer_minutes_override: int | None = None,
     google_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
+    db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     dry_run: bool = False,
 ) -> StaffMember | None:
     """担当のうち、この枠が Google+DB 的に取れる人を列挙し、優先度またはラウンドロビンで1名を返す。"""
@@ -591,7 +637,16 @@ async def pick_staff_for_slot(
         gmap, _google_busy_errors = await _load_google_busy_map(staff_list, ws - pad, we + pad, settings)
     free: list[StaffMember] = []
     for s in staff_list:
-        if await staff_is_free(session, s, start, end, settings, gmap, buffer_minutes=buf_min):
+        if await staff_is_free(
+            session,
+            s,
+            start,
+            end,
+            settings,
+            gmap,
+            buffer_minutes=buf_min,
+            db_busy_map=db_busy_map,
+        ):
             free.append(s)
     if not free:
         return None
@@ -719,6 +774,12 @@ async def available_slots_for_link(
         )
     else:
         gmap = google_busy_map
+    db_busy_map = await _db_booking_intervals_map_for_staff(
+        session,
+        [int(s.id) for s in staff_list],
+        rs_utc,
+        re_utc + AVAILABILITY_RANGE_END_SLACK,
+    )
 
     out: list[dict] = []
     had_slot_errors = False
@@ -777,6 +838,7 @@ async def available_slots_for_link(
                         link_priority_overrides=link_priority_overrides,
                         buffer_minutes_override=buffer_minutes_override,
                         google_busy_map=gmap,
+                        db_busy_map=db_busy_map,
                         dry_run=True,
                     )
                 except Exception as exc:
