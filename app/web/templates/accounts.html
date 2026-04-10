@@ -134,6 +134,15 @@
   {% if viewer_is_admin | default(false) %}
   var ORG_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
+  function esc(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
   function formatApiDetail(detail) {
     if (detail == null || detail === '') return '';
     if (typeof detail === 'string') return detail;
