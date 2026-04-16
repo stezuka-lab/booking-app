@@ -3059,12 +3059,11 @@ async def admin_oauth_google_link(
     await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=org.slug)
     if not settings.google_oauth_client_id or not settings.google_oauth_redirect_uri_value():
         raise HTTPException(503, "Google OAuth not configured")
-    ts = int(time_module.time())
-    secret = settings.booking_admin_secret.strip()
-    sig = sign_staff_oauth_link(body.staff_id, ts, secret)
-    base = settings.public_base_url_value()
-    q = urlencode({"staff_id": body.staff_id, "ts": ts, "sig": sig})
-    return {"url": f"{base}/api/booking/oauth/google/authorize?{q}"}
+    try:
+        url = google_calendar_authorization_url(body.staff_id, settings)
+    except RuntimeError as e:
+        raise HTTPException(503, str(e)) from e
+    return {"url": url}
 
 
 @router.get("/api/booking/oauth/google/authorize")

@@ -897,9 +897,16 @@
   var appViewer = window.__APP_VIEWER__ || {};
   function loadAdminPageData() {
     loadSummary().catch(function () {});
-    window.setTimeout(function () {
-      loadBookings().catch(function () {});
-    }, 200);
+    var scheduleBookingsLoad = function () {
+      window.setTimeout(function () {
+        loadBookings().catch(function () {});
+      }, 1200);
+    };
+    if (window.requestIdleCallback) {
+      window.requestIdleCallback(scheduleBookingsLoad, { timeout: 2000 });
+    } else {
+      scheduleBookingsLoad();
+    }
   }
 
   function bootAdminPage() {
