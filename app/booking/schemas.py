@@ -73,7 +73,6 @@ class StaffCreate(BaseModel):
     priority_rank: int = 100
     google_calendar_id: str | None = None
     zoom_meeting_url: str | None = None
-    line_user_id: str | None = None
 
 
 class OrgCreate(BaseModel):
@@ -129,7 +128,6 @@ class StaffPatch(BaseModel):
     priority_rank: int | None = None
     google_calendar_id: str | None = None
     zoom_meeting_url: str | None = None
-    line_user_id: str | None = None
     active: bool | None = None
     clear_google_oauth: bool | None = None
 

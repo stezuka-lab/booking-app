@@ -61,7 +61,6 @@
     var staff = manageData.staff || {};
     statusEl.textContent = '状態: ' + (b.status || '不明');
     var lines = [];
-    if (b.customer_name) lines.push('お名前: ' + b.customer_name);
     if (staff.name) lines.push('担当: ' + staff.name);
     if (b.start_utc) lines.push('日時: ' + fmtJa(b.start_utc));
     if (b.meeting_url) lines.push('会議 URL: ' + b.meeting_url);

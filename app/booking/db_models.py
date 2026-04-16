@@ -71,8 +71,6 @@ class StaffMember(Base):
     google_profile_email: Mapped[str | None] = mapped_column(String(320), nullable=True)
     google_profile_name: Mapped[str | None] = mapped_column(String(256), nullable=True)
     zoom_meeting_url: Mapped[str | None] = mapped_column(Text, nullable=True)
-    # LINE Messaging API の通知先（ユーザー ID）。チャネルアクセストークンは Settings 側。
-    line_user_id: Mapped[str | None] = mapped_column(String(256), nullable=True)
     # 旧スキーマ互換・未使用時は空（JSON 配列文字列など）
     skill_tags: Mapped[str] = mapped_column(String(1024), default="")
     active: Mapped[bool] = mapped_column(Boolean, default=True)
@@ -242,23 +240,6 @@ class BookingAttachment(Base):
     field_id: Mapped[str] = mapped_column(String(64), default="")
     original_filename: Mapped[str] = mapped_column(String(512), default="")
     stored_path: Mapped[str] = mapped_column(String(1024), default="")
-
-
-class CustomerProfile(Base):
-    """簡易 CRM：メール単位の最終予約日。"""
-
-    __tablename__ = "booking_customers"
-    __table_args__ = (UniqueConstraint("org_id", "email_normalized", name="uq_booking_customer_email"),)
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    org_id: Mapped[int] = mapped_column(ForeignKey("booking_orgs.id", ondelete="CASCADE"), index=True)
-    email_normalized: Mapped[str] = mapped_column(String(320), index=True)
-    display_name: Mapped[str] = mapped_column(String(256), default="")
-    last_booking_utc: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
-    repeat_outreach_sent_at: Mapped[datetime | None] = mapped_column(
-        DateTime(timezone=True), nullable=True
-    )
-
 
 class BookingAuditLog(Base):
     """管理操作や認証系の重要イベントを残す監査ログ。"""

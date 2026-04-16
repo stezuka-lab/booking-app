@@ -34,7 +34,6 @@ from app.booking.db_models import (
     BookingFormDefinition,
     BookingOrg,
     BookingService,
-    CustomerProfile,
     PublicBookingLink,
     StaffMember,
 )
@@ -45,7 +44,6 @@ from app.booking.initial_setup import (
     ensure_org_initial_setup,
 )
 from app.booking.meeting_service import build_meeting_url, resolve_meeting_provider_for_staff
-from app.booking.line_notify import notify_staff_line_booking
 from app.booking.rate_limit import check_public_booking_rate_limit
 from app.booking.policies import can_change_or_cancel_online
 from app.booking.routing_service import (
@@ -556,12 +554,6 @@ def _scrub_booking_personal_data(booking: Booking) -> None:
     booking.ga_client_id = None
 
 
-def _customer_profile_display_name(profile: CustomerProfile | None, settings: Settings) -> str:
-    if profile is None:
-        return ""
-    return (decrypt_secret(getattr(profile, "display_name", None), settings) or "").strip()
-
-
 def _booking_calendar_description(
     booking: Booking,
     staff: StaffMember,
@@ -797,10 +789,6 @@ def _normalize_optional_iso_date(raw: Any) -> str | None:
         return None
 
 
-def _normalize_email(email: str) -> str:
-    return email.strip().lower()
-
-
 async def _assert_staff_belong_to_org(
     session: AsyncSession,
     org_id: int,
@@ -818,38 +806,6 @@ async def _assert_staff_belong_to_org(
     ).all()
     if len(set(rows)) != len(set(staff_ids)):
         raise HTTPException(400, "staff_ids must belong to this org")
-
-
-async def _upsert_customer(
-    session: AsyncSession,
-    org_id: int,
-    email: str,
-    display_name: str,
-    booking_time: datetime,
-    settings: Settings,
-) -> None:
-    key = _normalize_email(email)
-    row = await session.scalar(
-        select(CustomerProfile).where(
-            CustomerProfile.org_id == org_id,
-            CustomerProfile.email_normalized == key,
-        )
-    )
-    if not row:
-        row = CustomerProfile(
-            org_id=org_id,
-            email_normalized=key,
-            display_name=encrypt_secret(display_name, settings) or display_name,
-            last_booking_utc=booking_time,
-            repeat_outreach_sent_at=None,
-        )
-        session.add(row)
-    else:
-        if display_name:
-            row.display_name = encrypt_secret(display_name, settings) or display_name
-        if not row.last_booking_utc or booking_time > row.last_booking_utc:
-            row.last_booking_utc = booking_time
-        row.repeat_outreach_sent_at = None
 
 
 @router.get("/booking/public/{token}")
@@ -1567,82 +1523,77 @@ async def _finalize_confirmed_booking(
     customer_name = _booking_customer_name(b, settings)
     customer_email = _booking_customer_email(b, settings)
     manage_url = f"{settings.public_base_url_value()}/app/manage/{b.manage_token}"
-    await _sync_booking_to_staff_calendar(
-        session,
-        settings,
-        b,
-        staff,
-        org,
-        service_name=service_name,
-        booking_link_title=booking_link_title,
-        post_booking_message=post_booking_message,
-    )
-    meeting_url = _booking_meeting_url(b, settings)
     customer_cal_ok = False
-    cust_tok = (customer_google_access_token or "").strip()
-    if cust_tok:
-        cust_no = ""
-        if isinstance(b.form_answers_json, dict):
-            cust_no = str(b.form_answers_json.get("customer_number") or "").strip()
-        desc_lines: list[str] = []
-        if meeting_url:
-            desc_lines.append(f"Zoom URL: {meeting_url}")
-        if (post_booking_message or "").strip():
-            desc_lines.append(f"ご案内: {(post_booking_message or '').strip()}")
-        desc_lines.append(f"予約リンク: {booking_link_title}")
-        desc_lines.append(f"予約者: {customer_name}")
-        desc_lines.append(f"メール: {customer_email}")
-        if cust_no:
-            desc_lines.append(f"顧客番号: {cust_no}")
-        if (b.company_name or "").strip():
-            desc_lines.append(f"会社名: {(b.company_name or '').strip()}")
-        desc_lines.append(f"担当: {(staff.name or '').strip()}")
-        desc_lines.append(f"予約の変更・キャンセル: {manage_url}")
-        ev_c = await insert_customer_primary_calendar_with_access_token(
-            cust_tok,
-            summary,
-            b.start_utc.isoformat(),
-            b.end_utc.isoformat(),
-            description="\n".join(desc_lines),
-            location=meeting_url or None,
+    try:
+        await _sync_booking_to_staff_calendar(
+            session,
+            settings,
+            b,
+            staff,
+            org,
+            service_name=service_name,
+            booking_link_title=booking_link_title,
+            post_booking_message=post_booking_message,
         )
-        customer_cal_ok = ev_c is not None
+        meeting_url = _booking_meeting_url(b, settings)
+        cust_tok = (customer_google_access_token or "").strip()
+        if cust_tok:
+            cust_no = ""
+            if isinstance(b.form_answers_json, dict):
+                cust_no = str(b.form_answers_json.get("customer_number") or "").strip()
+            desc_lines: list[str] = []
+            if meeting_url:
+                desc_lines.append(f"Zoom URL: {meeting_url}")
+            if (post_booking_message or "").strip():
+                desc_lines.append(f"ご案内: {(post_booking_message or '').strip()}")
+            desc_lines.append(f"予約リンク: {booking_link_title}")
+            desc_lines.append(f"予約者: {customer_name}")
+            desc_lines.append(f"メール: {customer_email}")
+            if cust_no:
+                desc_lines.append(f"顧客番号: {cust_no}")
+            if (b.company_name or "").strip():
+                desc_lines.append(f"会社名: {(b.company_name or '').strip()}")
+            desc_lines.append(f"担当: {(staff.name or '').strip()}")
+            desc_lines.append(f"予約の変更・キャンセル: {manage_url}")
+            ev_c = await insert_customer_primary_calendar_with_access_token(
+                cust_tok,
+                summary,
+                b.start_utc.isoformat(),
+                b.end_utc.isoformat(),
+                description="\n".join(desc_lines),
+                location=meeting_url or None,
+            )
+            customer_cal_ok = ev_c is not None
 
-    email_results = await send_booking_emails(
-        settings,
-        org,
-        b,
-        staff,
-        service_name,
-        booking_link_title=booking_link_title,
-        manage_url=manage_url,
-        post_booking_message=post_booking_message,
-        dry_run=settings.actions_dry_run,
-    )
-    email_now = datetime.now(timezone.utc)
-    b.customer_confirmation_email_last_attempt_at = email_now
-    if email_results.get("customer"):
-        b.customer_confirmation_email_sent_at = email_now
-        b.customer_confirmation_email_error = None
-    elif email_results.get("customer_error"):
-        b.customer_confirmation_email_error = str(email_results.get("customer_error"))[:500]
-    b.staff_notification_email_last_attempt_at = email_now
-    if email_results.get("staff"):
-        b.staff_notification_email_sent_at = email_now
-        b.staff_notification_email_error = None
-    elif email_results.get("staff_error"):
-        b.staff_notification_email_error = str(email_results.get("staff_error"))[:500]
-    await session.flush()
-    await notify_staff_line_booking(
-        settings,
-        staff_line_user_id=staff.line_user_id,
-        customer_name=customer_name,
-        start_iso=b.start_utc.isoformat(),
-        manage_hint=manage_url,
-    )
-    _scrub_booking_personal_data(b)
-    await session.flush()
-    return customer_cal_ok
+        email_results = await send_booking_emails(
+            settings,
+            org,
+            b,
+            staff,
+            service_name,
+            booking_link_title=booking_link_title,
+            manage_url=manage_url,
+            post_booking_message=post_booking_message,
+            dry_run=settings.actions_dry_run,
+        )
+        email_now = datetime.now(timezone.utc)
+        b.customer_confirmation_email_last_attempt_at = email_now
+        if email_results.get("customer"):
+            b.customer_confirmation_email_sent_at = email_now
+            b.customer_confirmation_email_error = None
+        elif email_results.get("customer_error"):
+            b.customer_confirmation_email_error = str(email_results.get("customer_error"))[:500]
+        b.staff_notification_email_last_attempt_at = email_now
+        if email_results.get("staff"):
+            b.staff_notification_email_sent_at = email_now
+            b.staff_notification_email_error = None
+        elif email_results.get("staff_error"):
+            b.staff_notification_email_error = str(email_results.get("staff_error"))[:500]
+        await session.flush()
+        return customer_cal_ok
+    finally:
+        _scrub_booking_personal_data(b)
+        await session.flush()
 
 
 async def _delete_staff_calendar_event_if_present(
@@ -2046,7 +1997,6 @@ async def admin_org_summary(
                 "email": s.email,
                 "priority_rank": s.priority_rank,
                 "active": s.active,
-                "line_user_id": s.line_user_id,
                 "has_google": bool(_staff_google_refresh_token(s, settings)),
                 "google_calendar_id": s.google_calendar_id or "",
                 "google_profile_email": _staff_google_profile_email(s, settings),
@@ -2218,8 +2168,6 @@ async def admin_list_bookings(
                 "status": b.status,
                 "start_utc": b.start_utc.isoformat(),
                 "end_utc": b.end_utc.isoformat(),
-                "customer_name": _booking_customer_name(b, settings),
-                "customer_email": _booking_customer_email(b, settings),
                 "booking_link_title_snapshot": b.booking_link_title_snapshot,
                 "staff_id": b.staff_id,
                 "staff_display_name": b.staff_display_name,
@@ -2287,16 +2235,12 @@ async def admin_org_calendar(
         svc = await db.get(BookingService, b.service_id) if b.service_id else None
         svc_name = svc.name if svc else "予約"
         staff_label = (st.name if st else None) or (b.staff_display_name or "") or "（削除済み担当）"
-        customer_name = _booking_customer_name(b, settings)
-        customer_email = _booking_customer_email(b, settings)
-        event_title = f"{svc_name} — {customer_name}" if customer_name else f"{svc_name} — 予約 #{b.id}"
+        event_title = f"{svc_name} — 予約 #{b.id}"
         events.append(
             {
                 "id": b.id,
                 "staff_id": b.staff_id,
                 "staff_name": staff_label,
-                "customer_name": customer_name,
-                "customer_email": customer_email,
                 "service_name": svc_name,
                 "title": event_title,
                 "start_utc": b.start_utc.isoformat(),
@@ -2346,7 +2290,6 @@ async def admin_add_staff(
         priority_rank=body.priority_rank,
         google_calendar_id=body.google_calendar_id,
         zoom_meeting_url=encrypt_secret(body.zoom_meeting_url, settings) if body.zoom_meeting_url else None,
-        line_user_id=body.line_user_id,
     )
     db.add(s)
     await db.flush()
@@ -2388,8 +2331,6 @@ async def admin_patch_staff(
         s.priority_rank = body.priority_rank
     if body.google_calendar_id is not None:
         s.google_calendar_id = body.google_calendar_id
-    if body.line_user_id is not None:
-        s.line_user_id = body.line_user_id or None
     if body.zoom_meeting_url is not None:
         s.zoom_meeting_url = encrypt_secret(body.zoom_meeting_url.strip(), settings) if body.zoom_meeting_url.strip() else None
     if body.active is not None:

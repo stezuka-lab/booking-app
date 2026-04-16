@@ -36,7 +36,6 @@ SCHEMA_DRIFT_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
         ("email_settings_json", '"email_settings_json" TEXT', '"email_settings_json" JSON'),
     ],
     "booking_staff": [
-        ("line_user_id", '"line_user_id" VARCHAR(256)', '"line_user_id" VARCHAR(256)'),
         ("google_profile_email", '"google_profile_email" VARCHAR(320)', '"google_profile_email" VARCHAR(320)'),
         ("google_profile_name", '"google_profile_name" VARCHAR(256)', '"google_profile_name" VARCHAR(256)'),
         ("zoom_meeting_url", '"zoom_meeting_url" TEXT', '"zoom_meeting_url" TEXT'),
@@ -71,9 +70,6 @@ SCHEMA_DRIFT_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
         ("company_name", '"company_name" VARCHAR(256)', '"company_name" VARCHAR(256)'),
         ("calendar_title_note", '"calendar_title_note" TEXT', '"calendar_title_note" TEXT'),
         ("staff_display_name", '"staff_display_name" VARCHAR(256)', '"staff_display_name" VARCHAR(256)'),
-    ],
-    "booking_customers": [
-        ("repeat_outreach_sent_at", '"repeat_outreach_sent_at" DATETIME', '"repeat_outreach_sent_at" TIMESTAMP WITH TIME ZONE'),
     ],
     "booking_app_users": [
         ("default_org_slug", '"default_org_slug" VARCHAR(128)', '"default_org_slug" VARCHAR(128)'),

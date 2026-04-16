@@ -712,7 +712,7 @@
       var tdBooking = document.createElement('td');
       tdBooking.innerHTML =
         '<div>' + esc(b.booking_link_title_snapshot || '予約') + '</div>' +
-        '<div class="muted small">' + esc(b.customer_name || '—') + '</div>';
+        '<div class="muted small">予約 #' + esc(String(b.id || '—')) + '</div>';
 
       var tdStaff = document.createElement('td');
       tdStaff.textContent = b.staff_display_name || (b.staff_id != null ? 'id ' + b.staff_id : '—');

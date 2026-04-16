@@ -230,7 +230,7 @@ async def send_customer_confirmation_email(
         post_booking_message=post_booking_message,
     )
     if dry_run:
-        logger.info("DRY-RUN customer booking email customer=%s", booking_customer_email_value(booking, settings))
+        logger.info("DRY-RUN customer booking email booking_id=%s", getattr(booking, "id", None))
         return True, None
     import asyncio
 
@@ -273,7 +273,7 @@ async def send_staff_notification_email(
         post_booking_message=post_booking_message,
     )
     if dry_run:
-        logger.info("DRY-RUN staff booking email staff=%s", staff.email)
+        logger.info("DRY-RUN staff booking email booking_id=%s", getattr(booking, "id", None))
         return True, None
     import asyncio
 

@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from urllib.parse import unquote
 
+import pytest
+
 from app.booking.db_models import Booking, BookingOrg, StaffMember
 from app.booking.routing_service import db_booking_busy_intervals_for_staff
 from app.booking.router import (
@@ -549,12 +551,8 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
             "staff_error": None,
         }
 
-    async def fake_notify_staff_line_booking(*args, **kwargs):
-        return {"ok": False, "skipped": True}
-
     monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
     monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
-    monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
 
     org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
     staff = StaffMember(
@@ -624,11 +622,7 @@ def test_finalize_confirmed_booking_records_calendar_sync_error_when_unlinked(mo
     async def fake_send_booking_emails(*args, **kwargs):
         return {"customer": True, "staff": True, "customer_error": None, "staff_error": None}
 
-    async def fake_notify_staff_line_booking(*args, **kwargs):
-        return {"ok": True}
-
     monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
-    monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
 
     org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
     staff = StaffMember(
@@ -793,13 +787,8 @@ def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatc
     async def fake_send_booking_emails(*args, **kwargs):
         return {"customer": True, "staff": True, "customer_error": None, "staff_error": None}
 
-    async def fake_notify_staff_line_booking(*args, **kwargs):
-        captured["line_customer_name"] = kwargs.get("customer_name")
-        return {"ok": True}
-
     monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
     monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
-    monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
 
     org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
     staff = StaffMember(
@@ -836,9 +825,66 @@ def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatc
 
     assert "予約者: Encrypted Customer" in str(captured["description"])
     assert "メール: encrypted@example.com" in str(captured["description"])
-    assert captured["line_customer_name"] == "Encrypted Customer"
     assert booking.customer_name == ""
     assert booking.customer_email == ""
+
+
+def test_finalize_confirmed_booking_scrubs_even_when_email_send_raises(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+
+    class DummySession:
+        async def flush(self) -> None:
+            return None
+
+    async def fake_create_event_for_booking_detailed(*args, **kwargs):
+        return {"id": "evt-exc"}, None
+
+    async def fake_send_booking_emails(*args, **kwargs):
+        raise RuntimeError("mail exploded")
+
+    monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
+    monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
+
+    org = BookingOrg(name="Test Org", slug="test-org", availability_defaults_json={})
+    staff = StaffMember(
+        org_id=1,
+        name="担当A",
+        email="staff-a@example.com",
+        google_refresh_token="refresh-token",
+    )
+    booking = Booking(
+        org_id=1,
+        staff_id=1,
+        service_id=1,
+        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        company_name="Acme Corp",
+        form_answers_json={"customer_number": "AP12345"},
+        manage_token="manage-token",
+    )
+
+    with pytest.raises(RuntimeError):
+        asyncio.run(
+            _finalize_confirmed_booking(
+                DummySession(),
+                settings,
+                booking,
+                staff,
+                org,
+                "初回相談",
+                booking_link_title="初回予約リンク",
+            )
+        )
+
+    assert booking.customer_name == ""
+    assert booking.customer_email == ""
+    assert booking.company_name is None
+    assert booking.form_answers_json == {}
 
 
 def test_sync_booking_to_staff_calendar_recreates_event(monkeypatch) -> None:
