@@ -19,38 +19,6 @@
     </div>
   </div>
 
-  <section class="panel admin-section" id="services-panel" hidden>
-    <h2 class="panel-title">予約区分</h2>
-    <p class="muted panel-hint">最初にここで予約区分を 1 件以上作成してください。予約リンクは、その区分が無いと発行できません。</p>
-    <div class="table-wrap">
-      <table class="admin-table">
-        <thead>
-          <tr>
-            <th>名前</th>
-            <th>所要（分）</th>
-            <th></th>
-          </tr>
-        </thead>
-        <tbody id="services-tbody"></tbody>
-      </table>
-    </div>
-    <div class="admin-row align-end wrap">
-      <div class="admin-field grow">
-        <label for="new-svc-name">区分名</label>
-        <p class="muted small">顧客に見える名前です。相談内容やメニュー名をそのまま入れてください。</p>
-        <input type="text" id="new-svc-name" placeholder="例: 60分コース" />
-      </div>
-      <div class="admin-field">
-        <label for="new-svc-dur">所要（分）</label>
-        <p class="muted small">1枠の長さです。30 や 60 などで入力します。</p>
-        <input type="number" id="new-svc-dur" min="5" max="480" step="5" value="30" class="admin-input-sm" />
-      </div>
-    </div>
-    <div class="section-actions">
-      <button type="button" class="btn primary" id="btn-add-service">区分を追加</button>
-    </div>
-  </section>
-
   <section class="panel admin-section" id="link-create-panel" hidden>
     <h2 class="panel-title">新規予約リンクを発行</h2>
     <p class="muted panel-hint">
@@ -63,9 +31,9 @@
         <input type="text" id="new-link-title" placeholder="例: 初回オンライン" />
       </div>
       <div class="admin-field">
-        <label for="new-link-service">予約区分 <span class="req">*</span></label>
-        <p class="muted small">ここで選んだ区分の所要時間が、予約枠の長さになります。</p>
-        <select id="new-link-service" class="admin-input-wide"></select>
+        <label for="new-link-duration">所要（分） <span class="req">*</span></label>
+        <p class="muted small">このリンクの予約枠の長さです。30 や 60 などで入力します。</p>
+        <input type="number" id="new-link-duration" min="5" max="480" step="5" value="30" class="admin-input-sm" />
       </div>
     </div>
     <fieldset class="staff-checks" id="new-link-staff-wrap">
@@ -118,7 +86,7 @@
         <thead>
           <tr>
             <th>リンク名</th>
-            <th>予約区分</th>
+            <th>所要</th>
             <th>担当</th>
             <th>直近ブロック</th>
             <th>状態</th>
@@ -178,9 +146,9 @@
       <input type="text" id="edit-campaign-title" class="booking-dialog__input-wide" autocomplete="off" />
     </div>
     <div class="admin-field" style="margin-bottom: 0.75rem">
-      <label for="edit-campaign-service">予約区分</label>
-      <p class="muted small">ここで選んだ区分の所要時間が、予約枠の長さになります。</p>
-      <select id="edit-campaign-service" class="booking-dialog__input-wide"></select>
+      <label for="edit-campaign-duration">所要（分）</label>
+      <p class="muted small">このリンクの予約枠の長さです。</p>
+      <input type="number" id="edit-campaign-duration" class="booking-dialog__input-wide" min="5" max="480" step="5" value="30" />
     </div>
     <fieldset class="staff-checks" style="margin: 0.75rem 0">
       <legend class="field-label">対象担当</legend>
@@ -284,7 +252,6 @@
 
   function showLinkPanels(show) {
     document.getElementById('link-create-panel').hidden = !show;
-    document.getElementById('services-panel').hidden = !show;
     document.getElementById('links-panel').hidden = !show;
     document.getElementById('bookings-panel').hidden = !show;
   }
@@ -370,23 +337,6 @@
         return map[id] || 'id ' + id;
       })
       .join('、');
-  }
-
-  function fillServiceSelect(sel, data, selectedId) {
-    sel.innerHTML = '';
-    (data.services || [])
-      .filter(function (s) {
-        return s.active !== false;
-      })
-      .forEach(function (s) {
-        const o = document.createElement('option');
-        o.value = String(s.id);
-        o.textContent = (s.name || '') + '（' + (s.duration_minutes || 30) + '分）';
-        if (selectedId != null && Number(selectedId) === s.id) {
-          o.selected = true;
-        }
-        sel.appendChild(o);
-      });
   }
 
   function fillStaffCheckboxes(container, data, checkedIds, priorityOverrides) {
@@ -487,7 +437,9 @@
     if (!link) return;
     document.getElementById('edit-campaign-id').value = String(link.id);
     document.getElementById('edit-campaign-title').value = link.title || '';
-    fillServiceSelect(document.getElementById('edit-campaign-service'), data, link.service_id);
+    document.getElementById('edit-campaign-duration').value = String(
+      link.service_duration_minutes != null ? link.service_duration_minutes : 30
+    );
     fillStaffCheckboxes(
       document.getElementById('edit-campaign-staff'),
       data,
@@ -513,89 +465,8 @@
   function renderLinksSummary(data) {
     campaignSummary = data;
 
-    fillServiceSelect(document.getElementById('new-link-service'), data, null);
-    fillServiceSelect(document.getElementById('edit-campaign-service'), data, null);
-
     const wrap = document.getElementById('new-link-staff');
     fillStaffCheckboxes(wrap, data, [], {});
-
-    const svcBody = document.getElementById('services-tbody');
-    const createBtn = document.getElementById('btn-create-link');
-    svcBody.innerHTML = '';
-    const svcs = data.services || [];
-    const activeServices = svcs.filter(function (s) { return s.active !== false; });
-    if (createBtn) {
-      createBtn.disabled = !activeServices.length;
-      createBtn.textContent = activeServices.length ? '専用リンクを発行' : '先に予約区分を追加してください';
-    }
-    if (!svcs.length) {
-      const trEmpty = document.createElement('tr');
-      const tdEmpty = document.createElement('td');
-      tdEmpty.colSpan = 3;
-      tdEmpty.className = 'muted';
-      tdEmpty.textContent = '予約区分がまだありません。下のフォームから追加してください。';
-      trEmpty.appendChild(tdEmpty);
-      svcBody.appendChild(trEmpty);
-    }
-    svcs.forEach(function (s) {
-      const trSvc = document.createElement('tr');
-      if (s.active === false) {
-        trSvc.className = 'admin-row-muted';
-      }
-      const tdName = document.createElement('td');
-      const inpName = document.createElement('input');
-      inpName.type = 'text';
-      inpName.className = 'admin-staff-inp admin-input-wide';
-      inpName.value = s.name || '';
-      inpName.placeholder = '区分名';
-      tdName.appendChild(inpName);
-      const tdDur = document.createElement('td');
-      const inpDur = document.createElement('input');
-      inpDur.type = 'number';
-      inpDur.min = '5';
-      inpDur.max = '480';
-      inpDur.step = '5';
-      inpDur.className = 'admin-staff-inp admin-input-sm';
-      inpDur.value = String(s.duration_minutes != null ? s.duration_minutes : 30);
-      tdDur.appendChild(inpDur);
-      const tdAct = document.createElement('td');
-      tdAct.className = 'cal-td-actions';
-      const bSaveSvc = document.createElement('button');
-      bSaveSvc.type = 'button';
-      bSaveSvc.className = 'btn sm primary';
-      bSaveSvc.textContent = '保存';
-      bSaveSvc.addEventListener('click', async function () {
-        setMsg('');
-        const name = inpName.value.trim();
-        if (!name) {
-          setMsg('区分名を入力してください', 'err');
-          return;
-        }
-        const dur = parseInt(inpDur.value, 10);
-        const r = await fetch('/api/booking/admin/services/' + s.id, {
-          method: 'PATCH',
-          credentials: 'same-origin',
-          headers: headersJson(),
-          body: JSON.stringify({
-            name: name,
-            duration_minutes: Number.isFinite(dur) && dur > 0 ? dur : 30,
-          }),
-        });
-        const j = await r.json().catch(function () { return {}; });
-        if (!r.ok) {
-          setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
-          return;
-        }
-        setMsg('予約区分を更新しました', 'ok');
-        setTimeout(function () { setMsg(''); }, 2000);
-        await loadSummary();
-      });
-      tdAct.appendChild(bSaveSvc);
-      trSvc.appendChild(tdName);
-      trSvc.appendChild(tdDur);
-      trSvc.appendChild(tdAct);
-      svcBody.appendChild(trSvc);
-    });
 
     const ltBody = document.getElementById('links-tbody');
     ltBody.innerHTML = '';
@@ -604,7 +475,7 @@
       const tdT = document.createElement('td');
       tdT.textContent = l.title || '';
       const tdCat = document.createElement('td');
-      tdCat.textContent = l.service_name || (l.service_id ? 'id ' + l.service_id : '—');
+      tdCat.textContent = l.service_duration_minutes ? (String(l.service_duration_minutes) + '分') : '—';
       const tdSt = document.createElement('td');
       tdSt.textContent = staffNamesForIds(data, l.staff_ids || []);
       const tdBlk = document.createElement('td');
@@ -880,43 +751,13 @@
     if (data) renderLinksSummary(data);
   }
 
-  document.getElementById('btn-add-service').addEventListener('click', async function () {
-    if (!ensureOrgSelected()) return;
-    setMsg('');
-    const name = document.getElementById('new-svc-name').value.trim();
-    if (!name) {
-      setMsg('区分名を入力してください', 'err');
-      return;
-    }
-    const dur = parseInt(document.getElementById('new-svc-dur').value, 10);
-    const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/services', {
-      method: 'POST',
-      credentials: 'same-origin',
-      headers: headersJson(),
-      body: JSON.stringify({
-        name: name,
-        duration_minutes: Number.isFinite(dur) && dur > 0 ? dur : 30,
-      }),
-    });
-    const j = await r.json().catch(function () { return {}; });
-    if (!r.ok) {
-      setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
-      return;
-    }
-    document.getElementById('new-svc-name').value = '';
-    setMsg('予約区分を追加しました', 'ok');
-    setTimeout(function () { setMsg(''); }, 2000);
-    await loadSummary();
-  });
-
   document.getElementById('btn-create-link').addEventListener('click', async function () {
     if (!ensureOrgSelected()) return;
     setMsg('');
     const title = document.getElementById('new-link-title').value.trim() || '予約リンク';
-    const svcEl = document.getElementById('new-link-service');
-    const serviceId = svcEl ? parseInt(svcEl.value, 10) : NaN;
-    if (!Number.isFinite(serviceId)) {
-      setMsg('先に予約区分を作成してから予約リンクを発行してください。', 'err');
+    const duration = parseInt(document.getElementById('new-link-duration').value, 10);
+    if (!Number.isFinite(duration) || duration < 5 || duration > 480) {
+      setMsg('所要（分）は 5〜480 の範囲で入力してください。', 'err');
       return;
     }
     const ids = collectCheckedStaffIds('#new-link-staff');
@@ -934,7 +775,8 @@
         headers: headersJson(),
         body: JSON.stringify({
           title: title,
-          service_id: serviceId,
+          service_name: title,
+          service_duration_minutes: duration,
           staff_ids: ids,
           staff_priority_overrides: priorityOverrides,
           buffer_minutes: Number.isFinite(bufferMinutes) ? Math.min(180, Math.max(0, bufferMinutes)) : 0,
@@ -953,6 +795,7 @@
         return;
       }
       document.getElementById('new-link-title').value = '';
+      document.getElementById('new-link-duration').value = '30';
       document.getElementById('new-link-block-days').value = '0';
       document.getElementById('new-link-buffer-minutes').value = '0';
       document.getElementById('new-link-max-advance-days').value = '0';
@@ -991,10 +834,9 @@
     const linkId = parseInt(idStr, 10);
     if (!Number.isFinite(linkId)) return;
     const title = document.getElementById('edit-campaign-title').value.trim();
-    const svcEl = document.getElementById('edit-campaign-service');
-    const serviceId = svcEl ? parseInt(svcEl.value, 10) : NaN;
-    if (!Number.isFinite(serviceId)) {
-      setMsg('予約区分を選んでください。', 'err');
+    const duration = parseInt(document.getElementById('edit-campaign-duration').value, 10);
+    if (!Number.isFinite(duration) || duration < 5 || duration > 480) {
+      setMsg('所要（分）は 5〜480 の範囲で入力してください。', 'err');
       return;
     }
     const ids = collectCheckedStaffIds('#edit-campaign-staff');
@@ -1008,7 +850,8 @@
     try {
       await saveCampaignLink(linkId, {
         title: title || undefined,
-        service_id: serviceId,
+        service_name: title || undefined,
+        service_duration_minutes: duration,
         staff_ids: ids,
         staff_priority_overrides: priorityOverrides,
         buffer_minutes: Number.isFinite(bufferMinutes) ? Math.min(180, Math.max(0, bufferMinutes)) : 0,
@@ -1052,10 +895,17 @@
   });
 
   var appViewer = window.__APP_VIEWER__ || {};
+  function loadAdminPageData() {
+    loadSummary().catch(function () {});
+    window.setTimeout(function () {
+      loadBookings().catch(function () {});
+    }, 200);
+  }
+
   function bootAdminPage() {
     if (appViewer.authenticated && appViewer.user && appViewer.user.default_org_slug) {
       currentOrgSlug = appViewer.user.default_org_slug;
-      Promise.all([loadSummary(), loadBookings()]).catch(function () {});
+      loadAdminPageData();
       return;
     }
     if (!(appViewer && appViewer.authenticated)) {
@@ -1066,7 +916,7 @@
       window.__loadAuthMe().then(function (live) {
         if (live && live.authenticated && live.user && live.user.default_org_slug) {
           currentOrgSlug = live.user.default_org_slug;
-          Promise.all([loadSummary(), loadBookings()]).catch(function () {});
+          loadAdminPageData();
         } else {
           showLinkPanels(false);
           setMsg('このアカウントに組織が設定されていません。管理者に組織を割り当ててもらってください。', 'err');

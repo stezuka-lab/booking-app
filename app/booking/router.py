@@ -1039,7 +1039,7 @@ async def link_availability(
         }
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
-        allow_open_hours_fallback = (linked_n == 0)
+        allow_open_hours_fallback = False
         fallback_open_hours_used = False
         if (
             not slots
@@ -1067,6 +1067,9 @@ async def link_availability(
         blocked_dates = blocked_iso_dates_in_range_for_link(org, link, from_ts, to_ts)
         slots = _filter_slots_by_blocked_dates(slots, blocked_dates, org)
         availability_error = None
+        if unlinked_fallback:
+            slots = []
+            availability_error = "担当者の Google カレンダー連携が未完了のため、予約受付を停止しています。管理画面から各担当のカレンダー連携を完了してください。"
         if not slots and linked_staff_ids and (gmap_failed or busy_union_failed or had_slot_errors):
             availability_error = "Google カレンダーの予定を確認できませんでした。担当のカレンダー認証または連携状態を確認してください。"
         response_payload = {
@@ -1102,7 +1105,7 @@ async def link_availability(
                     "カレンダーの空き情報を安全に読み切れなかったため、受付時間ベースの候補枠を表示しています。予約確定時に最終確認します。"
                     if fallback_open_hours_used
                     else
-                    "Google カレンダーが誰も連携していないため、空きはシステム上すべて空きとして枠を出しています。本番運用では各担当の Google 連携を完了してください。"
+                    "Google カレンダーが誰も連携していないため、予約受付を停止しています。各担当の Google 連携を完了してください。"
                     if unlinked_fallback
                     else None
                 ),
@@ -1955,6 +1958,12 @@ async def admin_org_summary(
                 )
                 if l.service_id
                 else None,
+                "service_duration_minutes": next(
+                    (s.duration_minutes for s in services if s.id == l.service_id),
+                    None,
+                )
+                if l.service_id
+                else None,
                 "staff_ids": valid_staff_ids,
                 "staff_priority_overrides": _normalize_link_priority_overrides(
                     getattr(l, "staff_priority_overrides_json", None),
@@ -2517,6 +2526,90 @@ async def admin_patch_service(
     }
 
 
+async def _delete_orphaned_service(db: AsyncSession, service_id: int | None) -> None:
+    if service_id is None:
+        return
+    remaining = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(PublicBookingLink)
+            .where(PublicBookingLink.service_id == service_id)
+        )
+        or 0
+    )
+    if remaining > 0:
+        return
+    await db.execute(delete(BookingService).where(BookingService.id == service_id))
+
+
+async def _resolve_inline_link_service(
+    db: AsyncSession,
+    org: BookingOrg,
+    *,
+    title: str,
+    service_id: int | None,
+    service_name: str | None,
+    service_duration_minutes: int | None,
+    existing_link: PublicBookingLink | None = None,
+) -> BookingService:
+    target_name = (service_name or title or "予約").strip() or "予約"
+    target_duration = int(service_duration_minutes or 30)
+    if target_duration < 5 or target_duration > 480:
+        raise HTTPException(400, "service_duration_minutes must be between 5 and 480")
+
+    if service_id is not None and existing_link is None:
+        svc = await db.get(BookingService, service_id)
+        if not svc or svc.org_id != org.id:
+            raise HTTPException(400, "invalid service_id for this organization")
+        return svc
+
+    current_service_id = existing_link.service_id if existing_link else None
+    current_service = await db.get(BookingService, current_service_id) if current_service_id else None
+
+    if service_id is not None:
+        svc = await db.get(BookingService, service_id)
+        if not svc or svc.org_id != org.id:
+            raise HTTPException(400, "invalid service_id for this organization")
+        current_service = svc
+
+    if current_service is None:
+        svc = BookingService(
+            org_id=org.id,
+            name=target_name,
+            duration_minutes=target_duration,
+            active=True,
+        )
+        db.add(svc)
+        await db.flush()
+        return svc
+
+    shared_links = int(
+        await db.scalar(
+            select(func.count())
+            .select_from(PublicBookingLink)
+            .where(PublicBookingLink.service_id == current_service.id)
+            .where(PublicBookingLink.id != (existing_link.id if existing_link else -1))
+        )
+        or 0
+    )
+    if shared_links > 0:
+        clone = BookingService(
+            org_id=org.id,
+            name=target_name,
+            duration_minutes=target_duration,
+            active=True,
+        )
+        db.add(clone)
+        await db.flush()
+        return clone
+
+    current_service.name = target_name
+    current_service.duration_minutes = target_duration
+    current_service.active = True
+    await db.flush()
+    return current_service
+
+
 @router.post("/api/booking/admin/orgs/{slug}/links")
 async def admin_add_link(
     request: Request,
@@ -2530,9 +2623,15 @@ async def admin_add_link(
     org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
     if not org:
         raise HTTPException(404, "org not found")
-    svc = await db.get(BookingService, body.service_id)
-    if not svc or svc.org_id != org.id:
-        raise HTTPException(400, "invalid service_id for this organization")
+    title = body.title.strip() or "予約"
+    svc = await _resolve_inline_link_service(
+        db,
+        org,
+        title=title,
+        service_id=body.service_id,
+        service_name=body.service_name,
+        service_duration_minutes=body.service_duration_minutes,
+    )
     ids = list(body.staff_ids)
     await _validate_staff_ids_for_org(db, org.id, ids)
     pri_map = _normalize_link_priority_overrides(body.staff_priority_overrides, ids)
@@ -2549,8 +2648,8 @@ async def admin_add_link(
     link = PublicBookingLink(
         org_id=org.id,
         token=token,
-        title=body.title.strip() or "予約",
-        service_id=body.service_id,
+        title=title,
+        service_id=svc.id,
         staff_ids_json=ids,
         staff_priority_overrides_json=pri_map,
         buffer_minutes=buffer_minutes,
@@ -2580,7 +2679,9 @@ async def admin_add_link(
         "id": link.id,
         "token": token,
         "title": link.title,
-        "service_id": body.service_id,
+        "service_id": svc.id,
+        "service_name": svc.name,
+        "service_duration_minutes": svc.duration_minutes,
         "staff_ids": ids,
         "staff_priority_overrides": pri_map,
         "buffer_minutes": buffer_minutes,
@@ -2614,11 +2715,22 @@ async def admin_patch_link(
     await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=org.slug)
     if body.title is not None:
         link.title = body.title.strip() or link.title
-    if body.service_id is not None:
-        svc = await db.get(BookingService, body.service_id)
-        if not svc or svc.org_id != org.id:
-            raise HTTPException(400, "invalid service_id for this organization")
-        link.service_id = body.service_id
+    old_service_id = link.service_id
+    if (
+        body.service_id is not None
+        or body.service_name is not None
+        or body.service_duration_minutes is not None
+    ):
+        svc = await _resolve_inline_link_service(
+            db,
+            org,
+            title=link.title,
+            service_id=body.service_id,
+            service_name=body.service_name,
+            service_duration_minutes=body.service_duration_minutes,
+            existing_link=link,
+        )
+        link.service_id = svc.id
     staff_ids_for_priority = list(json_list_or_empty(link.staff_ids_json))
     if body.staff_ids is not None:
         staff_ids_for_priority = list(body.staff_ids)
@@ -2664,6 +2776,9 @@ async def admin_patch_link(
         detail={"title": link.title, "service_id": link.service_id, "active": link.active},
     )
     await db.commit()
+    if old_service_id != link.service_id:
+        async with db.begin():
+            await _delete_orphaned_service(db, old_service_id)
     _clear_public_availability_cache(link.token)
     base = settings.public_base_url_value()
     valid_staff_ids = await _resolve_valid_link_staff_ids(
@@ -2671,12 +2786,15 @@ async def admin_patch_link(
         org.id,
         json_list_or_empty(link.staff_ids_json),
     )
+    current_service = await db.get(BookingService, link.service_id) if link.service_id else None
     return {
         "ok": True,
         "id": link.id,
         "token": link.token,
         "title": link.title,
         "service_id": link.service_id,
+        "service_name": current_service.name if current_service else None,
+        "service_duration_minutes": current_service.duration_minutes if current_service else None,
         "staff_ids": valid_staff_ids,
         "staff_priority_overrides": _normalize_link_priority_overrides(
             getattr(link, "staff_priority_overrides_json", None),
@@ -2724,8 +2842,11 @@ async def admin_delete_link(
         target_id=link.id,
         detail={"title": link.title, "service_id": link.service_id},
     )
+    old_service_id = link.service_id
     await db.execute(delete(PublicBookingLink).where(PublicBookingLink.id == link_id))
     await db.commit()
+    async with db.begin():
+        await _delete_orphaned_service(db, old_service_id)
     _clear_public_availability_cache(link.token)
     return {"ok": True}
 

@@ -156,7 +156,9 @@ class PublicLinkCreate(BaseModel):
     """予約リンクごとに専用トークンの URL を発行（予約区分・担当を紐づけ）。"""
 
     title: str = "予約"
-    service_id: int
+    service_id: int | None = None
+    service_name: str | None = None
+    service_duration_minutes: int = Field(30, ge=5, le=480)
     staff_ids: list[int] = Field(default_factory=list)
     staff_priority_overrides: dict[str, int] = Field(default_factory=dict)
     buffer_minutes: int | None = Field(None, ge=0, le=180)
@@ -170,6 +172,8 @@ class PublicLinkCreate(BaseModel):
 class PublicLinkPatch(BaseModel):
     title: str | None = None
     service_id: int | None = None
+    service_name: str | None = None
+    service_duration_minutes: int | None = Field(None, ge=5, le=480)
     staff_ids: list[int] | None = None
     staff_priority_overrides: dict[str, int] | None = None
     buffer_minutes: int | None = Field(None, ge=0, le=180)
