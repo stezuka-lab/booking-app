@@ -31,8 +31,9 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    Path("data").mkdir(parents=True, exist_ok=True)
     settings = get_settings()
+    if not settings.is_vercel_deployment():
+        Path("data").mkdir(parents=True, exist_ok=True)
     if settings.is_vercel_deployment() and str(settings.database_url).startswith("sqlite"):
         raise RuntimeError("Vercel deployment requires Postgres; sqlite DATABASE_URL is not supported.")
     if settings.should_run_startup_db_init():
