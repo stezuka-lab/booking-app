@@ -7,7 +7,6 @@ import logging
 import secrets
 import time as time_module
 from datetime import date, datetime, timedelta, timezone
-from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlencode
 
@@ -32,7 +31,6 @@ from app.booking.calendar_google import (
 )
 from app.booking.db_models import (
     Booking,
-    BookingAttachment,
     BookingFormDefinition,
     BookingOrg,
     BookingService,
@@ -542,6 +540,20 @@ def _booking_customer_email(booking: Booking | None, settings: Settings) -> str:
     if booking is None:
         return ""
     return (decrypt_secret(getattr(booking, "customer_email", None), settings) or "").strip()
+
+
+def _scrub_booking_personal_data(booking: Booking) -> None:
+    booking.customer_name = ""
+    booking.customer_email = ""
+    booking.customer_phone = None
+    booking.company_name = None
+    booking.calendar_title_note = None
+    booking.form_answers_json = {}
+    booking.utm_source = None
+    booking.utm_medium = None
+    booking.utm_campaign = None
+    booking.referrer = None
+    booking.ga_client_id = None
 
 
 def _customer_profile_display_name(profile: CustomerProfile | None, settings: Settings) -> str:
@@ -1384,8 +1396,14 @@ async def _create_booking_from_body(
             )
         staff = picked
 
+    if not org.auto_confirm:
+        raise HTTPException(
+            503,
+            "個人情報をアプリ内に保持しない運用のため、手動承認モードは利用できません。設定で自動確定を有効にしてください。",
+        )
+
     manage_token = secrets.token_urlsafe(24)
-    status = "confirmed" if org.auto_confirm else "pending"
+    status = "confirmed"
     _mp_raw = (body.meeting_provider or "").strip()
     mp = _mp_raw.lower() if _mp_raw else resolve_meeting_provider_for_staff(staff, settings)
     meet_url_placeholder, provider_resolved = build_meeting_url(mp, settings, staff)
@@ -1560,9 +1578,6 @@ async def _finalize_confirmed_booking(
         post_booking_message=post_booking_message,
     )
     meeting_url = _booking_meeting_url(b, settings)
-    await _upsert_customer(session, org.id, customer_email, customer_name, b.start_utc, settings)
-    await session.flush()
-
     customer_cal_ok = False
     cust_tok = (customer_google_access_token or "").strip()
     if cust_tok:
@@ -1625,6 +1640,8 @@ async def _finalize_confirmed_booking(
         start_iso=b.start_utc.isoformat(),
         manage_hint=manage_url,
     )
+    _scrub_booking_personal_data(b)
+    await session.flush()
     return customer_cal_ok
 
 
@@ -1655,47 +1672,9 @@ async def book_with_files(
     payload: str = Form(...),
     files: list[UploadFile] = File(default=[]),
 ) -> dict[str, Any]:
-    check_public_booking_rate_limit(
-        request,
-        max_requests=max(1, int(settings.booking_public_rate_limit_max_requests or 40)),
-        window_sec=max(60, int(settings.booking_public_rate_limit_window_sec or 3600)),
-    )
-    data = json.loads(payload)
-    data["link_token"] = token
-    body = BookingCreate.model_validate(data)
-    b, staff, _customer_cal, booking_link_title, post_booking_message = await _create_booking_from_body(token, body, db, settings)
-    upload_dir = Path("data/uploads/booking") / str(b.id)
-    upload_dir.mkdir(parents=True, exist_ok=True)
-    for uf in files:
-        if not uf.filename:
-            continue
-        suffix = Path(uf.filename).suffix
-        dest = upload_dir / f"{secrets.token_hex(8)}{suffix}"
-        dest.write_bytes(await uf.read())
-        db.add(
-            BookingAttachment(
-                booking_id=b.id,
-                field_id="file",
-                original_filename=uf.filename,
-                stored_path=str(dest),
-            )
-        )
-    await db.commit()
-    _clear_public_availability_cache(token)
-    org = await db.get(BookingOrg, b.org_id)
-    svc = await db.get(BookingService, b.service_id) if b.service_id else None
-    service_name = svc.name if svc else "予約"
-    if not org:
-        raise HTTPException(500, "org missing")
-    return _public_booking_response(
-        settings,
-        org,
-        b,
-        staff,
-        service_name,
-        booking_link_title=booking_link_title,
-        customer_calendar_added=_customer_cal,
-        post_booking_message=post_booking_message,
+    raise HTTPException(
+        400,
+        "個人情報をアプリ内に残さない運用へ変更したため、予約時のファイルアップロードは無効です。",
     )
 
 
@@ -1714,7 +1693,6 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
             "status": b.status,
             "start_utc": b.start_utc.isoformat(),
             "end_utc": b.end_utc.isoformat(),
-            "customer_name": _booking_customer_name(b, settings),
             "meeting_url": _booking_meeting_url(b, settings),
         },
         "staff": {"name": staff_name},
@@ -2311,6 +2289,7 @@ async def admin_org_calendar(
         staff_label = (st.name if st else None) or (b.staff_display_name or "") or "（削除済み担当）"
         customer_name = _booking_customer_name(b, settings)
         customer_email = _booking_customer_email(b, settings)
+        event_title = f"{svc_name} — {customer_name}" if customer_name else f"{svc_name} — 予約 #{b.id}"
         events.append(
             {
                 "id": b.id,
@@ -2319,7 +2298,7 @@ async def admin_org_calendar(
                 "customer_name": customer_name,
                 "customer_email": customer_email,
                 "service_name": svc_name,
-                "title": f"{svc_name} — {customer_name}",
+                "title": event_title,
                 "start_utc": b.start_utc.isoformat(),
                 "end_utc": b.end_utc.isoformat(),
                 "status": b.status,
@@ -2852,7 +2831,7 @@ async def admin_approve_booking(
         org_slug=org.slug,
         target_type="booking",
         target_id=b.id,
-        detail={"customer_name": _booking_customer_name(b, settings), "staff_id": b.staff_id},
+        detail={"staff_id": b.staff_id},
     )
     await db.commit()
     return {"ok": True, "status": b.status}
@@ -2883,7 +2862,7 @@ async def admin_reject_booking(
         org_slug=org.slug,
         target_type="booking",
         target_id=b.id,
-        detail={"customer_name": _booking_customer_name(b, settings), "staff_id": b.staff_id},
+        detail={"staff_id": b.staff_id},
     )
     await db.commit()
     return {"ok": True, "status": b.status}

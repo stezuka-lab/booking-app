@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from datetime import datetime, timezone as dt_timezone
 from types import SimpleNamespace
 
 import pytest
@@ -13,8 +12,8 @@ from app.auth.rate_limit import (
     record_login_failure,
     record_password_reset_attempt,
 )
-from app.booking.router import _upsert_customer
-from app.booking.db_models import CustomerProfile
+from app.booking.db_models import Booking
+from app.booking.router import _scrub_booking_personal_data
 from app.config import Settings
 from app.main import _is_same_origin
 from app.security.crypto import decrypt_secret, encrypt_secret
@@ -103,30 +102,31 @@ def test_secret_decrypt_accepts_legacy_plaintext() -> None:
     assert decrypt_secret("legacy-plain-token", settings) == "legacy-plain-token"
 
 
-def test_upsert_customer_encrypts_display_name() -> None:
-    settings = Settings(booking_session_secret="test-session-secret")
-    added: list[CustomerProfile] = []
-
-    class DummySession:
-        async def scalar(self, _query):
-            return None
-
-        def add(self, row):
-            added.append(row)
-
-    import asyncio
-
-    asyncio.run(
-        _upsert_customer(
-            DummySession(),
-            1,
-            "customer@example.com",
-            "Customer Name",
-            datetime.now(dt_timezone.utc),
-            settings,
-        )
+def test_scrub_booking_personal_data_clears_pii_fields() -> None:
+    booking = Booking(
+        customer_name="Customer Name",
+        customer_email="customer@example.com",
+        customer_phone="090-0000-0000",
+        company_name="Acme",
+        calendar_title_note="VIP",
+        form_answers_json={"customer_number": "C-001"},
+        utm_source="google",
+        utm_medium="cpc",
+        utm_campaign="spring",
+        referrer="https://example.com/?email=customer@example.com",
+        ga_client_id="ga.123",
     )
 
-    assert added
-    assert added[0].display_name != "Customer Name"
-    assert decrypt_secret(added[0].display_name, settings) == "Customer Name"
+    _scrub_booking_personal_data(booking)
+
+    assert booking.customer_name == ""
+    assert booking.customer_email == ""
+    assert booking.customer_phone is None
+    assert booking.company_name is None
+    assert booking.calendar_title_note is None
+    assert booking.form_answers_json == {}
+    assert booking.utm_source is None
+    assert booking.utm_medium is None
+    assert booking.utm_campaign is None
+    assert booking.referrer is None
+    assert booking.ga_client_id is None

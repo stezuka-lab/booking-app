@@ -541,9 +541,6 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
         captured["location"] = kwargs.get("location")
         return {"id": "evt-1"}, None
 
-    async def fake_upsert_customer(*args, **kwargs):
-        return None
-
     async def fake_send_booking_emails(*args, **kwargs):
         return {
             "customer": False,
@@ -556,7 +553,6 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
         return {"ok": False, "skipped": True}
 
     monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
-    monkeypatch.setattr(booking_router, "_upsert_customer", fake_upsert_customer)
     monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
     monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
 
@@ -607,6 +603,10 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
     assert "予約者: Customer" in str(captured["description"])
     assert "メール: customer@example.com" in str(captured["description"])
     assert "顧客番号: AP12345" in str(captured["description"])
+    assert booking.customer_name == ""
+    assert booking.customer_email == ""
+    assert booking.company_name is None
+    assert booking.form_answers_json == {}
     assert booking.customer_confirmation_email_sent_at is None
     assert booking.customer_confirmation_email_error == "SMTP temporary failure"
     assert booking.customer_confirmation_email_last_attempt_at is not None
@@ -621,16 +621,12 @@ def test_finalize_confirmed_booking_records_calendar_sync_error_when_unlinked(mo
         async def flush(self) -> None:
             return None
 
-    async def fake_upsert_customer(*args, **kwargs):
-        return None
-
     async def fake_send_booking_emails(*args, **kwargs):
         return {"customer": True, "staff": True, "customer_error": None, "staff_error": None}
 
     async def fake_notify_staff_line_booking(*args, **kwargs):
         return {"ok": True}
 
-    monkeypatch.setattr(booking_router, "_upsert_customer", fake_upsert_customer)
     monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
     monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
 
@@ -669,6 +665,8 @@ def test_finalize_confirmed_booking_records_calendar_sync_error_when_unlinked(mo
     assert booking.google_event_id is None
     assert booking.google_calendar_synced_at is None
     assert booking.google_calendar_sync_error == "担当のGoogleカレンダー連携が未設定です"
+    assert booking.customer_name == ""
+    assert booking.customer_email == ""
 
 
 def test_delete_staff_calendar_event_clears_google_event_id(monkeypatch) -> None:
@@ -792,10 +790,6 @@ def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatc
         captured["description"] = kwargs.get("description")
         return {"id": "evt-enc"}, None
 
-    async def fake_upsert_customer(*args, **kwargs):
-        captured["upsert_args"] = args
-        return None
-
     async def fake_send_booking_emails(*args, **kwargs):
         return {"customer": True, "staff": True, "customer_error": None, "staff_error": None}
 
@@ -804,7 +798,6 @@ def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatc
         return {"ok": True}
 
     monkeypatch.setattr(booking_router, "create_event_for_booking_detailed", fake_create_event_for_booking_detailed)
-    monkeypatch.setattr(booking_router, "_upsert_customer", fake_upsert_customer)
     monkeypatch.setattr(booking_router, "send_booking_emails", fake_send_booking_emails)
     monkeypatch.setattr(booking_router, "notify_staff_line_booking", fake_notify_staff_line_booking)
 
@@ -844,6 +837,8 @@ def test_finalize_confirmed_booking_handles_encrypted_customer_fields(monkeypatc
     assert "予約者: Encrypted Customer" in str(captured["description"])
     assert "メール: encrypted@example.com" in str(captured["description"])
     assert captured["line_customer_name"] == "Encrypted Customer"
+    assert booking.customer_name == ""
+    assert booking.customer_email == ""
 
 
 def test_sync_booking_to_staff_calendar_recreates_event(monkeypatch) -> None:
