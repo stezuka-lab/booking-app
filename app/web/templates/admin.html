@@ -105,7 +105,10 @@
         <h2 class="panel-title">最近の予約と同期状態</h2>
         <p class="muted panel-hint">直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。</p>
       </div>
-      <button type="button" class="btn secondary" id="btn-reconcile-calendar-blocks">今すぐ整合性を回復</button>
+      <div class="cal-td-actions">
+        <button type="button" class="btn secondary" id="btn-load-bookings">予約一覧を読み込む</button>
+        <button type="button" class="btn secondary" id="btn-reconcile-calendar-blocks">今すぐ整合性を回復</button>
+      </div>
     </div>
     <div class="table-wrap">
       <table class="admin-table">
@@ -218,8 +221,11 @@
   var currentOrgSlug = '';
   const msg = document.getElementById('admin-msg');
   const out = document.getElementById('admin-out');
+  const bookingsLoadBtn = document.getElementById('btn-load-bookings');
   let campaignSummary = null;
   let currentBookings = [];
+  let bookingsLoaded = false;
+  let bookingsLoading = false;
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -254,6 +260,18 @@
     document.getElementById('link-create-panel').hidden = !show;
     document.getElementById('links-panel').hidden = !show;
     document.getElementById('bookings-panel').hidden = !show;
+  }
+
+  function renderBookingsPlaceholder(text) {
+    var tbody = document.getElementById('bookings-tbody');
+    tbody.innerHTML = '';
+    var tr = document.createElement('tr');
+    var td = document.createElement('td');
+    td.colSpan = 8;
+    td.className = 'muted';
+    td.textContent = text;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
   }
 
   async function reconcileCalendarBlocks() {
@@ -559,6 +577,12 @@
   }
 
   function renderBookings(data) {
+    bookingsLoaded = true;
+    bookingsLoading = false;
+    if (bookingsLoadBtn) {
+      bookingsLoadBtn.disabled = false;
+      bookingsLoadBtn.textContent = '予約一覧を再読み込み';
+    }
     currentBookings = (data && data.bookings) || [];
     var tbody = document.getElementById('bookings-tbody');
     tbody.innerHTML = '';
@@ -640,8 +664,22 @@
 
   async function loadBookings() {
     if (!ensureOrgSelected()) return;
+    if (bookingsLoading) return;
+    bookingsLoading = true;
+    if (bookingsLoadBtn) {
+      bookingsLoadBtn.disabled = true;
+      bookingsLoadBtn.textContent = '読み込み中…';
+    }
     var data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/bookings?limit=50');
-    if (data) renderBookings(data);
+    if (data) {
+      renderBookings(data);
+      return;
+    }
+    bookingsLoading = false;
+    if (bookingsLoadBtn) {
+      bookingsLoadBtn.disabled = false;
+      bookingsLoadBtn.textContent = bookingsLoaded ? '予約一覧を再読み込み' : '予約一覧を読み込む';
+    }
   }
 
   async function resyncBookingCalendar(bookingId) {
@@ -826,6 +864,7 @@
     ev.preventDefault();
     document.getElementById('link-diagnostics-dialog').close();
   });
+  document.getElementById('btn-load-bookings').addEventListener('click', loadBookings);
   document.getElementById('btn-reconcile-calendar-blocks').addEventListener('click', reconcileCalendarBlocks);
 
   document.getElementById('edit-campaign-save').addEventListener('click', async function () {
@@ -897,16 +936,7 @@
   var appViewer = window.__APP_VIEWER__ || {};
   function loadAdminPageData() {
     loadSummary().catch(function () {});
-    var scheduleBookingsLoad = function () {
-      window.setTimeout(function () {
-        loadBookings().catch(function () {});
-      }, 1200);
-    };
-    if (window.requestIdleCallback) {
-      window.requestIdleCallback(scheduleBookingsLoad, { timeout: 2000 });
-    } else {
-      scheduleBookingsLoad();
-    }
+    renderBookingsPlaceholder('予約一覧は必要な時だけ読み込みます。上の「予約一覧を読み込む」を押してください。');
   }
 
   function bootAdminPage() {
