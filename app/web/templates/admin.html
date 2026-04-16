@@ -398,7 +398,7 @@
     });
     (data.staff || [])
       .filter(function (s) {
-        return s.active !== false;
+        return s.active !== false && !!s.has_google;
       })
       .forEach(function (s) {
         const row = document.createElement('div');
@@ -412,7 +412,7 @@
         lab.appendChild(cb);
         const staffText = document.createElement('span');
         staffText.className = 'staff-priority-name';
-        staffText.textContent = (s.name || '') + ' (id ' + s.id + ')';
+        staffText.textContent = s.name || '';
         lab.appendChild(staffText);
         row.appendChild(lab);
         const priWrap = document.createElement('div');
