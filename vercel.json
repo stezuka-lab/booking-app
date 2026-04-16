@@ -1,10 +1,9 @@
 {
+  "$schema": "https://openapi.vercel.sh/vercel.json",
   "buildCommand": "python build.py",
   "functions": {
     "index.py": {
-      "runtime": "python3.12",
       "maxDuration": 30
     }
   }
 }
-
