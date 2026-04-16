@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 
 from app.config import get_settings
+from app.web import routes as web_routes
 
 
 def test_settings_defines_actions_dry_run() -> None:
@@ -59,6 +60,22 @@ def test_openapi_docs_available(client: TestClient) -> None:
 
 def test_web_app_home(client: TestClient) -> None:
     r = client.get("/app")
+    assert r.status_code == 200
+    assert "text/html" in r.headers.get("content-type", "")
+
+
+def test_web_app_login_recovers_from_session_user_resolution_error(
+    client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    async def _boom(_request, _db):
+        raise RuntimeError("session lookup failed")
+
+    monkeypatch.setattr(web_routes, "get_current_app_user", _boom)
+    client.cookies.set("session", "corrupted-session")
+
+    r = client.get("/app/login")
+
     assert r.status_code == 200
     assert "text/html" in r.headers.get("content-type", "")
 

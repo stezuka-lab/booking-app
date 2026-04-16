@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 from typing import Any
 from urllib.parse import quote
@@ -16,6 +17,7 @@ from app.db import get_session_factory
 from app.version import __version__
 from sqlalchemy import select
 
+logger = logging.getLogger(__name__)
 _TEMPLATES = Path(__file__).resolve().parent / "templates"
 templates = Jinja2Templates(directory=str(_TEMPLATES))
 
@@ -57,7 +59,12 @@ def _viewer_payload(user: Any) -> dict[str, Any]:
 async def _session_user(request: Request):
     factory = get_session_factory()
     async with factory() as db:
-        return await get_current_app_user(request, db)
+        try:
+            return await get_current_app_user(request, db)
+        except Exception:
+            logger.exception("Failed to resolve session user for path %s", getattr(request.url, "path", ""))
+            request.session.clear()
+            return None
 
 
 async def _attach_default_org_name(user: Any) -> Any:
@@ -65,8 +72,12 @@ async def _attach_default_org_name(user: Any) -> Any:
         return user
     factory = get_session_factory()
     async with factory() as db:
-        org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == user.default_org_slug))
-        setattr(user, "_default_org_name", org.name if org else None)
+        try:
+            org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == user.default_org_slug))
+            setattr(user, "_default_org_name", org.name if org else None)
+        except Exception:
+            logger.exception("Failed to resolve default org for user %s", getattr(user, "id", None))
+            setattr(user, "_default_org_name", None)
     return user
 
 
