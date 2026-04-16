@@ -206,7 +206,14 @@
     } else {
       hint.textContent = '連携済みの担当は空き時間に Google の予定が反映されます。';
     }
-    var rows = data.staff.map(function (s) {
+    var linkedStaff = data.staff.filter(function (s) {
+      return !!(s && s.has_google);
+    });
+    if (!linkedStaff.length) {
+      box.innerHTML = '<p class="muted">連携済みの担当はいません。未連携の担当はこの一覧に表示しません。「担当を追加してカレンダーを連携」から追加してください。</p>';
+      return;
+    }
+    var rows = linkedStaff.map(function (s) {
       var st = s.has_google
         ? '<span class="cal-pill ok">連携済</span>'
         : '<span class="cal-pill">未連携</span>';
