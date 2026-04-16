@@ -49,7 +49,12 @@ async def get_current_app_user(request: Request, db: AsyncSession) -> AppUser | 
     uid = request.session.get("user_id")
     if uid is None:
         return None
-    user = await db.get(AppUser, int(uid))
+    try:
+        user_id = int(uid)
+    except (TypeError, ValueError):
+        request.session.pop("user_id", None)
+        return None
+    user = await db.get(AppUser, user_id)
     if not user or not user.is_active:
         return None
     return user

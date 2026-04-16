@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 from fastapi import HTTPException
 
+from app.auth.deps import get_current_app_user
 from app.auth.rate_limit import (
     check_login_rate_limit,
     check_password_reset_rate_limit,
@@ -130,3 +132,16 @@ def test_scrub_booking_personal_data_clears_pii_fields() -> None:
     assert booking.utm_campaign is None
     assert booking.referrer is None
     assert booking.ga_client_id is None
+
+
+def test_get_current_app_user_ignores_invalid_session_user_id() -> None:
+    class DummyDb:
+        async def get(self, _model, _pk):
+            raise AssertionError("db.get should not be called for invalid session values")
+
+    request = SimpleNamespace(session={"user_id": "not-an-int"})
+
+    user = asyncio.run(get_current_app_user(request, DummyDb()))
+
+    assert user is None
+    assert "user_id" not in request.session
