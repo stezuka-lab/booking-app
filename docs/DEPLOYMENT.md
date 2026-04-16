@@ -111,6 +111,29 @@ Google Cloud Console 側で次を一致させてください。
 - `SMTP_PASSWORD`
 - `SMTP_FROM`
 
+## Vercel
+
+This app can run on Vercel with the current reduced feature set, but only with an external Postgres database.
+
+- `index.py` exports the FastAPI app for Vercel
+- `vercel.json` sets the Python runtime and build command
+- `build.py` copies `app/web/static/*` into `public/assets/web/`
+- Set `VERCEL=true`
+- Set `DATABASE_URL` to Postgres, not SQLite
+- Set `PUBLIC_BASE_URL=https://<your-project>.vercel.app`
+- Keep startup side effects off on Vercel unless you intentionally need them:
+  - `STARTUP_INIT_DB=false`
+  - `STARTUP_BOOTSTRAP_ADMIN=false`
+  - `STARTUP_SEED_DEMO=false`
+  - `STARTUP_EMBEDDED_JOBS=false`
+
+Recommended Vercel stack:
+
+- Runtime: Vercel Python
+- DB: Neon Postgres
+- Mail: external SMTP
+- File uploads: disabled, or move to Blob/S3 if re-enabled later
+
 ## 起動確認
 
 ```bash

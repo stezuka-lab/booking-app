@@ -55,6 +55,26 @@ def test_platform_url_overrides_localhost_defaults() -> None:
     assert "booking-test.onrender.com" in s.trusted_hosts()
 
 
+def test_vercel_settings_disable_startup_side_effects_by_default() -> None:
+    s = Settings(
+        vercel=True,
+        public_base_url="https://booking-app.vercel.app",
+    )
+    assert s.is_vercel_deployment() is True
+    assert s.should_run_startup_db_init() is False
+    assert s.should_run_startup_bootstrap_admin() is False
+    assert s.should_run_startup_seed_demo() is False
+    assert s.should_run_embedded_jobs() is False
+
+
+def test_vercel_public_base_url_prefers_explicit_https_origin() -> None:
+    s = Settings(
+        vercel=True,
+        public_base_url="https://booking-app.vercel.app",
+    )
+    assert s.public_base_url_value() == "https://booking-app.vercel.app"
+
+
 def test_login_rate_limit_blocks_after_repeated_failures() -> None:
     request = _dummy_request("10.0.0.8")
     username = "tester"

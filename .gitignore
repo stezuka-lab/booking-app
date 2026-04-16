@@ -12,3 +12,4 @@ venv/
 *.pyd
 *.log
 Untitled
+public/assets/

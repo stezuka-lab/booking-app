@@ -24,6 +24,7 @@ uvicorn app.main:app --reload --host 127.0.0.1 --port 8000
 
 - **Windows**: `run_dev.bat` / `run_server.bat`
 - **Free PaaS**: `Procfile` / `render.yaml` / `python -m app.serve`
+- **Vercel**: `index.py` + `vercel.json` + `python build.py`
 - **Docker**: `docker compose up --build`
 - **テスト**: `python -m pytest -q`
 - **Migration**: `alembic upgrade head`

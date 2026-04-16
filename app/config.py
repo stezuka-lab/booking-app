@@ -22,6 +22,10 @@ class Settings(BaseSettings):
         default="",
         validation_alias=AliasChoices("RENDER_EXTERNAL_URL"),
     )
+    vercel: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("VERCEL"),
+    )
     railway_public_domain: str = Field(
         default="",
         validation_alias=AliasChoices("RAILWAY_PUBLIC_DOMAIN"),
@@ -83,6 +87,10 @@ class Settings(BaseSettings):
     line_messaging_channel_access_token: str = ""
     # メール・LINE 等の副作用を送らずログのみ（本番は False）
     actions_dry_run: bool = False
+    startup_init_db: bool | None = None
+    startup_bootstrap_admin: bool | None = None
+    startup_seed_demo: bool | None = None
+    startup_embedded_jobs: bool | None = None
 
     smtp_host: str = ""
     smtp_port: int = 587
@@ -123,6 +131,10 @@ class Settings(BaseSettings):
         return host in {"", "127.0.0.1", "localhost", "0.0.0.0"}
 
     def _platform_public_base_url(self) -> str:
+        if self.is_vercel_deployment():
+            explicit = (self.public_base_url or "").strip().rstrip("/")
+            if explicit and not self._is_local_origin(explicit):
+                return explicit
         direct = (self.render_external_url or "").strip().rstrip("/")
         if direct:
             return direct
@@ -187,6 +199,29 @@ class Settings(BaseSettings):
 
     def should_expose_demo_info(self) -> bool:
         return not self.is_public_deployment()
+
+    def is_vercel_deployment(self) -> bool:
+        return bool(self.vercel)
+
+    def should_run_startup_db_init(self) -> bool:
+        if self.startup_init_db is not None:
+            return bool(self.startup_init_db)
+        return not self.is_vercel_deployment()
+
+    def should_run_startup_bootstrap_admin(self) -> bool:
+        if self.startup_bootstrap_admin is not None:
+            return bool(self.startup_bootstrap_admin)
+        return not self.is_vercel_deployment()
+
+    def should_run_startup_seed_demo(self) -> bool:
+        if self.startup_seed_demo is not None:
+            return bool(self.startup_seed_demo)
+        return self.booking_seed_demo and not self.is_vercel_deployment()
+
+    def should_run_embedded_jobs(self) -> bool:
+        if self.startup_embedded_jobs is not None:
+            return bool(self.startup_embedded_jobs)
+        return self.booking_jobs_embedded and not self.is_vercel_deployment()
 
     def booking_data_encryption_key_value(self) -> str:
         explicit = (self.booking_data_encryption_key or "").strip()

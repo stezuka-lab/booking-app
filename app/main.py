@@ -32,10 +32,15 @@ logger = logging.getLogger(__name__)
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Path("data").mkdir(parents=True, exist_ok=True)
-    logger.info("Startup: init_db begin")
-    await init_db()
-    logger.info("Startup: init_db done")
     settings = get_settings()
+    if settings.is_vercel_deployment() and str(settings.database_url).startswith("sqlite"):
+        raise RuntimeError("Vercel deployment requires Postgres; sqlite DATABASE_URL is not supported.")
+    if settings.should_run_startup_db_init():
+        logger.info("Startup: init_db begin")
+        await init_db()
+        logger.info("Startup: init_db done")
+    else:
+        logger.info("Startup: init_db skipped for this deployment target")
     if settings.is_public_deployment():
         if not (settings.booking_session_secret or "").strip():
             raise RuntimeError(
@@ -45,26 +50,32 @@ async def lifespan(app: FastAPI):
             raise RuntimeError(
                 "公開サーバーでは BOOKING_SEED_DEMO=false にしてください。"
             )
-    logger.info("Startup: bootstrap admin begin")
-    await run_bootstrap_admin_if_needed(settings)
-    logger.info("Startup: bootstrap admin done")
+    if settings.should_run_startup_bootstrap_admin():
+        logger.info("Startup: bootstrap admin begin")
+        await run_bootstrap_admin_if_needed(settings)
+        logger.info("Startup: bootstrap admin done")
+    else:
+        logger.info("Startup: bootstrap admin skipped for this deployment target")
     admin_on = bool(settings.booking_admin_secret.strip())
     logger.info(
         "Booking config: PUBLIC_BASE_URL=%s | legacy X-Admin-Secret %s",
         settings.public_base_url_value(),
         "on" if admin_on else "off (session login or bootstrap user)",
     )
-    logger.info("Startup: demo seed begin")
-    await run_demo_seed_if_enabled(settings)
-    logger.info("Startup: demo seed done")
-    if settings.booking_jobs_embedded:
+    if settings.should_run_startup_seed_demo():
+        logger.info("Startup: demo seed begin")
+        await run_demo_seed_if_enabled(settings)
+        logger.info("Startup: demo seed done")
+    else:
+        logger.info("Startup: demo seed skipped for this deployment target")
+    if settings.should_run_embedded_jobs():
         logger.info("Startup: embedded scheduler begin")
         setup_booking_scheduler()
         logger.info("Startup: embedded scheduler done")
     else:
         logger.info("Booking embedded scheduler disabled; run job runner separately.")
     yield
-    if settings.booking_jobs_embedded:
+    if settings.should_run_embedded_jobs():
         shutdown_booking_scheduler()
 
 
