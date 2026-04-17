@@ -7,14 +7,14 @@
 {% endblock %}
 {% block content %}
 <div class="booking-flow booking-flow-v2">
-  <div class="booking-hero-bar">
-    <div>
-      <h1 class="page-title booking-hero-title" id="page-heading">予約リンク</h1>
-      <p class="booking-link-notice booking-link-notice-inline booking-multiline-note" id="booking-link-notice" hidden></p>
-    </div>
-    <div id="ga4-slot"></div>
-  </div>
   <section class="panel booking-cal-section">
+    <div class="booking-scheduler-head">
+      <div class="booking-scheduler-head__copy">
+        <h1 class="page-title booking-hero-title" id="page-heading">予約リンク</h1>
+        <p class="booking-link-notice booking-link-notice-inline booking-multiline-note" id="booking-link-notice" hidden></p>
+      </div>
+      <div id="ga4-slot"></div>
+    </div>
     <div class="booking-scheduler-layout">
       <aside class="booking-slot-sidebar">
         <div class="booking-slot-sidebar__head">
@@ -26,6 +26,7 @@
         </div>
       </aside>
       <div class="booking-calendar-main">
+        <div id="booking-date-strip" class="booking-date-strip" aria-label="表示開始日を選択"></div>
         <div class="gcal-toolbar booking-cal-toolbar">
           <button type="button" class="btn gcal-today" id="booking-cal-today">本日</button>
           <div class="gcal-nav">
@@ -551,35 +552,57 @@
     });
   }
 
+  function renderDateStrip(rangeStart) {
+    const root = document.getElementById('booking-date-strip');
+    if (!root) return;
+    root.innerHTML = '';
+    const anchor = startOfWeekSunday(rangeStart || new Date());
+    for (let i = 0; i < 14; i++) {
+      const day = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + i, 0, 0, 0, 0);
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'booking-date-pill';
+      if (isSameDate(day, rangeStart)) btn.classList.add('is-active');
+      if (isSameDate(day, new Date())) btn.classList.add('is-today');
+      btn.innerHTML =
+        '<span class="booking-date-pill__dow">' +
+        new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(day) +
+        '</span><span class="booking-date-pill__date">' +
+        (day.getMonth() + 1) +
+        '/' +
+        day.getDate() +
+        '</span>';
+      btn.addEventListener('click', function () {
+        cursorDate = startOfLocalDay(day);
+        loadSlots();
+      });
+      root.appendChild(btn);
+    }
+  }
+
   function renderWeekCalendar() {
     const grid = document.getElementById('booking-cal-grid');
     const loading = document.getElementById('slots-loading');
     const empty = document.getElementById('slots-empty');
     const wrap = document.getElementById('booking-cal-wrap');
     const slots = (lastAvail && lastAvail.slots) || [];
-    const busyAll = (lastAvail && lastAvail.busy_intervals) || [];
     loading.hidden = true;
     grid.hidden = false;
     grid.innerHTML = '';
     grid.dataset.selectedStart = '';
-    grid.className = 'cal-grid gcal-grid gcal-grid-week';
+    grid.className = 'booking-compact-grid';
     if (wrap) wrap.className = 'gcal-wrap booking-cal-wrap';
 
-    const weekStart = startOfWeekSunday(cursorDate || new Date());
+    const weekStart = startOfLocalDay(cursorDate || startOfWeekSunday(new Date()));
     const days = [];
     for (let i = 0; i < 7; i++) {
       const dd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i, 0, 0, 0, 0);
       days.push(dd);
     }
+    renderDateStrip(weekStart);
     document.getElementById('booking-cal-range-label').textContent =
       fmtRangeLabel.format(days[0]) + ' 〜 ' + fmtRangeLabel.format(days[6]);
     renderSlotsSidebar(days, slots);
-
-    const START_H = getGridHours().START_H;
-    const END_H = getGridHours().END_H;
-    const hp = HOUR_PX;
-    const totalHMain = (END_H - START_H) * hp;
-    const CLOSING_STRIP_PX = 28;
     const nothing = !slots.length;
     empty.hidden = !nothing;
     grid.hidden = nothing;
@@ -587,15 +610,34 @@
       empty.textContent = 'この週に予約可能な時間帯がありません。別の週を試してください。';
       return;
     }
+    const slotMap = {};
+    const rows = [];
+    slots.forEach(function (slot) {
+      const st = new Date(slot.start_utc);
+      const dayKey = isoDateLocal(st);
+      const end = new Date(st.getTime() + ((lastAvail && lastAvail.service_duration_minutes) || 30) * 60000);
+      const rowKey =
+        new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(st) +
+        ' - ' +
+        new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(end);
+      slotMap[dayKey + '|' + rowKey] = slot;
+      if (rows.indexOf(rowKey) === -1) rows.push(rowKey);
+    });
+    rows.sort();
 
-    const headW = document.createElement('div');
-    headW.className = 'gcal-head gcal-head-week';
-    headW.innerHTML = '<div class="gcal-corner"></div>';
+    const table = document.createElement('table');
+    table.className = 'booking-compact-table';
+    const thead = document.createElement('thead');
+    const htr = document.createElement('tr');
+    const corner = document.createElement('th');
+    corner.className = 'booking-compact-time-head';
+    corner.textContent = '時間帯';
+    htr.appendChild(corner);
     days.forEach(function (d) {
-      const c = document.createElement('div');
-      c.className = 'gcal-head-daycell';
-      if (isSameDate(d, new Date())) c.classList.add('is-today');
-      c.innerHTML =
+      const th = document.createElement('th');
+      th.className = 'booking-compact-day-head';
+      if (isSameDate(d, new Date())) th.classList.add('is-today');
+      th.innerHTML =
         '<span class="booking-compact-dow">' +
         new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(d) +
         '</span><span class="booking-compact-date">' +
@@ -603,76 +645,43 @@
         '/' +
         d.getDate() +
         '</span>';
-      headW.appendChild(c);
+      htr.appendChild(th);
     });
-    grid.appendChild(headW);
+    thead.appendChild(htr);
+    table.appendChild(thead);
 
-    const bodyW = document.createElement('div');
-    bodyW.className = 'gcal-body gcal-body-week';
-    const railW = document.createElement('div');
-    railW.className = 'gcal-rail';
-    for (let h2 = START_H; h2 < END_H; h2++) {
-      const lab2 = document.createElement('div');
-      lab2.className = 'gcal-rail-hour';
-      lab2.style.height = hp + 'px';
-      lab2.textContent = String(h2).padStart(2, '0') + ':00';
-      railW.appendChild(lab2);
-    }
-    const railClose = document.createElement('div');
-    railClose.className = 'gcal-rail-closing';
-    railClose.style.minHeight = CLOSING_STRIP_PX + 'px';
-    railW.appendChild(railClose);
-    bodyW.appendChild(railW);
-
-    days.forEach(function (dayDate) {
-      const day0 = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate());
-      const day1 = new Date(day0);
-      day1.setDate(day1.getDate() + 1);
-      const blocked = isDateBlocked(day0);
-
-      const col = document.createElement('div');
-      col.className = 'gcal-col booking-cal-col-hit booking-cal-col-grid booking-cal-col-compact';
-      if (isSameDate(dayDate, new Date())) col.classList.add('is-today');
-      if (blocked) col.classList.add('booking-day-blocked');
-      col.style.height = totalHMain + CLOSING_STRIP_PX + 'px';
-      col.style.setProperty('--booking-hour-px', hp + 'px');
-
-      const layer = document.createElement('div');
-      layer.className = 'cal-events-layer gcal-events-layer booking-cal-events-layer';
-      layer.style.top = '0';
-      layer.style.height = totalHMain + 'px';
-      layer.style.bottom = 'auto';
-      const daySlots = slots.filter(function (s) {
-        const t = new Date(s.start_utc);
-        return t >= day0 && t < day1;
+    const tbody = document.createElement('tbody');
+    rows.forEach(function (rowKey) {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th');
+      th.className = 'booking-compact-time';
+      th.textContent = rowKey;
+      tr.appendChild(th);
+      days.forEach(function (d) {
+        const td = document.createElement('td');
+        td.className = 'booking-compact-cell';
+        const slot = slotMap[isoDateLocal(d) + '|' + rowKey];
+        if (slot) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'booking-slot-choice booking-compact-slot-btn';
+          btn.dataset.startUtc = slot.start_utc;
+          if (slot.staff_id != null && slot.staff_id !== '') btn.dataset.staffId = String(slot.staff_id);
+          btn.textContent = '予約する';
+          btn.addEventListener('click', function () {
+            document.getElementById('page-msg').textContent = '';
+            openBookingModal(slot.start_utc);
+          });
+          td.appendChild(btn);
+        } else {
+          td.innerHTML = '<span class="booking-compact-empty">-</span>';
+        }
+        tr.appendChild(td);
       });
-      placeSlotsInLayer(layer, day0, day1, daySlots, totalHMain, hp, START_H);
-      layer.addEventListener(
-        'click',
-        function (ev) {
-          const btn = ev.target.closest('.booking-slot-choice');
-          if (!btn || !btn.dataset.startUtc) return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          openBookingModal(btn.dataset.startUtc);
-        },
-        true
-      );
-      if (blocked) {
-        const ov = document.createElement('div');
-        ov.className = 'booking-day-blocked-overlay';
-        ov.setAttribute('role', 'presentation');
-        layer.appendChild(ov);
-      }
-      col.appendChild(layer);
-      const foot = document.createElement('div');
-      foot.className = 'booking-cal-footer-spacer';
-      foot.style.height = CLOSING_STRIP_PX + 'px';
-      foot.setAttribute('aria-hidden', 'true');
-      col.appendChild(foot);
-      bodyW.appendChild(col);
+      tbody.appendChild(tr);
     });
-    grid.appendChild(bodyW);
+    table.appendChild(tbody);
+    grid.appendChild(table);
   }
 
   function renderCalendar() {
