@@ -78,9 +78,17 @@ async def _load_session_user_with_org(request: Request) -> Any:
             return None
         if not user or not getattr(user, "default_org_slug", None):
             return user
+        session_slug = (request.session.get("default_org_slug") or "").strip()
+        session_org_name = (request.session.get("default_org_name") or "").strip()
+        if session_slug and session_slug == user.default_org_slug and session_org_name:
+            setattr(user, "_default_org_name", session_org_name)
+            return user
         try:
             org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == user.default_org_slug))
-            setattr(user, "_default_org_name", org.name if org else None)
+            org_name = org.name if org else None
+            setattr(user, "_default_org_name", org_name)
+            request.session["default_org_slug"] = user.default_org_slug or ""
+            request.session["default_org_name"] = org_name or ""
         except Exception:
             logger.exception("Failed to resolve default org for user %s", getattr(user, "id", None))
             setattr(user, "_default_org_name", None)

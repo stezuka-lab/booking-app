@@ -186,6 +186,7 @@
   const out = document.getElementById('admin-out');
   /** API パスに使う確定 slug（入力欄を未保存のまま編集しても古い slug でリクエストする） */
   var patchSlug = null;
+  var currentSummaryData = null;
   var ORG_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
 
   function formatApiDetail(detail) {
@@ -410,6 +411,7 @@
   }
 
   function renderSummary(data) {
+    currentSummaryData = data || null;
     const org = data.org || {};
     if (org.slug) {
       patchSlug = org.slug;
@@ -558,9 +560,7 @@
   document.getElementById('btn-save-availability').addEventListener('click', async function () {
     if (!ensureOrgSelected()) return;
     setMsg('');
-    const cur = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary');
-    if (!cur) return;
-    const prev = (cur.org && cur.org.availability_defaults_json) || {};
+    const prev = (currentSummaryData && currentSummaryData.org && currentSummaryData.org.availability_defaults_json) || {};
     const tplRaw = document.getElementById('org-cal-title-template').value.trim();
     const merged = Object.assign({}, prev, {
       block_saturday: document.getElementById('org-block-sat').checked,

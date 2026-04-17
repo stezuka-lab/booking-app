@@ -526,10 +526,10 @@
 
   applyMeSlug()
     .then(function () {
-      return fetchOAuthStatus();
-    })
-    .then(function () {
-      loadAll();
+      return Promise.all([
+        fetchOAuthStatus(),
+        Promise.resolve().then(function () { loadAll(); }),
+      ]);
     });
 })();
 </script>

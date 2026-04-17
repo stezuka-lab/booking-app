@@ -56,6 +56,16 @@ async def _session_db() -> AsyncSession:
 AuthDb = Annotated[AsyncSession, Depends(_session_db)]
 
 
+async def _default_org_name(db: AsyncSession, org_slug: str | None) -> str | None:
+    slug = (org_slug or "").strip()
+    if not slug:
+        return None
+    org_row = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+    if org_row is None:
+        return None
+    return (org_row.name or "").strip() or None
+
+
 async def _materialize_org_assignment(
     db: AsyncSession,
     org_slug_in: str | None,
@@ -191,6 +201,8 @@ async def login(
     clear_login_failures(request, username)
     await _repair_default_org_for_user(db, u)
     request.session["user_id"] = u.id
+    request.session["default_org_slug"] = u.default_org_slug or ""
+    request.session["default_org_name"] = await _default_org_name(db, u.default_org_slug) or ""
     return {
         "ok": True,
         "user": {
@@ -255,6 +267,8 @@ async def patch_me_preferences(
             u.default_org_slug = slug
     await db.commit()
     await db.refresh(u)
+    request.session["default_org_slug"] = u.default_org_slug or ""
+    request.session["default_org_name"] = await _default_org_name(db, u.default_org_slug) or ""
     return {"ok": True, "default_org_slug": u.default_org_slug}
 
 
