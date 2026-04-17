@@ -124,7 +124,6 @@ def build_booking_confirmation_email_body(
     if intro:
         lines.append(intro)
         lines.append("")
-    lines.append("ご予約ありがとうございます。")
     lines.append(f"予約リンク: {link_title}")
     lines.append(f"日時: {when}")
     if meet_url:
@@ -139,9 +138,6 @@ def build_booking_confirmation_email_body(
     if footer:
         lines.append("")
         lines.append(footer)
-    lines.append("")
-    lines.append("—")
-    lines.append((org.name or "").strip() or "予約システム")
     body = "\n".join(lines)
     subj = f"[予約確認] {link_title}"
     return subj, body

@@ -308,14 +308,16 @@ def get_calendar_event_status_sync(
     event_id: str,
     settings: Settings,
 ) -> tuple[bool | None, str | None]:
-    """eventId の存在確認。True=存在, False=404で消失, None=判定失敗。"""
+    """eventId の存在確認。True=存在, False=404/キャンセル済みで消失, None=判定失敗。"""
     from googleapiclient.discovery import build
     from googleapiclient.errors import HttpError
 
     creds = _credentials_from_refresh(refresh_token, settings)
     service = build("calendar", "v3", credentials=creds, cache_discovery=False)
     try:
-        service.events().get(calendarId=calendar_id or "primary", eventId=event_id).execute()
+        event = service.events().get(calendarId=calendar_id or "primary", eventId=event_id).execute()
+        if str((event or {}).get("status") or "").strip().lower() == "cancelled":
+            return False, None
         return True, None
     except HttpError as exc:
         status = getattr(getattr(exc, "resp", None), "status", None)

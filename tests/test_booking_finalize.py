@@ -8,6 +8,7 @@ from urllib.parse import unquote
 import pytest
 
 from app.booking.db_models import Booking, BookingOrg, BookingService, PublicBookingLink, StaffMember
+from app.booking.calendar_google import get_calendar_event_status_sync
 from app.booking.routing_service import db_booking_busy_intervals_for_staff
 from app.booking.router import (
     _delete_staff_calendar_event_if_present,
@@ -125,6 +126,37 @@ def test_release_bookings_with_missing_google_events(monkeypatch) -> None:
     assert released == 1
     assert booking.status == "cancelled"
     assert booking.google_event_id is None
+
+
+def test_get_calendar_event_status_sync_treats_cancelled_event_as_missing(monkeypatch) -> None:
+    import app.booking.calendar_google as calendar_google
+
+    settings = get_settings()
+
+    class DummyGetRequest:
+        def execute(self):
+            return {"id": "evt-1", "status": "cancelled"}
+
+    class DummyEvents:
+        def get(self, **kwargs):
+            return DummyGetRequest()
+
+    class DummyService:
+        def events(self):
+            return DummyEvents()
+
+    monkeypatch.setattr(calendar_google, "_credentials_from_refresh", lambda refresh_token, settings: object())
+    monkeypatch.setattr("googleapiclient.discovery.build", lambda *args, **kwargs: DummyService())
+
+    exists, err = get_calendar_event_status_sync(
+        "refresh-token",
+        "primary",
+        "evt-1",
+        settings,
+    )
+
+    assert exists is False
+    assert err is None
 
 
 def test_link_availability_checks_missing_google_events_on_open(monkeypatch) -> None:
@@ -966,6 +998,8 @@ def test_booking_confirmation_email_body_includes_post_booking_message() -> None
         post_booking_message="開始5分前までにご準備ください。",
     )
 
+    assert "ご予約ありがとうございます。" not in body
+    assert "\n—\n" not in body
     assert "開始5分前までにご準備ください。" in body
 
 
