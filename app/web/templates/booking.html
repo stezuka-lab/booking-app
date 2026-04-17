@@ -16,15 +16,16 @@
     </div>
     <div class="booking-scheduler-layout">
       <aside class="booking-slot-sidebar">
-        <div class="booking-slot-sidebar__head">
-          <p class="booking-slot-sidebar__lead" id="booking-notice-intro" hidden>ご予約前にご確認ください。</p>
-          <p class="booking-slot-sidebar__title">お知らせ</p>
+        <div class="booking-slot-sidebar__card booking-slot-sidebar__notice" id="booking-notice-card" hidden>
+          <p class="booking-slot-sidebar__title" id="booking-notice-intro" hidden>ご予約前にご確認ください。</p>
           <p class="booking-link-notice booking-multiline-note" id="booking-link-notice" hidden></p>
+        </div>
+        <div class="booking-slot-sidebar__card">
           <h2 class="booking-slot-sidebar__title">予約可能な時間帯</h2>
           <p class="booking-slot-sidebar__lead">左の一覧からも、そのまま予約できます。</p>
-        </div>
-        <div id="booking-slot-sidebar-list" class="booking-slot-sidebar__list">
-          <p class="loading-text">読み込み中…</p>
+          <div id="booking-slot-sidebar-list" class="booking-slot-sidebar__list">
+            <p class="loading-text">読み込み中…</p>
+          </div>
         </div>
       </aside>
       <div class="booking-calendar-main">
@@ -878,6 +879,7 @@
     document.getElementById('page-heading').textContent = lt;
     const noticeWrap = document.getElementById('booking-link-notice');
     const noticeIntro = document.getElementById('booking-notice-intro');
+    const noticeCard = document.getElementById('booking-notice-card');
     const preBookingNotice = m.link && m.link.pre_booking_notice ? m.link.pre_booking_notice : '';
     if (noticeWrap) {
       noticeWrap.hidden = !preBookingNotice;
@@ -885,6 +887,9 @@
     }
     if (noticeIntro) {
       noticeIntro.hidden = !preBookingNotice;
+    }
+    if (noticeCard) {
+      noticeCard.hidden = !preBookingNotice;
     }
     const ga = m.ga4_measurement_id;
     if (ga) {
