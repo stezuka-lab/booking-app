@@ -1121,14 +1121,21 @@ code {
   top: 50%;
   transform: translateY(-50%);
   z-index: 2;
+  background: rgba(255, 255, 255, 0.96);
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
 }
 
 #booking-grid-prev {
-  left: 0.35rem;
+  left: 0.18rem;
 }
 
 #booking-grid-next {
-  right: 0.35rem;
+  right: 0.18rem;
+}
+
+.booking-grid-head-row__arrow:hover,
+.booking-grid-head-row__arrow:focus-visible {
+  transform: translateY(-50%);
 }
 
 .booking-grid-date-row {
