@@ -45,11 +45,7 @@
 
   <section class="panel admin-section" id="org-email-panel" hidden>
     <h2 class="panel-title">予約完了メール</h2>
-    <p class="muted panel-hint">顧客向け確認メールと担当通知メールの送信設定です。実際に送るにはサーバー側で SMTP 設定が必要です。</p>
-    <div class="booking-note-card">
-      <strong>メール送信に必要なもの</strong>
-      <p class="booking-multiline-note">サーバー側で SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASSWORD / SMTP_FROM を設定してください。設定が無い場合は予約は保存されますが、メールは送信されません。</p>
-    </div>
+    <p class="muted panel-hint">顧客向け確認メールと担当通知メールの ON/OFF と文面を設定します。</p>
     <div class="admin-row">
       <div class="admin-field admin-field-check">
         <label class="check-line">
@@ -433,8 +429,8 @@
     }
     card('公開ベース URL', '<code>' + (data.public_base_url || '') + '</code>');
     const counts = data.counts || {};
-    card('担当', String(counts.staff != null ? counts.staff : (data.staff || []).length) + ' 名');
-    card('予約区分', String(counts.services != null ? counts.services : (data.services || []).length) + ' 件');
+    card('連携担当', String(counts.staff != null ? counts.staff : (data.staff || []).length) + ' 名');
+    card('所要設定', String(counts.links != null ? counts.links : (data.links || []).length) + ' 件');
     card('予約リンク', String(counts.links != null ? counts.links : (data.links || []).length) + ' 件');
     card('カレンダー認証', data.google_oauth_ready ? '設定済み' : '未設定');
     document.getElementById('org-routing-mode').value = org.routing_mode || 'priority';

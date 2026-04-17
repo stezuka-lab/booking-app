@@ -824,24 +824,21 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
     org = await db.get(BookingOrg, link.org_id)
     if not org:
         raise HTTPException(404, "org missing")
-    services = (
-        await db.scalars(
-            select(BookingService).where(
-                BookingService.org_id == org.id,
-                BookingService.active.is_(True),
+    services = []
+    if link.service_id is None:
+        services = (
+            await db.scalars(
+                select(BookingService).where(
+                    BookingService.org_id == org.id,
+                    BookingService.active.is_(True),
+                )
             )
-        )
-    ).all()
+        ).all()
     form = await db.scalar(
         select(BookingFormDefinition).where(
             BookingFormDefinition.org_id == org.id,
             BookingFormDefinition.active.is_(True),
         )
-    )
-    staff_ids = await _resolve_valid_link_staff_ids(db, org.id, json_list_or_empty(link.staff_ids_json))
-    link_priority_overrides = _normalize_link_priority_overrides(
-        getattr(link, "staff_priority_overrides_json", None),
-        staff_ids,
     )
     fixed_service: dict[str, Any] | None = None
     if link.service_id:
@@ -865,8 +862,6 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
         "link": {
             "title": link.title,
             "campaign_name": link.title,
-            "staff_filter": staff_ids,
-            "staff_priority_overrides": link_priority_overrides,
             "service_id": link.service_id,
             "buffer_minutes": link_buffer_minutes(link, org, settings),
             "max_advance_booking_days": link_max_advance_booking_days(link, org),
@@ -1638,8 +1633,6 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
     if not b:
         raise HTTPException(404, "not found")
     org = await db.get(BookingOrg, b.org_id)
-    staff = await db.get(StaffMember, b.staff_id) if b.staff_id is not None else None
-    staff_name = (staff.name if staff else None) or (b.staff_display_name or "") or ""
     allowed, reason = can_change_or_cancel_online(org, b) if org else (False, "no_org")
     return {
         "booking": {
@@ -1648,8 +1641,8 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
             "start_utc": b.start_utc.isoformat(),
             "end_utc": b.end_utc.isoformat(),
             "meeting_url": _booking_meeting_url(b, settings),
+            "link_title": (b.booking_link_title_snapshot or "").strip() or "予約",
         },
-        "staff": {"name": staff_name},
         "can_cancel_online": allowed,
         "can_reschedule_online": allowed,
         "policy_reason": reason,
@@ -1944,9 +1937,27 @@ async def admin_org_summary(
         active_staff_ids = set()
     counts: dict[str, int] = {}
     if include_counts:
-        counts["staff"] = len(staff) if include_staff else int(
-            await db.scalar(select(func.count()).select_from(StaffMember).where(StaffMember.org_id == org.id)) or 0
-        )
+        if include_staff:
+            counts["staff"] = len(
+                [
+                    s
+                    for s in staff
+                    if bool(getattr(s, "active", True)) and bool(getattr(s, "google_refresh_token", None))
+                ]
+            )
+        else:
+            counts["staff"] = int(
+                await db.scalar(
+                    select(func.count())
+                    .select_from(StaffMember)
+                    .where(
+                        StaffMember.org_id == org.id,
+                        StaffMember.active.is_(True),
+                        StaffMember.google_refresh_token.is_not(None),
+                    )
+                )
+                or 0
+            )
         counts["services"] = len(services) if include_services else int(
             await db.scalar(select(func.count()).select_from(BookingService).where(BookingService.org_id == org.id)) or 0
         )

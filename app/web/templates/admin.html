@@ -204,16 +204,6 @@
   </div>
 </dialog>
 
-<dialog class="booking-dialog" id="link-diagnostics-dialog" aria-labelledby="link-diagnostics-title">
-  <div class="booking-dialog__panel" style="max-width: 40rem">
-    <h2 class="booking-dialog__title" id="link-diagnostics-title">予約ブロック診断</h2>
-    <p class="muted" id="link-diagnostics-lead">公開予約ページで何が空きを塞いでいるかを表示します。</p>
-    <div id="link-diagnostics-body"></div>
-    <div class="booking-dialog__actions">
-      <button type="button" class="btn primary" id="link-diagnostics-close">閉じる</button>
-    </div>
-  </div>
-</dialog>
 {% endblock %}
 {% block scripts %}
 <script>
@@ -550,17 +540,9 @@
       b2.target = '_blank';
       b2.rel = 'noopener noreferrer';
       b2.textContent = '開く';
-      const bDiag = document.createElement('button');
-      bDiag.type = 'button';
-      bDiag.className = 'btn sm secondary';
-      bDiag.textContent = '診断';
-      bDiag.addEventListener('click', function () {
-        openLinkDiagnostics(l);
-      });
       tdA.appendChild(b0);
       tdA.appendChild(bToggle);
       tdA.appendChild(b1);
-      tdA.appendChild(bDiag);
       tdA.appendChild(b2);
       tr.appendChild(tdT);
       tr.appendChild(tdCat);
@@ -701,63 +683,6 @@
     }
   }
 
-  async function openLinkDiagnostics(link) {
-    setMsg('');
-    var box = document.getElementById('link-diagnostics-body');
-    var lead = document.getElementById('link-diagnostics-lead');
-    box.innerHTML = '<p class="muted">診断を読み込んでいます…</p>';
-    lead.textContent = (link.title || '予約リンク') + ' のブロック理由を確認しています。';
-    document.getElementById('link-diagnostics-dialog').showModal();
-    try {
-      var from = new Date();
-      from.setHours(0, 0, 0, 0);
-      var to = new Date(from);
-      to.setDate(to.getDate() + 7);
-      to.setMilliseconds(-1);
-      var q = new URLSearchParams({
-        from_ts: from.toISOString(),
-        to_ts: to.toISOString(),
-      });
-      if (link.service_id != null) q.set('service_id', String(link.service_id));
-      var token = (link.public_url || '').split('/').pop() || '';
-      var r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/availability?' + q.toString());
-      var j = await r.json().catch(function () { return {}; });
-      if (!r.ok) {
-        throw new Error((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText);
-      }
-      var dbg = j.availability_debug || {};
-      var details = dbg.db_busy_details || [];
-      box.innerHTML =
-        '<div class="summary-cards">' +
-          '<div class="summary-card"><h3>Google busy</h3><p>' + esc(String(dbg.google_busy_count || 0)) + '件</p></div>' +
-          '<div class="summary-card"><h3>DBブロック</h3><p>' + esc(String(dbg.db_busy_count || 0)) + '件</p></div>' +
-          '<div class="summary-card"><h3>自動解放</h3><p>' + esc(String(dbg.released_missing_google_events || 0)) + '件</p></div>' +
-        '</div>' +
-        (j.blocked_dates && j.blocked_dates.length
-          ? '<p class="muted" style="margin-top:1rem">予約不可日: ' + esc(j.blocked_dates.join(' / ')) + '</p>'
-          : '') +
-        (j.availability_error
-          ? '<p class="err" style="margin-top:0.75rem">' + esc(j.availability_error) + '</p>'
-          : '') +
-        (details.length
-          ? '<div class="table-wrap" style="margin-top:1rem"><table class="admin-table"><thead><tr><th>ID</th><th>担当</th><th>状態</th><th>日時</th><th>同期</th><th>理由</th></tr></thead><tbody>' +
-              details.map(function (d) {
-                return '<tr>' +
-                  '<td>' + esc(String(d.booking_id || '—')) + '</td>' +
-                  '<td>' + esc(String(d.staff_id || '—')) + '</td>' +
-                  '<td>' + esc(d.status || '—') + '</td>' +
-                  '<td><div>' + esc(fmtJst(d.start_utc)) + '</div><div class="muted small">〜 ' + esc(fmtJst(d.end_utc)) + '</div></td>' +
-                  '<td>' + (d.google_calendar_synced_at ? badgeHtml('同期済み', 'ok') : badgeHtml('未同期', 'warn')) + '</td>' +
-                  '<td>' + esc(d.google_calendar_sync_error || '—') + '</td>' +
-                '</tr>';
-              }).join('') +
-            '</tbody></table></div>'
-          : '<p class="muted" style="margin-top:1rem">この期間に DB 側のブロック予約は見つかりませんでした。</p>');
-    } catch (e) {
-      box.innerHTML = '<p class="err">' + esc(String(e)) + '</p>';
-    }
-  }
-
   async function getJson(path) {
     setMsg('');
     const r = await fetch(path, { credentials: 'same-origin', headers: headersJson() });
@@ -857,13 +782,6 @@
     document.getElementById('edit-campaign-dialog').close();
   });
 
-  document.getElementById('link-diagnostics-close').addEventListener('click', function () {
-    document.getElementById('link-diagnostics-dialog').close();
-  });
-  document.getElementById('link-diagnostics-dialog').addEventListener('cancel', function (ev) {
-    ev.preventDefault();
-    document.getElementById('link-diagnostics-dialog').close();
-  });
   document.getElementById('btn-load-bookings').addEventListener('click', loadBookings);
   document.getElementById('btn-reconcile-calendar-blocks').addEventListener('click', reconcileCalendarBlocks);
 

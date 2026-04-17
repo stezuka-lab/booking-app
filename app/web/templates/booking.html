@@ -61,7 +61,6 @@
     <h2 id="booking-success-title" class="booking-dialog__title">予約が完了しました</h2>
     <p class="booking-dialog__datetime" id="success-link-title"></p>
     <p class="muted" id="success-datetime"></p>
-    <p class="muted" id="success-staff" hidden></p>
     <div id="success-message-row" class="booking-note-card" hidden>
       <strong>ご案内</strong>
       <p id="success-message-text" class="booking-multiline-note"></p>
@@ -431,14 +430,6 @@
       (isConfirmed ? ' の予約が完了しました' : ' の予約を受け付けました');
     document.getElementById('success-datetime').textContent =
       '日時: ' + fmtSlot.format(new Date(startIso));
-    var staffEl = document.getElementById('success-staff');
-    if (data && data.staff_name) {
-      staffEl.hidden = false;
-      staffEl.textContent = '担当: ' + data.staff_name;
-    } else {
-      staffEl.hidden = true;
-      staffEl.textContent = '';
-    }
     var zoomRow = document.getElementById('success-zoom-row');
     var zoomLink = document.getElementById('success-zoom-url');
     if (data && data.meeting_url) {
@@ -808,7 +799,7 @@
       fixedServiceId = firstService.id;
     }
     renderExtraFields(m.form_fields || []);
-    await loadSlots();
+    loadSlots();
   }
 
   async function loadSlots() {

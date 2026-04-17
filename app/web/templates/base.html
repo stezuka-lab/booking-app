@@ -9,6 +9,7 @@
   {% block head_extra %}{% endblock %}
 </head>
 <body>
+  <div class="app-busy-indicator" id="app-busy-indicator" hidden aria-live="polite">読み込み中…</div>
   <header class="app-header">
     <a class="app-brand" href="/app">
       <span class="app-brand-mark" aria-hidden="true"></span>
@@ -41,10 +42,44 @@
   <script>
   (function () {
     var orig = window.fetch;
+    var busyEl = document.getElementById('app-busy-indicator');
+    var busyCount = 0;
+    var busyTimer = null;
+    function showBusy(label) {
+      if (!busyEl) return;
+      busyEl.textContent = label || '読み込み中…';
+      busyEl.hidden = false;
+      document.body.classList.add('app-busy');
+    }
+    function hideBusy() {
+      if (!busyEl) return;
+      busyEl.hidden = true;
+      document.body.classList.remove('app-busy');
+    }
+    function beginBusy(label) {
+      if (busyTimer) clearTimeout(busyTimer);
+      busyTimer = setTimeout(function () {
+        if (busyCount > 0) showBusy(label);
+      }, 180);
+    }
+    function endBusy() {
+      if (busyCount <= 0) {
+        busyCount = 0;
+        if (busyTimer) clearTimeout(busyTimer);
+        hideBusy();
+      }
+    }
+    window.__setAppBusy = showBusy;
+    window.__clearAppBusy = hideBusy;
     window.fetch = function (input, init) {
       init = init || {};
       if (init.credentials == null) init.credentials = 'same-origin';
-      return orig.call(this, input, init);
+      busyCount += 1;
+      beginBusy('読み込み中…');
+      return orig.call(this, input, init).finally(function () {
+        busyCount -= 1;
+        endBusy();
+      });
     };
     window.__loadAuthMe = function () {
       return window.fetch('/api/auth/me', { credentials: 'same-origin' })
@@ -99,6 +134,15 @@
       }
       el.innerHTML = '';
     }
+    document.addEventListener('click', function (ev) {
+      var link = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+      if (!link) return;
+      var href = link.getAttribute('href') || '';
+      if (!href || href.charAt(0) === '#' || link.target === '_blank' || link.hasAttribute('download')) return;
+      if (href.indexOf('/app') === 0 || href.indexOf('/api') === 0) {
+        window.__setAppBusy('画面を読み込み中…');
+      }
+    }, true);
   })();
   </script>
 </body>

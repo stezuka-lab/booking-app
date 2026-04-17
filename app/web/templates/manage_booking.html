@@ -58,10 +58,9 @@
   function render(data) {
     manageData = data || {};
     var b = manageData.booking || {};
-    var staff = manageData.staff || {};
     statusEl.textContent = '状態: ' + (b.status || '不明');
     var lines = [];
-    if (staff.name) lines.push('担当: ' + staff.name);
+    if (b.link_title) lines.push('予約内容: ' + b.link_title);
     if (b.start_utc) lines.push('日時: ' + fmtJa(b.start_utc));
     if (b.meeting_url) lines.push('会議 URL: ' + b.meeting_url);
     summaryEl.innerHTML = '<div class="booking-summary-list">' + lines.map(function (x) {
@@ -80,7 +79,7 @@
     if (manageData.policy_reason === 'ok') {
       policyEl.textContent = 'オンラインでキャンセルできます。';
     } else {
-      policyEl.textContent = 'オンライン変更の期限外です。必要に応じて担当者へ連絡してください。';
+      policyEl.textContent = 'オンライン変更の期限外です。必要に応じて運営へ連絡してください。';
     }
   }
 

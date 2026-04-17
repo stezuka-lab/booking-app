@@ -9,6 +9,7 @@
   {% block head_extra %}{% endblock %}
 </head>
 <body class="public-booking-body">
+  <div class="app-busy-indicator" id="app-busy-indicator" hidden aria-live="polite">読み込み中…</div>
   <header class="public-shell-header">
     <div class="public-shell-brand">
       <span class="app-brand-mark" aria-hidden="true"></span>
@@ -21,6 +22,51 @@
   <main class="app-main wide public-booking-main">
     {% block content %}{% endblock %}
   </main>
+  <script>
+  (function () {
+    var orig = window.fetch;
+    var busyEl = document.getElementById('app-busy-indicator');
+    var busyCount = 0;
+    var busyTimer = null;
+    function showBusy(label) {
+      if (!busyEl) return;
+      busyEl.textContent = label || '読み込み中…';
+      busyEl.hidden = false;
+      document.body.classList.add('app-busy');
+    }
+    function hideBusy() {
+      if (!busyEl) return;
+      busyEl.hidden = true;
+      document.body.classList.remove('app-busy');
+    }
+    window.__setAppBusy = showBusy;
+    window.__clearAppBusy = hideBusy;
+    window.fetch = function (input, init) {
+      init = init || {};
+      if (init.credentials == null) init.credentials = 'same-origin';
+      busyCount += 1;
+      if (busyTimer) clearTimeout(busyTimer);
+      busyTimer = setTimeout(function () {
+        if (busyCount > 0) showBusy('読み込み中…');
+      }, 180);
+      return orig.call(this, input, init).finally(function () {
+        busyCount -= 1;
+        if (busyCount <= 0) {
+          busyCount = 0;
+          if (busyTimer) clearTimeout(busyTimer);
+          hideBusy();
+        }
+      });
+    };
+    document.addEventListener('click', function (ev) {
+      var link = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+      if (!link) return;
+      var href = link.getAttribute('href') || '';
+      if (!href || href.charAt(0) === '#' || link.target === '_blank' || link.hasAttribute('download')) return;
+      showBusy('画面を読み込み中…');
+    }, true);
+  })();
+  </script>
   {% block scripts %}{% endblock %}
 </body>
 </html>

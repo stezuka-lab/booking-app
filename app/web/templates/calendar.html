@@ -235,12 +235,14 @@
         : '';
       return (
         '<tr><td class="cal-td-name">' + esc(s.name) + '</td><td>' + esc(s.email || '') + '</td><td class="cal-td-gprof">' + gprof + '</td><td>' +
+        '<div class="cal-td-actions">' +
         '<input type="url" class="admin-staff-inp cal-zoom-input" data-id="' + s.id + '" value="' + zoomVal + '" placeholder="https://zoom.us/j/..." />' +
+        '<button type="button" class="btn sm secondary cal-save-zoom" data-id="' + s.id + '">Zoom URL を保存</button>' +
+        '</div>' +
         '<div class="muted small" style="margin-top:0.35rem">この担当に予約が入ったときの案内 URL</div>' +
         '</td><td>' + st + '</td><td class="cal-td-actions">' +
-        '<button type="button" class="btn sm secondary cal-save-zoom" data-id="' + s.id + '">Zoom URL を保存</button>' +
-        '<button type="button" class="btn gcal-google-btn cal-oauth"' + dis + ' data-id="' + s.id + '">' +
-        '<span class="gcal-g-icon" aria-hidden="true"></span> カレンダーを連携</button>' +
+        (s.has_google ? '' : ('<button type="button" class="btn gcal-google-btn cal-oauth"' + dis + ' data-id="' + s.id + '">' +
+        '<span class="gcal-g-icon" aria-hidden="true"></span> カレンダーを連携</button>')) +
         disconnect + '</td></tr>'
       );
     }).join('');
