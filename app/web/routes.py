@@ -67,6 +67,26 @@ async def _session_user(request: Request):
             return None
 
 
+async def _load_session_user_with_org(request: Request) -> Any:
+    factory = get_session_factory()
+    async with factory() as db:
+        try:
+            user = await get_current_app_user(request, db)
+        except Exception:
+            logger.exception("Failed to resolve session user for path %s", getattr(request.url, "path", ""))
+            request.session.clear()
+            return None
+        if not user or not getattr(user, "default_org_slug", None):
+            return user
+        try:
+            org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == user.default_org_slug))
+            setattr(user, "_default_org_name", org.name if org else None)
+        except Exception:
+            logger.exception("Failed to resolve default org for user %s", getattr(user, "id", None))
+            setattr(user, "_default_org_name", None)
+        return user
+
+
 async def _attach_default_org_name(user: Any) -> Any:
     if not user or not getattr(user, "default_org_slug", None):
         return user
@@ -105,7 +125,7 @@ async def _require_login_html(request: Request, next_path: str) -> RedirectRespo
 @router.get("/app", response_class=HTMLResponse)
 async def app_home(request: Request) -> Any:
     settings = get_settings()
-    u = await _attach_default_org_name(await _session_user(request))
+    u = await _load_session_user_with_org(request)
     if not u:
         return RedirectResponse(url="/app/login", status_code=302)
     return _html("home.html", request, settings, app_viewer=_viewer_payload(u))
@@ -115,79 +135,74 @@ async def app_home(request: Request) -> Any:
 async def app_login(request: Request) -> Any:
     settings = get_settings()
     nxt = (request.query_params.get("next") or "").strip() or "/app"
-    return _html("login.html", request, settings, login_next=nxt, app_viewer=_viewer_payload(await _attach_default_org_name(await _session_user(request))))
+    return _html("login.html", request, settings, login_next=nxt, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
 
 
 @router.get("/app/forgot-password", response_class=HTMLResponse)
 async def app_forgot_password(request: Request) -> Any:
     settings = get_settings()
-    return _html("forgot_password.html", request, settings, app_viewer=_viewer_payload(await _attach_default_org_name(await _session_user(request))))
+    return _html("forgot_password.html", request, settings, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
 
 
 @router.get("/app/reset-password", response_class=HTMLResponse)
 async def app_reset_password(request: Request) -> Any:
     settings = get_settings()
     tok = (request.query_params.get("token") or "").strip()
-    return _html("reset_password.html", request, settings, reset_token=tok, app_viewer=_viewer_payload(await _attach_default_org_name(await _session_user(request))))
+    return _html("reset_password.html", request, settings, reset_token=tok, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
 
 
 @router.get("/app/accounts", response_class=HTMLResponse)
 async def app_accounts(request: Request) -> Any:
     settings = get_settings()
-    redir = await _require_login_html(request, "/app/accounts")
-    if redir:
-        return redir
-    u = await _attach_default_org_name(await _session_user(request))
+    u = await _load_session_user_with_org(request)
+    if not u:
+        return RedirectResponse(url="/app/login?next=" + quote("/app/accounts", safe=""), status_code=302)
     return _html("accounts.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
 
 
 @router.get("/app/booking/{token}", response_class=HTMLResponse)
 async def app_booking(request: Request, token: str) -> Any:
     settings = get_settings()
-    return _html("booking.html", request, settings, link_token=token, app_viewer=_viewer_payload(await _attach_default_org_name(await _session_user(request))))
+    return _html("booking.html", request, settings, link_token=token, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
 
 
 @router.get("/app/manage/{manage_token}", response_class=HTMLResponse)
 async def app_booking_manage(request: Request, manage_token: str) -> Any:
     settings = get_settings()
-    return _html("manage_booking.html", request, settings, manage_token=manage_token, app_viewer=_viewer_payload(await _attach_default_org_name(await _session_user(request))))
+    return _html("manage_booking.html", request, settings, manage_token=manage_token, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
 
 
 @router.get("/app/admin", response_class=HTMLResponse)
 async def app_admin(request: Request) -> Any:
     settings = get_settings()
-    redir = await _require_login_html(request, "/app/admin")
-    if redir:
-        return redir
-    u = await _attach_default_org_name(await _session_user(request))
+    u = await _load_session_user_with_org(request)
+    if not u:
+        return RedirectResponse(url="/app/login?next=" + quote("/app/admin", safe=""), status_code=302)
     return _html("admin.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
 
 
 @router.get("/app/campaigns", response_class=HTMLResponse)
 async def app_campaigns_alias(request: Request) -> Any:
     settings = get_settings()
-    redir = await _require_login_html(request, "/app/campaigns")
-    if redir:
-        return redir
-    u = await _attach_default_org_name(await _session_user(request))
+    u = await _load_session_user_with_org(request)
+    if not u:
+        return RedirectResponse(url="/app/login?next=" + quote("/app/campaigns", safe=""), status_code=302)
     return _html("admin.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
 
 
 @router.get("/app/settings", response_class=HTMLResponse)
 async def app_settings(request: Request) -> Any:
     settings = get_settings()
-    redir = await _require_login_html(request, "/app/settings")
-    if redir:
-        return redir
-    u = await _attach_default_org_name(await _session_user(request))
+    u = await _load_session_user_with_org(request)
+    if not u:
+        return RedirectResponse(url="/app/login?next=" + quote("/app/settings", safe=""), status_code=302)
     return _html("settings.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
 
 
 @router.get("/app/calendar", response_class=HTMLResponse)
 async def app_calendar(request: Request) -> Any:
     settings = get_settings()
-    redir = await _require_login_html(request, "/app/calendar")
-    if redir:
-        return redir
-    u = await _attach_default_org_name(await _session_user(request))
+    u = await _load_session_user_with_org(request)
+    if not u:
+        return RedirectResponse(url="/app/login?next=" + quote("/app/calendar", safe=""), status_code=302)
     return _html("calendar.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
