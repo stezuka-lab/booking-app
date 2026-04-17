@@ -1127,11 +1127,11 @@ code {
 }
 
 #booking-grid-prev {
-  left: 0;
+  left: calc(var(--booking-rail-width, 40px) + 0.4rem);
 }
 
 #booking-grid-next {
-  right: 0;
+  right: 0.4rem;
 }
 
 .booking-grid-head-row__arrow:hover,
