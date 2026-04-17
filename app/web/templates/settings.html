@@ -184,6 +184,7 @@
   var patchSlug = null;
   var currentSummaryData = null;
   var ORG_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+  const summaryCacheTtlMs = 60000;
 
   function formatApiDetail(detail) {
     if (detail == null || detail === '') return '';
@@ -267,6 +268,34 @@
 
   function headersJson() {
     return { 'Content-Type': 'application/json' };
+  }
+
+  function summaryCacheKey() {
+    const slug = getPatchSlug();
+    return slug ? 'booking.settings.summary.' + slug : '';
+  }
+
+  function readSummaryCache() {
+    const key = summaryCacheKey();
+    if (!key) return null;
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.data || !parsed.ts) return null;
+      if ((Date.now() - Number(parsed.ts)) > summaryCacheTtlMs) return null;
+      return parsed.data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeSummaryCache(data) {
+    const key = summaryCacheKey();
+    if (!key) return;
+    try {
+      sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: data }));
+    } catch (e) {}
   }
 
   /** HH:MM(:SS) や H:MM を input[type=time] 用に正規化 */
@@ -489,8 +518,15 @@
     return data;
   }
 
-  async function loadSummary() {
+  async function loadSummary(forceRefresh) {
     if (!ensureOrgSelected()) return;
+    if (!forceRefresh) {
+      const cached = readSummaryCache();
+      if (cached) {
+        renderSummary(cached);
+        return cached;
+      }
+    }
     const q = new URLSearchParams({
       include_staff: 'false',
       include_services: 'false',
@@ -499,7 +535,11 @@
       include_counts: 'true'
     });
     const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary?' + q.toString());
-    if (data) renderSummary(data);
+    if (data) {
+      writeSummaryCache(data);
+      renderSummary(data);
+    }
+    return data;
   }
 
   document.getElementById('btn-save-email').addEventListener('click', async function () {
@@ -529,7 +569,7 @@
     setTimeout(function () {
       setMsg('');
     }, 2000);
-    await loadSummary();
+    await loadSummary(true);
   });
 
   document.getElementById('btn-save-org').addEventListener('click', async function () {
@@ -550,7 +590,7 @@
     }
     setMsg('保存しました', 'ok');
     setTimeout(function () { setMsg(''); }, 2000);
-    await loadSummary();
+    await loadSummary(true);
   });
 
   document.getElementById('btn-save-availability').addEventListener('click', async function () {
@@ -582,7 +622,7 @@
     }
     setMsg('予約可能時間・休日・カレンダー件名を保存しました', 'ok');
     setTimeout(function () { setMsg(''); }, 2000);
-    await loadSummary();
+    await loadSummary(true);
   });
 
   document.querySelectorAll('.cal-title-insert-btn').forEach(function (b) {
@@ -612,7 +652,7 @@
   function maybeAutoLoadSummary() {
     applyMeOrgPreference()
       .then(function () {
-        return loadSummary();
+        return loadSummary(true);
       })
       .catch(function () {});
   }

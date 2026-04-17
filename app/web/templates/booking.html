@@ -26,11 +26,6 @@
         </div>
       </aside>
       <div class="booking-calendar-main">
-        <div class="booking-cal-topline">
-          <button type="button" class="booking-date-pill booking-date-pill--today" id="booking-cal-today">本日</button>
-          <div id="booking-date-strip" class="booking-date-strip" aria-label="表示開始日を選択"></div>
-          <span class="gcal-title booking-cal-range-label-hidden" id="booking-cal-range-label" hidden></span>
-        </div>
         <div class="gcal-wrap booking-cal-wrap" id="booking-cal-wrap">
           <p id="slots-loading" class="loading-text">読み込み中…</p>
           <div class="cal-grid gcal-grid" id="booking-cal-grid" hidden></div>
@@ -146,6 +141,16 @@
 
   function startOfLocalDay(d) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  }
+
+  function todayLocal() {
+    return startOfLocalDay(new Date());
+  }
+
+  function clampCursorDate(d) {
+    const day = startOfLocalDay(d || new Date());
+    const today = todayLocal();
+    return day < today ? today : day;
   }
 
   function startOfWeekSunday(d) {
@@ -555,14 +560,16 @@
     const root = document.getElementById('booking-date-strip');
     if (!root) return;
     root.innerHTML = '';
-    const anchor = startOfLocalDay(rangeStart || new Date());
+    const anchor = clampCursorDate(rangeStart || new Date());
+    const today = todayLocal();
     for (let i = 0; i < 14; i++) {
       const day = new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate() + i, 0, 0, 0, 0);
+      if (day < today) continue;
       const btn = document.createElement('button');
       btn.type = 'button';
       btn.className = 'booking-date-pill';
-      if (isSameDate(day, rangeStart)) btn.classList.add('is-active');
-      if (isSameDate(day, new Date())) btn.classList.add('is-today');
+      if (isSameDate(day, anchor)) btn.classList.add('is-active');
+      if (isSameDate(day, today)) btn.classList.add('is-today');
       btn.innerHTML =
         '<span class="booking-date-pill__date">' +
         (day.getMonth() + 1) +
@@ -641,7 +648,8 @@
     grid.className = 'cal-grid gcal-grid gcal-grid-week';
     if (wrap) wrap.className = 'gcal-wrap booking-cal-wrap';
 
-    const weekStart = startOfLocalDay(cursorDate || new Date());
+    const weekStart = clampCursorDate(cursorDate || new Date());
+    cursorDate = weekStart;
     const days = [];
     for (let i = 0; i < 7; i++) {
       const dd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i, 0, 0, 0, 0);
@@ -659,30 +667,40 @@
     const totalHMain = (END_H - START_H) * hp;
     const CLOSING_STRIP_PX = 20;
 
-    const headTools = document.createElement('div');
-    headTools.className = 'booking-grid-nav';
-    headTools.innerHTML =
-      '<button type="button" class="btn secondary gcal-arrow booking-grid-nav__arrow" id="booking-grid-prev" aria-label="前の週">‹</button>' +
-      '<div class="booking-grid-nav__spacer"></div>' +
-      '<button type="button" class="btn secondary gcal-arrow booking-grid-nav__arrow" id="booking-grid-next" aria-label="次の週">›</button>';
-    grid.appendChild(headTools);
-
     const headW = document.createElement('div');
-    headW.className = 'gcal-head gcal-head-week';
+    headW.className = 'gcal-head gcal-head-week booking-grid-date-row';
     headW.innerHTML = '<div class="gcal-corner"></div>';
     days.forEach(function (d) {
-      const c = document.createElement('div');
-      c.className = 'gcal-head-daycell';
+      const c = document.createElement('button');
+      c.type = 'button';
+      c.className = 'gcal-head-daycell booking-grid-date-btn';
       if (isSameDate(d, new Date())) c.classList.add('is-today');
       c.innerHTML =
-        '<span class="gcal-dom">' +
+        '<span class="gcal-dom gcal-dom-inline">' +
         d.getDate() +
         '</span><span class="gcal-dow gcal-dow-inline">' +
         new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(d) +
         '</span>';
+      c.addEventListener('click', function () {
+        cursorDate = startOfLocalDay(d);
+        loadSlots();
+      });
       headW.appendChild(c);
     });
-    grid.appendChild(headW);
+    const headRow = document.createElement('div');
+    headRow.className = 'booking-grid-head-row';
+    headRow.innerHTML =
+      '<button type="button" class="booking-date-pill booking-date-pill--today booking-grid-head-row__today" id="booking-grid-today">本日</button>' +
+      '<button type="button" class="btn secondary gcal-arrow booking-grid-head-row__arrow" id="booking-grid-prev" aria-label="前の週">‹</button>';
+    headRow.appendChild(headW);
+    const nextBtnWrap = document.createElement('button');
+    nextBtnWrap.type = 'button';
+    nextBtnWrap.className = 'btn secondary gcal-arrow booking-grid-head-row__arrow';
+    nextBtnWrap.id = 'booking-grid-next';
+    nextBtnWrap.setAttribute('aria-label', '次の週');
+    nextBtnWrap.textContent = '›';
+    headRow.appendChild(nextBtnWrap);
+    grid.appendChild(headRow);
 
     const bodyW = document.createElement('div');
     bodyW.className = 'gcal-body gcal-body-week';
@@ -737,7 +755,7 @@
       prevBtn.addEventListener('click', function () {
         const d = startOfLocalDay(cursorDate || new Date());
         d.setDate(d.getDate() - 7);
-        cursorDate = d;
+        cursorDate = clampCursorDate(d);
         loadSlots();
       });
     }
@@ -746,6 +764,13 @@
         const d = startOfLocalDay(cursorDate || new Date());
         d.setDate(d.getDate() + 7);
         cursorDate = d;
+        loadSlots();
+      });
+    }
+    const todayBtn = document.getElementById('booking-grid-today');
+    if (todayBtn) {
+      todayBtn.addEventListener('click', function () {
+        cursorDate = todayLocal();
         loadSlots();
       });
     }
@@ -777,7 +802,7 @@
     const m = await r.json();
     lastMeta = m;
     metaAvailability = m.availability_defaults || {};
-    cursorDate = startOfLocalDay(new Date());
+    cursorDate = todayLocal();
     const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
     document.getElementById('page-heading').textContent = lt;
     const noticeWrap = document.getElementById('booking-link-notice');
@@ -827,7 +852,8 @@
     if (!Number.isFinite(svcId) && window.__BOOKING_LINK_SERVICE_ID__ != null) {
       svcId = window.__BOOKING_LINK_SERVICE_ID__;
     }
-    if (!cursorDate) cursorDate = startOfLocalDay(new Date());
+    if (!cursorDate) cursorDate = todayLocal();
+    cursorDate = clampCursorDate(cursorDate);
     const from = startOfLocalDay(cursorDate);
     const to = new Date(from);
     to.setDate(to.getDate() + 7);
@@ -891,7 +917,8 @@
     if (!Number.isFinite(svcId) && window.__BOOKING_LINK_SERVICE_ID__ != null) {
       svcId = window.__BOOKING_LINK_SERVICE_ID__;
     }
-    if (!cursorDate) cursorDate = startOfLocalDay(new Date());
+    if (!cursorDate) cursorDate = todayLocal();
+    cursorDate = clampCursorDate(cursorDate);
     const from = startOfLocalDay(cursorDate);
     const to = new Date(from);
     to.setDate(to.getDate() + 7);
@@ -966,11 +993,6 @@
     if (pageMsg) pageMsg.textContent = payload.availability_error || '';
     renderCalendar();
   };
-
-  document.getElementById('booking-cal-today').addEventListener('click', function () {
-    cursorDate = startOfLocalDay(new Date());
-    loadSlots();
-  });
 
   document.getElementById('modal-cancel').addEventListener('click', function () {
     dialogEl.close();
@@ -1066,7 +1088,11 @@
     successDialogEl.close();
   });
 
-  Promise.all([loadMeta(), loadSlots()]).catch(function (e) {
+  loadMeta()
+    .then(function () {
+      return loadSlots();
+    })
+    .catch(function (e) {
     document.getElementById('page-msg').textContent = String(e);
     document.getElementById('slots-loading').textContent = '読み込みに失敗しました';
   });

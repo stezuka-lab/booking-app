@@ -216,6 +216,7 @@
   let currentBookings = [];
   let bookingsLoaded = false;
   let bookingsLoading = false;
+  const summaryCacheTtlMs = 60000;
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -244,6 +245,33 @@
 
   function headersJson() {
     return { 'Content-Type': 'application/json' };
+  }
+
+  function summaryCacheKey() {
+    return currentOrgSlug ? 'booking.admin.summary.' + currentOrgSlug : '';
+  }
+
+  function readSummaryCache() {
+    const key = summaryCacheKey();
+    if (!key) return null;
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.data || !parsed.ts) return null;
+      if ((Date.now() - Number(parsed.ts)) > summaryCacheTtlMs) return null;
+      return parsed.data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeSummaryCache(data) {
+    const key = summaryCacheKey();
+    if (!key) return;
+    try {
+      sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: data }));
+    } catch (e) {}
   }
 
   function showLinkPanels(show) {
@@ -432,7 +460,7 @@
       setMsg(okMessage, 'ok');
       setTimeout(function () { setMsg(''); }, 2000);
     }
-    await loadSummary();
+    await loadSummary(true);
     return j;
   }
 
@@ -701,17 +729,28 @@
     return data;
   }
 
-  async function loadSummary() {
+  async function loadSummary(forceRefresh) {
     if (!ensureOrgSelected()) return;
+    if (!forceRefresh) {
+      const cached = readSummaryCache();
+      if (cached) {
+        renderLinksSummary(cached);
+        return cached;
+      }
+    }
     const q = new URLSearchParams({
       include_staff: 'true',
-      include_services: 'true',
+      include_services: 'false',
       include_links: 'true',
       include_forms: 'false',
       include_counts: 'false'
     });
     const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString());
-    if (data) renderLinksSummary(data);
+    if (data) {
+      writeSummaryCache(data);
+      renderLinksSummary(data);
+    }
+    return data;
   }
 
   document.getElementById('btn-create-link').addEventListener('click', async function () {
@@ -765,7 +804,7 @@
       document.getElementById('new-link-bookable-until-date').value = '';
       document.getElementById('new-link-pre-booking-notice').value = '';
       document.getElementById('new-link-post-booking-message').value = '';
-      await loadSummary();
+      await loadSummary(true);
       alert('発行しました。\n' + (j.public_url || ''));
     } catch (e) {
       setMsg(String(e), 'err');
@@ -848,7 +887,7 @@
     setTimeout(function () {
       setMsg('');
     }, 2000);
-    await loadSummary();
+    await loadSummary(true);
   });
 
   var appViewer = window.__APP_VIEWER__ || {};
