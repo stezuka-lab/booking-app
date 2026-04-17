@@ -9,7 +9,7 @@
 <div class="booking-flow booking-flow-v2">
   <div class="booking-hero-bar">
     <div>
-      <h1 class="page-title booking-hero-title" id="page-heading">予約</h1>
+      <h1 class="page-title booking-hero-title" id="page-heading">予約リンク</h1>
       <p class="booking-link-notice booking-link-notice-inline booking-multiline-note" id="booking-link-notice" hidden></p>
     </div>
     <div id="ga4-slot"></div>
@@ -133,6 +133,12 @@
 
   function startOfLocalDay(d) {
     return new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  }
+
+  function startOfWeekSunday(d) {
+    const x = startOfLocalDay(d);
+    x.setDate(x.getDate() - x.getDay());
+    return x;
   }
 
   function parseHm(s) {
@@ -471,150 +477,18 @@
     document.getElementById('modal-company').value = '';
   }
 
-  function placeBusyInLayer(layer, day0, day1, busyList, totalH, hp, START_H) {
-    (busyList || []).forEach(function (iv) {
-      const st = new Date(iv.start_utc);
-      const en = new Date(iv.end_utc);
-      if (en <= day0 || st >= day1) return;
-      const cs = st < day0 ? day0 : st;
-      const ce = en > day1 ? day1 : en;
-      let top = (hoursFromDayStart(cs, day0) - START_H) * hp;
-      let hgt = ((ce - cs) / 3600000) * hp;
-      if (top + hgt < 0 || top > totalH) return;
-      top = Math.max(0, top);
-      hgt = Math.min(hgt, totalH - top);
-      /* 8px 固定だと短い予定が下に伸び、実際より隙間が消えたように見える（隣接予定で重なる） */
-      hgt = Math.max(hgt, 2);
-      const el = document.createElement('div');
-      el.className = 'booking-busy-block';
-      el.style.top = top + 'px';
-      el.style.height = hgt + 'px';
-      el.innerHTML = '<div class="cal-ev-title">予定あり</div>';
-      el.title = 'この時間帯は埋まっている可能性があります';
-      layer.appendChild(el);
-    });
-  }
-
-  function placeSlotsInLayer(layer, day0, day1, slots, totalH, hp, START_H) {
-    const durMin = (lastAvail && lastAvail.service_duration_minutes) || 30;
-    const pxPerHour = hp;
-    // 所要時間に応じた最小高さ（固定 28px だと 30 分枠 ≈16px になり「予約可能」ボタンが一切出ない）
-    const minFullPx = Math.max(6, (durMin / 60) * pxPerHour * 0.35);
-    (slots || []).forEach(function (s) {
-      const st = new Date(s.start_utc);
-      const en = new Date(s.end_utc);
-      if (en <= day0 || st >= day1) return;
-      const cs = st < day0 ? day0 : st;
-      const ce = en > day1 ? day1 : en;
-      let top = (hoursFromDayStart(cs, day0) - START_H) * hp;
-      let hgt = ((ce - cs) / 3600000) * hp;
-      if (top + hgt < 0 || top > totalH) return;
-      top = Math.max(0, top);
-      hgt = Math.min(hgt, totalH - top);
-      if (hgt < minFullPx) return;
-      const btn = document.createElement('button');
-      btn.type = 'button';
-      btn.className = 'cal-event booking-slot-choice';
-      if (durMin >= 60) btn.classList.add('is-long-slot');
-      if (durMin <= 30) btn.classList.add('is-short-slot');
-      btn.style.top = top + 'px';
-      btn.style.height = hgt + 'px';
-      btn.dataset.startUtc = s.start_utc;
-      if (s.staff_id != null && s.staff_id !== '') {
-        btn.dataset.staffId = String(s.staff_id);
-      }
-      const timeLine =
-        new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(cs) +
-        ' – ' +
-        new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(ce);
-      btn.setAttribute('aria-label', '空き枠 ' + timeLine);
-      if (durMin <= 30) {
-        btn.innerHTML =
-          '<span class="booking-slot-row">' +
-          '<span class="cal-ev-time">' + timeLine + '</span>' +
-          '<span class="booking-slot-badge">' + durMin + '分</span>' +
-          '</span>';
-      } else {
-        btn.innerHTML =
-          '<span class="cal-ev-time">' + timeLine + '</span>' +
-          '<span class="booking-slot-meta">' + durMin + '分</span>';
-      }
-      layer.appendChild(btn);
-    });
-  }
-
-  function trySelectFromClick(day0, offsetY, colEl) {
-    if (!lastAvail) return;
-    if (isDateBlocked(day0)) {
-      document.getElementById('page-msg').textContent =
-        'この日は予約を受け付けていません（休業日・土日祝設定）';
-      return;
-    }
-    const START_H = getGridHours().START_H;
-    const END_H = getGridHours().END_H;
-    const hp = HOUR_PX;
-    const totalHMain = (END_H - START_H) * hp;
-    if (offsetY < 0 || offsetY > totalHMain) return;
-    const slotMin = lastAvail.slot_minutes || 30;
-    const durMin = lastAvail.service_duration_minutes || 30;
-    const fracH = START_H + offsetY / hp;
-    let totalMins = Math.round(fracH * 60);
-    totalMins = Math.floor(totalMins / slotMin) * slotMin;
-    const h = Math.floor(totalMins / 60);
-    const m = totalMins % 60;
-    const start = new Date(day0.getFullYear(), day0.getMonth(), day0.getDate(), h, m, 0, 0);
-    const end = new Date(start.getTime() + durMin * 60000);
-    const bounds = dayBusinessBounds(day0);
-    if (start < bounds.start || end > bounds.end) {
-      document.getElementById('page-msg').textContent = '受付時間外です。別の時間を選んでください。';
-      return;
-    }
-    const tolMs = Math.max(
-      slotMin * 60 * 1000,
-      Math.floor((durMin * 60000) / 2),
-      120000
-    );
-    const match = findNearestSlotMeta(start.getTime(), tolMs);
-    if (match) {
-      document.getElementById('page-msg').textContent = '';
-      openBookingModal(match.start_utc);
-      return;
-    }
-    const busy = lastAvail.busy_intervals || [];
-    for (let i = 0; i < busy.length; i++) {
-      const b0 = new Date(busy[i].start_utc);
-      const b1 = new Date(busy[i].end_utc);
-      if (intervalsOverlap(start, end, b0, b1)) {
-        document.getElementById('page-msg').textContent =
-          'この時間は既に予定が入っている可能性があります。別の枠を選んでください。';
-        return;
-      }
-    }
-    document.getElementById('page-msg').textContent = '緑の枠の時刻を選んでください。';
-  }
-
   function renderWeekCalendar() {
     const grid = document.getElementById('booking-cal-grid');
     const loading = document.getElementById('slots-loading');
     const empty = document.getElementById('slots-empty');
-    const wrap = document.getElementById('booking-cal-wrap');
     const slots = (lastAvail && lastAvail.slots) || [];
-    const busyAll = (lastAvail && lastAvail.busy_intervals) || [];
     loading.hidden = true;
     grid.hidden = false;
     grid.innerHTML = '';
     grid.dataset.selectedStart = '';
-    grid.className = 'cal-grid gcal-grid gcal-grid-week';
-    wrap.className = 'gcal-wrap booking-cal-wrap';
+    grid.className = 'booking-compact-grid';
 
-    const START_H = getGridHours().START_H;
-    const END_H = getGridHours().END_H;
-    const hp = HOUR_PX;
-    const totalHMain = (END_H - START_H) * hp;
-    const CLOSING_STRIP_PX = 36;
-    const endLabel = metaAvailability.end || '22:00';
-
-    const weekStart = startOfLocalDay(cursorDate);
+    const weekStart = startOfWeekSunday(cursorDate || new Date());
     const days = [];
     for (let i = 0; i < 7; i++) {
       const dd = new Date(weekStart.getFullYear(), weekStart.getMonth(), weekStart.getDate() + i, 0, 0, 0, 0);
@@ -622,124 +496,107 @@
     }
     document.getElementById('booking-cal-range-label').textContent =
       fmtRangeLabel.format(days[0]) + ' 〜 ' + fmtRangeLabel.format(days[6]);
-
-    const headW = document.createElement('div');
-    headW.className = 'gcal-head gcal-head-week';
-    headW.innerHTML = '<div class="gcal-corner"></div>';
-    days.forEach(function (d) {
-      const c = document.createElement('div');
-      c.className = 'gcal-head-daycell';
-      if (isSameDate(d, new Date())) c.classList.add('is-today');
-      const d0h = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-      if (isDateBlocked(d0h)) c.classList.add('booking-head-day-blocked');
-      c.innerHTML =
-        '<span class="gcal-dow">' +
-        new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(d) +
-        '</span><span class="gcal-dom">' +
-        d.getDate() +
-        '</span>';
-      headW.appendChild(c);
-    });
-    grid.appendChild(headW);
-
-    const bodyW = document.createElement('div');
-    bodyW.className = 'gcal-body gcal-body-week';
-
-    const railW = document.createElement('div');
-    railW.className = 'gcal-rail';
-    for (let h2 = START_H; h2 < END_H; h2++) {
-      const lab2 = document.createElement('div');
-      lab2.className = 'gcal-rail-hour';
-      lab2.style.height = hp + 'px';
-      lab2.textContent = (h2 === 0 ? '0' : String(h2)) + ':00';
-      railW.appendChild(lab2);
-    }
-    const railClose = document.createElement('div');
-    railClose.className = 'gcal-rail-closing';
-    railClose.style.minHeight = CLOSING_STRIP_PX + 'px';
-    const startLabel = metaAvailability.start || '08:00';
-    railClose.textContent = '受付 ' + startLabel + '〜' + endLabel;
-    railClose.title = '';
-    railW.appendChild(railClose);
-    bodyW.appendChild(railW);
-
+    const durationMin = (lastAvail && lastAvail.service_duration_minutes) || 30;
+    const dayMap = {};
+    const rowMap = {};
     days.forEach(function (dayDate) {
-      const day0 = new Date(dayDate.getFullYear(), dayDate.getMonth(), dayDate.getDate());
-      const day1 = new Date(day0);
-      day1.setDate(day1.getDate() + 1);
-      const blocked = isDateBlocked(day0);
-
-      const col2 = document.createElement('div');
-      col2.className = 'gcal-col booking-cal-col-hit booking-cal-col-grid';
-      if (isSameDate(dayDate, new Date())) col2.classList.add('is-today');
-      if (blocked) col2.classList.add('booking-day-blocked');
-      col2.style.height = totalHMain + CLOSING_STRIP_PX + 'px';
-      col2.style.setProperty('--booking-hour-px', hp + 'px');
-
-      const layer2 = document.createElement('div');
-      layer2.className = 'cal-events-layer gcal-events-layer booking-cal-events-layer';
-      layer2.style.top = '0';
-      layer2.style.height = totalHMain + 'px';
-      layer2.style.bottom = 'auto';
-      const dayBusy = busyAll.filter(function (iv) {
-        const s = new Date(iv.start_utc);
-        const e = new Date(iv.end_utc);
-        return e > day0 && s < day1;
-      });
-      const daySlots = slots.filter(function (s) {
-        const t = new Date(s.start_utc);
-        return t >= day0 && t < day1;
-      });
-      placeBusyInLayer(layer2, day0, day1, dayBusy, totalHMain, hp, START_H);
-      placeSlotsInLayer(layer2, day0, day1, daySlots, totalHMain, hp, START_H);
-      layer2.addEventListener(
-        'click',
-        function (ev) {
-          const btn = ev.target.closest('.booking-slot-choice');
-          if (!btn || !btn.dataset.startUtc) return;
-          ev.preventDefault();
-          ev.stopPropagation();
-          openBookingModal(btn.dataset.startUtc);
-        },
-        true
-      );
-      if (blocked) {
-        const ov = document.createElement('div');
-        ov.className = 'booking-day-blocked-overlay';
-        ov.setAttribute('role', 'presentation');
-        layer2.appendChild(ov);
-      }
-      layer2.addEventListener('click', function (ev) {
-        if (blocked) {
-          ev.preventDefault();
-          ev.stopPropagation();
-          document.getElementById('page-msg').textContent =
-            'この日は予約を受け付けていません（休業日・土日祝設定）';
-          return;
-        }
-        if (ev.target.closest('.booking-slot-choice')) return;
-        if (ev.target.closest('.booking-busy-block')) return;
-        const rect = col2.getBoundingClientRect();
-        const y = ev.clientY - rect.top;
-        trySelectFromClick(day0, y, col2);
-      });
-      col2.appendChild(layer2);
-      const foot = document.createElement('div');
-      foot.className = 'booking-cal-footer-spacer';
-      foot.style.height = CLOSING_STRIP_PX + 'px';
-      foot.setAttribute('aria-hidden', 'true');
-      col2.appendChild(foot);
-      bodyW.appendChild(col2);
+      dayMap[isoDateLocal(dayDate)] = {};
     });
-    grid.appendChild(bodyW);
+    (slots || []).forEach(function (slot) {
+      const st = new Date(slot.start_utc);
+      const localDay = isoDateLocal(st);
+      const hh = String(st.getHours()).padStart(2, '0');
+      const mm = String(st.getMinutes()).padStart(2, '0');
+      const rowKey = hh + ':' + mm;
+      const end = new Date(st.getTime() + durationMin * 60000);
+      rowMap[rowKey] = {
+        key: rowKey,
+        sortValue: st.getHours() * 60 + st.getMinutes(),
+        label:
+          hh +
+          ':' +
+          mm +
+          ' - ' +
+          String(end.getHours()).padStart(2, '0') +
+          ':' +
+          String(end.getMinutes()).padStart(2, '0'),
+      };
+      if (!dayMap[localDay]) dayMap[localDay] = {};
+      dayMap[localDay][rowKey] = slot;
+    });
+    const rows = Object.values(rowMap).sort(function (a, b) {
+      return a.sortValue - b.sortValue;
+    });
 
-    const nothing = !slots.length && !busyAll.length;
+    const nothing = !rows.length;
     empty.hidden = !nothing;
     grid.hidden = nothing;
-    if (!slots.length && busyAll.length) {
-      empty.hidden = false;
-      empty.textContent = 'この週に予約枠がありません。別の週を試してください。';
+    if (nothing) {
+      empty.textContent = 'この週に予約可能な時間帯がありません。別の週を試してください。';
+      return;
     }
+
+    const table = document.createElement('table');
+    table.className = 'booking-compact-table';
+
+    const thead = document.createElement('thead');
+    const trHead = document.createElement('tr');
+    const thTime = document.createElement('th');
+    thTime.textContent = '時間帯';
+    thTime.className = 'booking-compact-time-head';
+    trHead.appendChild(thTime);
+    days.forEach(function (d) {
+      const th = document.createElement('th');
+      th.className = 'booking-compact-day-head';
+      if (isSameDate(d, new Date())) th.classList.add('is-today');
+      th.innerHTML =
+        '<span class="booking-compact-dow">' +
+        new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(d) +
+        '</span><span class="booking-compact-date">' +
+        (d.getMonth() + 1) +
+        '/' +
+        d.getDate() +
+        '</span>';
+      trHead.appendChild(th);
+    });
+    thead.appendChild(trHead);
+    table.appendChild(thead);
+
+    const tbody = document.createElement('tbody');
+    rows.forEach(function (row) {
+      const tr = document.createElement('tr');
+      const th = document.createElement('th');
+      th.className = 'booking-compact-time';
+      th.textContent = row.label;
+      tr.appendChild(th);
+      days.forEach(function (d) {
+        const td = document.createElement('td');
+        td.className = 'booking-compact-cell';
+        const dayKey = isoDateLocal(d);
+        const slot = dayMap[dayKey] && dayMap[dayKey][row.key];
+        if (slot) {
+          const btn = document.createElement('button');
+          btn.type = 'button';
+          btn.className = 'booking-slot-choice booking-compact-slot-btn';
+          btn.dataset.startUtc = slot.start_utc;
+          if (slot.staff_id != null && slot.staff_id !== '') {
+            btn.dataset.staffId = String(slot.staff_id);
+          }
+          btn.textContent = '予約する';
+          btn.addEventListener('click', function () {
+            document.getElementById('page-msg').textContent = '';
+            openBookingModal(slot.start_utc);
+          });
+          td.appendChild(btn);
+        } else {
+          td.innerHTML = '<span class="booking-compact-empty">-</span>';
+        }
+        tr.appendChild(td);
+      });
+      tbody.appendChild(tr);
+    });
+    table.appendChild(tbody);
+    grid.appendChild(table);
   }
 
   function renderCalendar() {
@@ -768,7 +625,7 @@
     const m = await r.json();
     lastMeta = m;
     metaAvailability = m.availability_defaults || {};
-    cursorDate = startOfLocalDay(new Date());
+    cursorDate = startOfWeekSunday(new Date());
     const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
     document.getElementById('page-heading').textContent = lt;
     const noticeWrap = document.getElementById('booking-link-notice');
@@ -794,7 +651,7 @@
       (m.fixed_service && m.fixed_service.id) ||
       (m.link && m.link.service_id != null ? m.link.service_id : null);
     window.__BOOKING_LINK_SERVICE_ID__ = m.link && m.link.service_id != null ? m.link.service_id : null;
-    const firstService = (m.services || [])[0];
+    const firstService = m.initial_service || null;
     if (!m.fixed_service && firstService) {
       fixedServiceId = firstService.id;
     }
@@ -866,19 +723,19 @@
   }
 
   document.getElementById('booking-cal-prev').addEventListener('click', function () {
-    const d = startOfLocalDay(cursorDate || new Date());
+    const d = startOfWeekSunday(cursorDate || new Date());
     d.setDate(d.getDate() - 7);
     cursorDate = d;
     loadSlots();
   });
   document.getElementById('booking-cal-next').addEventListener('click', function () {
-    const d = startOfLocalDay(cursorDate || new Date());
+    const d = startOfWeekSunday(cursorDate || new Date());
     d.setDate(d.getDate() + 7);
     cursorDate = d;
     loadSlots();
   });
   document.getElementById('booking-cal-today').addEventListener('click', function () {
-    cursorDate = startOfLocalDay(new Date());
+    cursorDate = startOfWeekSunday(new Date());
     loadSlots();
   });
 
