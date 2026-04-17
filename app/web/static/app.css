@@ -1131,12 +1131,17 @@ code {
 }
 
 #booking-grid-next {
-  right: 0.18rem;
+  right: 0;
 }
 
 .booking-grid-head-row__arrow:hover,
-.booking-grid-head-row__arrow:focus-visible {
-  transform: translateY(-50%);
+.booking-grid-head-row__arrow:focus-visible,
+.booking-grid-head-row__arrow:active,
+.booking-grid-head-row__arrow.btn.secondary:hover,
+.booking-grid-head-row__arrow.btn.secondary:focus-visible,
+.booking-grid-head-row__arrow.btn.secondary:active {
+  transform: translateY(-50%) !important;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.08);
 }
 
 .booking-grid-date-row {
