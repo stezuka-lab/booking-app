@@ -1109,7 +1109,7 @@ code {
 .booking-grid-head-row {
   position: relative;
   margin-bottom: 0.22rem;
-  padding-inline: 2.4rem;
+  padding-inline: 0;
 }
 
 .booking-grid-head-row__arrow {
@@ -1124,11 +1124,11 @@ code {
 }
 
 #booking-grid-prev {
-  left: 0;
+  left: 0.35rem;
 }
 
 #booking-grid-next {
-  right: 0;
+  right: 0.35rem;
 }
 
 .booking-grid-date-row {
@@ -1144,8 +1144,9 @@ code {
   align-items: center;
   justify-content: center;
   color: transparent;
-  background: #f8fafc;
-  border-right: 1px solid #e2e8f0;
+  background: transparent;
+  border-right: none;
+  box-shadow: none;
 }
 
 .booking-grid-date-btn {
@@ -1158,6 +1159,10 @@ code {
   padding: 0.26rem 0.18rem;
   text-align: center;
   cursor: default;
+}
+
+.booking-grid-date-row .booking-grid-date-btn:first-of-type {
+  border-left: none;
 }
 
 .booking-grid-date-btn.is-today {
