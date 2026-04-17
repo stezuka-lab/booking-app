@@ -1835,6 +1835,26 @@ body {
   line-height: 1.7;
 }
 
+.hero-home-steps {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+  margin-top: 1rem;
+}
+
+.hero-home-steps span {
+  display: inline-flex;
+  align-items: center;
+  min-height: 2rem;
+  padding: 0.35rem 0.8rem;
+  border-radius: 999px;
+  background: rgba(31, 95, 82, 0.08);
+  border: 1px solid rgba(31, 95, 82, 0.12);
+  color: #365c50;
+  font-size: 0.92rem;
+  font-weight: 700;
+}
+
 .hero-home-actions {
   display: flex;
   flex-wrap: wrap;
@@ -2148,6 +2168,15 @@ body {
 
   .hero-home {
     padding: 1.8rem 1.2rem;
+  }
+
+  .hero-home-steps {
+    gap: 0.45rem;
+  }
+
+  .hero-home-steps span {
+    width: 100%;
+    justify-content: center;
   }
 
   .booking-hero-bar {
