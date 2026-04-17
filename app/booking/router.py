@@ -937,16 +937,19 @@ async def link_availability(
         resolve_ms = (time_module.monotonic() - resolve_started) * 1000
         released_missing = 0
         if staff_list:
+            release_horizon_days = max(14, min(90, int(link_max_adv_days or 30)))
+            release_start = min(fts, datetime.now(timezone.utc) - timedelta(days=1))
+            release_end = max(tts + AVAILABILITY_RANGE_END_SLACK, datetime.now(timezone.utc) + timedelta(days=release_horizon_days))
             released_missing = await _release_bookings_with_missing_google_events(
                 db,
                 settings,
                 staff_list,
-                fts,
-                tts + AVAILABILITY_RANGE_END_SLACK,
+                release_start,
+                release_end,
             )
             if released_missing:
                 await db.commit()
-                _invalidate_public_availability_cache(token)
+                _clear_public_availability_cache(token)
         if cached_payload is not None and not released_missing:
             logger.info(
                 "booking.availability cache_hit token=%s service_id=%s from=%s to=%s released_missing=%s total_ms=%s",
@@ -1623,6 +1626,30 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
     b = await db.scalar(select(Booking).where(Booking.manage_token == manage_token))
     if not b:
         raise HTTPException(404, "not found")
+    if b.status == "confirmed" and (b.google_event_id or "").strip() and b.staff_id:
+        staff = await db.get(StaffMember, b.staff_id)
+        if staff:
+            exists, err = await get_calendar_event_status(
+                _staff_google_refresh_token(staff, settings),
+                staff.google_calendar_id,
+                (b.google_event_id or "").strip(),
+                settings,
+            )
+            if exists is False:
+                b.status = "cancelled"
+                b.cancelled_at = datetime.now(timezone.utc)
+                b.google_event_id = None
+                b.google_calendar_synced_at = None
+                b.google_calendar_sync_error = "Googleカレンダー上で予定が削除されたため自動で解放しました"
+                await db.commit()
+                _clear_public_availability_cache()
+            elif err:
+                logger.warning(
+                    "Manage page Google event existence check failed booking_id=%s staff_id=%s err=%s",
+                    b.id,
+                    getattr(staff, "id", None),
+                    err,
+                )
     org = await db.get(BookingOrg, b.org_id)
     allowed, reason = can_change_or_cancel_online(org, b) if org else (False, "no_org")
     return {

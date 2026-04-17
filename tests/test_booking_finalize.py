@@ -18,6 +18,7 @@ from app.booking.router import (
     _release_unsynced_orphan_bookings,
     _sync_booking_to_staff_calendar,
 )
+from app.booking.router import manage_info
 from app.booking.email_booking import build_booking_confirmation_email_body
 from app.config import get_settings
 from app.security.crypto import encrypt_secret
@@ -200,6 +201,74 @@ def test_link_availability_checks_missing_google_events_on_open(monkeypatch) -> 
     assert captured["range_start"] is not None
     assert captured["range_end"] is not None
     assert db.committed is True
+
+
+def test_link_availability_cache_hit_still_checks_missing_google_events(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    booking_router._PUBLIC_AVAILABILITY_CACHE.clear()
+    captured: dict[str, object] = {}
+    org = BookingOrg(id=1, name="Test Org", slug="test-org", availability_defaults_json={})
+    link = PublicBookingLink(id=10, org_id=1, token="tok-1", title="初回相談", service_id=1, active=True)
+    service = BookingService(id=1, org_id=1, name="初回相談", duration_minutes=30)
+    staff = StaffMember(id=4, org_id=1, name="担当A", email="a@example.com", google_refresh_token="refresh")
+
+    class DummyDb:
+        def __init__(self) -> None:
+            self.committed = False
+
+        async def scalar(self, _query):
+            return link
+
+        async def get(self, model, _id):
+            if model is BookingOrg:
+                return org
+            if model is BookingService:
+                return service
+            return None
+
+        async def commit(self):
+            self.committed = True
+
+    async def fake_release(db, settings, staff_list, range_start, range_end):
+        captured["staff_count"] = len(staff_list)
+        return 0
+
+    async def fake_resolve_valid_link_staff_ids(*args, **kwargs):
+        return [staff.id]
+
+    async def fake_eligible_staff(*args, **kwargs):
+        return [staff]
+
+    monkeypatch.setattr(booking_router, "_release_bookings_with_missing_google_events", fake_release)
+    monkeypatch.setattr(booking_router, "_resolve_valid_link_staff_ids", fake_resolve_valid_link_staff_ids)
+    monkeypatch.setattr(booking_router, "eligible_staff", fake_eligible_staff)
+
+    now = datetime.now(timezone.utc)
+    booking_router._set_cached_public_availability(
+        "tok-1",
+        now,
+        now + timedelta(days=7),
+        1,
+        {"slots": [], "busy_intervals": [], "blocked_dates": [], "cached": False},
+        settings,
+    )
+    db = DummyDb()
+    body = asyncio.run(
+        booking_router.link_availability(
+            "tok-1",
+            db,
+            settings,
+            now,
+            now + timedelta(days=7),
+            1,
+        )
+    )
+
+    assert body["cached"] is True
+    assert captured["staff_count"] == 1
+    assert db.committed is False
 
 
 def test_db_busy_intervals_ignore_pending_for_auto_confirm_org(client) -> None:
@@ -780,6 +849,60 @@ def test_delete_staff_calendar_event_clears_google_event_id(monkeypatch) -> None
 
     assert deleted is True
     assert captured["event_id"] == "evt-123"
+    assert booking.google_event_id is None
+
+
+def test_manage_info_cancels_when_google_event_missing(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    staff = StaffMember(
+        id=4,
+        org_id=1,
+        name="担当A",
+        google_refresh_token=encrypt_secret("refresh-token", settings),
+        google_calendar_id="primary",
+    )
+    booking = Booking(
+        id=99,
+        org_id=1,
+        staff_id=4,
+        service_id=1,
+        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
+        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        google_event_id="evt-missing",
+        manage_token="manage-token",
+    )
+    org = BookingOrg(id=1, name="Test Org", slug="test-org", availability_defaults_json={})
+
+    class DummySession:
+        def __init__(self) -> None:
+            self.committed = False
+
+        async def scalar(self, _query):
+            return booking
+
+        async def get(self, model, _id):
+            if model is StaffMember:
+                return staff
+            if model is BookingOrg:
+                return org
+            return None
+
+        async def commit(self):
+            self.committed = True
+
+    async def fake_event_status(*args, **kwargs):
+        return False, None
+
+    monkeypatch.setattr(booking_router, "get_calendar_event_status", fake_event_status)
+
+    body = asyncio.run(manage_info("manage-token", DummySession(), settings))
+
+    assert body["booking"]["status"] == "cancelled"
     assert booking.google_event_id is None
 
 
