@@ -1925,6 +1925,23 @@ async def admin_org_summary(
         else []
     )
     base = settings.public_base_url_value()
+    service_map = {int(s.id): s for s in services}
+    if include_staff:
+        active_staff_ids = {int(s.id) for s in staff if bool(getattr(s, "active", True))}
+    elif include_links:
+        active_staff_ids = {
+            int(x)
+            for x in (
+                await db.scalars(
+                    select(StaffMember.id).where(
+                        StaffMember.org_id == org.id,
+                        StaffMember.active.is_(True),
+                    )
+                )
+            ).all()
+        }
+    else:
+        active_staff_ids = set()
     counts: dict[str, int] = {}
     if include_counts:
         counts["staff"] = len(staff) if include_staff else int(
@@ -1941,29 +1958,28 @@ async def admin_org_summary(
         )
     links_payload: list[dict[str, Any]] = []
     for l in links:
-        valid_staff_ids = await _resolve_valid_link_staff_ids(
-            db,
-            org.id,
-            json_list_or_empty(l.staff_ids_json),
-        )
+        raw_staff_ids = json_list_or_empty(l.staff_ids_json)
+        seen_staff_ids: set[int] = set()
+        valid_staff_ids: list[int] = []
+        for raw in raw_staff_ids:
+            try:
+                sid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if sid in seen_staff_ids:
+                continue
+            seen_staff_ids.add(sid)
+            if not active_staff_ids or sid in active_staff_ids:
+                valid_staff_ids.append(sid)
+        svc = service_map.get(int(l.service_id)) if l.service_id is not None else None
         links_payload.append(
             {
                 "id": l.id,
                 "token": l.token,
                 "title": l.title,
                 "service_id": l.service_id,
-                "service_name": next(
-                    (s.name for s in services if s.id == l.service_id),
-                    None,
-                )
-                if l.service_id
-                else None,
-                "service_duration_minutes": next(
-                    (s.duration_minutes for s in services if s.id == l.service_id),
-                    None,
-                )
-                if l.service_id
-                else None,
+                "service_name": svc.name if svc else None,
+                "service_duration_minutes": svc.duration_minutes if svc else None,
                 "staff_ids": valid_staff_ids,
                 "staff_priority_overrides": _normalize_link_priority_overrides(
                     getattr(l, "staff_priority_overrides_json", None),
