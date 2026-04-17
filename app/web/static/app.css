@@ -1011,6 +1011,8 @@ code {
   flex: 0 0 auto;
   min-width: 4.1rem;
   min-height: 3.7rem;
+  width: auto !important;
+  max-width: none;
   padding: 0.55rem 0.65rem;
   border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 16px;
