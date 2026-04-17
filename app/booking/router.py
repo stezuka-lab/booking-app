@@ -1626,30 +1626,6 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
     b = await db.scalar(select(Booking).where(Booking.manage_token == manage_token))
     if not b:
         raise HTTPException(404, "not found")
-    if b.status == "confirmed" and (b.google_event_id or "").strip() and b.staff_id:
-        staff = await db.get(StaffMember, b.staff_id)
-        if staff:
-            exists, err = await get_calendar_event_status(
-                _staff_google_refresh_token(staff, settings),
-                staff.google_calendar_id,
-                (b.google_event_id or "").strip(),
-                settings,
-            )
-            if exists is False:
-                b.status = "cancelled"
-                b.cancelled_at = datetime.now(timezone.utc)
-                b.google_event_id = None
-                b.google_calendar_synced_at = None
-                b.google_calendar_sync_error = "Googleカレンダー上で予定が削除されたため自動で解放しました"
-                await db.commit()
-                _clear_public_availability_cache()
-            elif err:
-                logger.warning(
-                    "Manage page Google event existence check failed booking_id=%s staff_id=%s err=%s",
-                    b.id,
-                    getattr(staff, "id", None),
-                    err,
-                )
     org = await db.get(BookingOrg, b.org_id)
     allowed, reason = can_change_or_cancel_online(org, b) if org else (False, "no_org")
     return {

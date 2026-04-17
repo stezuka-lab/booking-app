@@ -19,7 +19,6 @@ from app.booking.router import (
     _release_unsynced_orphan_bookings,
     _sync_booking_to_staff_calendar,
 )
-from app.booking.router import manage_info
 from app.booking.email_booking import build_booking_confirmation_email_body
 from app.config import get_settings
 from app.security.crypto import encrypt_secret
@@ -881,60 +880,6 @@ def test_delete_staff_calendar_event_clears_google_event_id(monkeypatch) -> None
 
     assert deleted is True
     assert captured["event_id"] == "evt-123"
-    assert booking.google_event_id is None
-
-
-def test_manage_info_cancels_when_google_event_missing(monkeypatch) -> None:
-    import app.booking.router as booking_router
-
-    settings = get_settings()
-    staff = StaffMember(
-        id=4,
-        org_id=1,
-        name="担当A",
-        google_refresh_token=encrypt_secret("refresh-token", settings),
-        google_calendar_id="primary",
-    )
-    booking = Booking(
-        id=99,
-        org_id=1,
-        staff_id=4,
-        service_id=1,
-        start_utc=datetime(2030, 1, 1, 1, 0, tzinfo=timezone.utc),
-        end_utc=datetime(2030, 1, 1, 2, 0, tzinfo=timezone.utc),
-        status="confirmed",
-        customer_name="Customer",
-        customer_email="customer@example.com",
-        google_event_id="evt-missing",
-        manage_token="manage-token",
-    )
-    org = BookingOrg(id=1, name="Test Org", slug="test-org", availability_defaults_json={})
-
-    class DummySession:
-        def __init__(self) -> None:
-            self.committed = False
-
-        async def scalar(self, _query):
-            return booking
-
-        async def get(self, model, _id):
-            if model is StaffMember:
-                return staff
-            if model is BookingOrg:
-                return org
-            return None
-
-        async def commit(self):
-            self.committed = True
-
-    async def fake_event_status(*args, **kwargs):
-        return False, None
-
-    monkeypatch.setattr(booking_router, "get_calendar_event_status", fake_event_status)
-
-    body = asyncio.run(manage_info("manage-token", DummySession(), settings))
-
-    assert body["booking"]["status"] == "cancelled"
     assert booking.google_event_id is None
 
 
