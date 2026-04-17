@@ -57,7 +57,6 @@ from app.booking.routing_service import (
     blocked_iso_dates_in_range_for_link,
     link_lead_blocked_dates,
     booking_conflict_detail_json,
-    busy_intervals_union_for_link,
     db_booking_busy_intervals_for_staff,
     eligible_staff,
     fallback_open_hour_slots_for_link,
@@ -824,16 +823,23 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
     org = await db.get(BookingOrg, link.org_id)
     if not org:
         raise HTTPException(404, "org missing")
-    services = []
+    initial_service: dict[str, Any] | None = None
     if link.service_id is None:
-        services = (
-            await db.scalars(
-                select(BookingService).where(
-                    BookingService.org_id == org.id,
-                    BookingService.active.is_(True),
-                )
+        initial_service_row = await db.scalar(
+            select(BookingService)
+            .where(
+                BookingService.org_id == org.id,
+                BookingService.active.is_(True),
             )
-        ).all()
+            .order_by(BookingService.id.asc())
+            .limit(1)
+        )
+        if initial_service_row:
+            initial_service = {
+                "id": initial_service_row.id,
+                "name": initial_service_row.name,
+                "duration_minutes": initial_service_row.duration_minutes,
+            }
     form = await db.scalar(
         select(BookingFormDefinition).where(
             BookingFormDefinition.org_id == org.id,
@@ -854,14 +860,12 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
             "duration_minutes": fs.duration_minutes,
         }
     return {
-        "org": {"name": org.name, "slug": org.slug, "routing_mode": org.routing_mode, "auto_confirm": org.auto_confirm},
-        "services": [{"id": s.id, "name": s.name, "duration_minutes": s.duration_minutes} for s in services],
         "fixed_service": fixed_service,
+        "initial_service": initial_service,
         "form_fields": json_list_or_empty(form.fields_json) if form else [],
         "ga4_measurement_id": org.ga4_measurement_id,
         "link": {
             "title": link.title,
-            "campaign_name": link.title,
             "service_id": link.service_id,
             "buffer_minutes": link_buffer_minutes(link, org, settings),
             "max_advance_booking_days": link_max_advance_booking_days(link, org),
@@ -870,15 +874,6 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
             "post_booking_message": getattr(link, "post_booking_message", None) or "",
         },
         "availability_defaults": json_object_or_empty(org.availability_defaults_json),
-        "go_google_calendar": {
-            "client_id": (settings.google_oauth_client_id or "").strip(),
-            "enabled": bool((settings.google_oauth_client_id or "").strip()),
-            "gsi_setup_note_ja": (
-                "Google Cloud Console → 認証情報 → OAuth クライアント（ウェブアプリケーション）で、"
-                "「承認済みの JavaScript 生成元」に、この予約ページを開いている URL のオリジン（例: https://example.com）を追加してください。"
-                " redirect_uri_mismatch は多くの場合この未設定です。"
-            ),
-        },
     }
 
 
@@ -958,16 +953,6 @@ async def link_availability(
             logger.exception("Public link Google busy load failed: token=%s org_id=%s", token, org.id)
             gmap = {}
             google_busy_errors = {}
-        reconcile = await _reconcile_staff_calendar_blocks(
-            db,
-            settings,
-            staff_list,
-            fts,
-            tts,
-            google_busy_map=gmap,
-            google_busy_errors=google_busy_errors,
-        )
-        released_count = int(reconcile.get("released_total") or 0)
         db_busy_map = await _db_booking_intervals_map_for_staff(
             db,
             [int(s.id) for s in staff_list],
@@ -993,45 +978,6 @@ async def link_availability(
             max_advance_days_override=link_max_adv_days,
             bookable_until_date_override=link_cutoff_date,
         )
-        busy_union_failed = False
-        busy_union_error_message = None
-        try:
-            busy_union = await busy_intervals_union_for_link(
-                db,
-                staff_list,
-                from_ts,
-                to_ts,
-                gmap,
-                db_busy_map=db_busy_map,
-            )
-        except Exception as exc:
-            busy_union_failed = True
-            busy_union_error_message = (str(exc).strip() or exc.__class__.__name__)[:500]
-            logger.exception("Public link busy union failed: token=%s org_id=%s", token, org.id)
-            busy_union = []
-        google_busy_count = 0
-        db_busy_count = sum(len(v) for v in db_busy_map.values())
-        db_busy_details: list[dict[str, Any]] = []
-        try:
-            for s in staff_list:
-                google_busy_count += len(gmap.get(s.id) or [])
-            db_busy_details = await _debug_db_busy_booking_details(db, staff_ids, fts, tts)
-        except Exception:
-            logger.exception("Public link busy source diagnostics failed: token=%s org_id=%s", token, org.id)
-        availability_debug = {
-            "gmap_failed": gmap_failed,
-            "google_busy_failed_staff_count": len(google_busy_errors),
-            "busy_union_failed": busy_union_failed,
-            "busy_union_error_message": busy_union_error_message,
-            "had_slot_errors": had_slot_errors,
-            "slot_error_message": slot_error_message,
-            "linked_staff_ids": sorted(linked_staff_ids),
-            "effective_staff_ids": [int(getattr(s, "id")) for s in staff_list],
-            "released_missing_google_events": released_count,
-            "google_busy_count": google_busy_count,
-            "db_busy_count": db_busy_count,
-            "db_busy_details": db_busy_details,
-        }
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
         allow_open_hours_fallback = False
@@ -1039,9 +985,9 @@ async def link_availability(
         if (
             not slots
             and staff_list
-            and not busy_union
+            and not gmap
             and allow_open_hours_fallback
-            and (gmap_failed or busy_union_failed or had_slot_errors)
+            and (gmap_failed or had_slot_errors)
         ):
             fallback_slots, fallback_step = fallback_open_hour_slots_for_link(
                 org,
@@ -1065,13 +1011,11 @@ async def link_availability(
         if unlinked_fallback:
             slots = []
             availability_error = "担当者の Google カレンダー連携が未完了のため、予約受付を停止しています。管理画面から各担当のカレンダー連携を完了してください。"
-        if not slots and linked_staff_ids and (gmap_failed or busy_union_failed or had_slot_errors):
+        if not slots and linked_staff_ids and (gmap_failed or had_slot_errors):
             availability_error = "Google カレンダーの予定を確認できませんでした。担当のカレンダー認証または連携状態を確認してください。"
         response_payload = {
             "slots": slots,
-            "busy_intervals": [
-                {"start_utc": a.isoformat(), "end_utc": b.isoformat()} for a, b in busy_union
-            ],
+            "busy_intervals": [],
             "blocked_dates": blocked_dates,
             "slot_minutes": slot_generation_step,
             "service_duration_minutes": duration_min,
@@ -1095,7 +1039,7 @@ async def link_availability(
                     if google_busy_errors and staff_list
                     else
                     "Google カレンダーの予定を確認できませんでした。担当のカレンダー認証または連携状態を確認してください。"
-                    if linked_staff_ids and (gmap_failed or busy_union_failed or had_slot_errors) and not slots
+                    if linked_staff_ids and (gmap_failed or had_slot_errors) and not slots
                     else
                     "カレンダーの空き情報を安全に読み切れなかったため、受付時間ベースの候補枠を表示しています。予約確定時に最終確認します。"
                     if fallback_open_hours_used
@@ -1105,7 +1049,6 @@ async def link_availability(
                     else None
                 ),
             },
-            "availability_debug": availability_debug,
         }
         _store_cached_public_availability(token, from_ts, to_ts, service_id, response_payload, settings)
         response_payload["cached"] = False
@@ -1134,16 +1077,6 @@ async def link_availability(
                 "google_linked_staff_count": 0,
                 "unlinked_fallback_active": False,
                 "warning_ja": None,
-            },
-            "availability_debug": {
-                "gmap_failed": True,
-                "google_busy_failed_staff_count": 0,
-                "busy_union_failed": False,
-                "busy_union_error_message": None,
-                "had_slot_errors": False,
-                "slot_error_message": "availability_exception",
-                "linked_staff_ids": [],
-                "effective_staff_ids": [],
             },
         }
         _store_cached_public_availability(token, from_ts, to_ts, service_id, response_payload, settings)

@@ -26,14 +26,14 @@
         </div>
       </aside>
       <div class="booking-calendar-main">
-        <div id="booking-date-strip" class="booking-date-strip" aria-label="表示開始日を選択"></div>
-        <div class="gcal-toolbar booking-cal-toolbar">
+        <div class="booking-cal-topline">
           <button type="button" class="btn gcal-today" id="booking-cal-today">本日</button>
-          <div class="gcal-nav">
-            <button type="button" class="btn secondary gcal-arrow" id="booking-cal-prev" aria-label="前の週">‹</button>
-            <button type="button" class="btn secondary gcal-arrow" id="booking-cal-next" aria-label="次の週">›</button>
+          <div class="booking-date-strip-wrap">
+            <button type="button" class="btn secondary gcal-arrow booking-strip-arrow" id="booking-cal-prev" aria-label="前の週">‹</button>
+            <div id="booking-date-strip" class="booking-date-strip" aria-label="表示開始日を選択"></div>
+            <button type="button" class="btn secondary gcal-arrow booking-strip-arrow" id="booking-cal-next" aria-label="次の週">›</button>
           </div>
-          <span class="gcal-title" id="booking-cal-range-label"></span>
+          <span class="gcal-title booking-cal-range-label-hidden" id="booking-cal-range-label" hidden></span>
         </div>
         <div class="gcal-wrap booking-cal-wrap" id="booking-cal-wrap">
           <p id="slots-loading" class="loading-text">読み込み中…</p>
@@ -115,6 +115,9 @@
   let lastAvailabilityRange = null;
   let fixedServiceId = null;
   let linkDisabled = false;
+  let availabilityRequestController = null;
+  let lastLoadedAvailabilityKey = '';
+  const availabilityCache = new Map();
   const HOUR_PX = 40;
   const fmtSlot = new Intl.DateTimeFormat('ja-JP', {
     weekday: 'short',
@@ -565,12 +568,12 @@
       if (isSameDate(day, rangeStart)) btn.classList.add('is-active');
       if (isSameDate(day, new Date())) btn.classList.add('is-today');
       btn.innerHTML =
-        '<span class="booking-date-pill__dow">' +
-        new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(day) +
-        '</span><span class="booking-date-pill__date">' +
+        '<span class="booking-date-pill__date">' +
         (day.getMonth() + 1) +
         '/' +
         day.getDate() +
+        '</span><span class="booking-date-pill__dow">' +
+        new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(day) +
         '</span>';
       btn.addEventListener('click', function () {
         cursorDate = startOfLocalDay(day);
@@ -649,8 +652,6 @@
       days.push(dd);
     }
     renderDateStrip(weekStart);
-    document.getElementById('booking-cal-range-label').textContent =
-      fmtRangeLabel.format(days[0]) + ' 〜 ' + fmtRangeLabel.format(days[6]);
     renderSlotsSidebar(days, slots);
     const nothing = !slots.length;
     empty.hidden = !nothing;
@@ -673,10 +674,10 @@
       c.className = 'gcal-head-daycell';
       if (isSameDate(d, new Date())) c.classList.add('is-today');
       c.innerHTML =
-        '<span class="gcal-dow">' +
-        new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(d) +
-        '</span><span class="gcal-dom">' +
+        '<span class="gcal-dom">' +
         d.getDate() +
+        '</span><span class="gcal-dow">' +
+        new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(d) +
         '</span>';
       headW.appendChild(c);
     });
@@ -787,7 +788,6 @@
       fixedServiceId = firstService.id;
     }
     renderExtraFields(m.form_fields || []);
-    loadSlots();
   }
 
   async function loadSlots() {
@@ -807,7 +807,7 @@
     if (!Number.isFinite(svcId) && window.__BOOKING_LINK_SERVICE_ID__ != null) {
       svcId = window.__BOOKING_LINK_SERVICE_ID__;
     }
-    if (!cursorDate) cursorDate = startOfWeekSunday(new Date());
+    if (!cursorDate) cursorDate = startOfLocalDay(new Date());
     const from = startOfLocalDay(cursorDate);
     const to = new Date(from);
     to.setDate(to.getDate() + 7);
@@ -853,20 +853,114 @@
     renderCalendar();
   }
 
+  loadSlots = async function (forceRefresh) {
+    const loading = document.getElementById('slots-loading');
+    const grid = document.getElementById('booking-cal-grid');
+    const empty = document.getElementById('slots-empty');
+    loading.hidden = false;
+    grid.hidden = true;
+    empty.hidden = true;
+    loading.textContent = '読み込み中…';
+
+    if (linkDisabled) {
+      setLinkDisabledState('現在この予約リンクは予約を受け付けていません。');
+      return;
+    }
+
+    let svcId = fixedServiceId;
+    if (!Number.isFinite(svcId) && window.__BOOKING_LINK_SERVICE_ID__ != null) {
+      svcId = window.__BOOKING_LINK_SERVICE_ID__;
+    }
+    if (!cursorDate) cursorDate = startOfLocalDay(new Date());
+    const from = startOfLocalDay(cursorDate);
+    const to = new Date(from);
+    to.setDate(to.getDate() + 7);
+    to.setMilliseconds(-1);
+    const cacheKey = [from.toISOString(), to.toISOString(), Number.isFinite(svcId) ? String(svcId) : 'none'].join('|');
+
+    if (!forceRefresh && availabilityCache.has(cacheKey)) {
+      lastAvail = availabilityCache.get(cacheKey);
+      lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
+      loading.hidden = true;
+      const cachedMsg = document.getElementById('page-msg');
+      if (cachedMsg) cachedMsg.textContent = lastAvail.availability_error || '';
+      renderCalendar();
+      return;
+    }
+
+    if (availabilityRequestController) {
+      availabilityRequestController.abort();
+    }
+    availabilityRequestController = new AbortController();
+    lastLoadedAvailabilityKey = cacheKey;
+
+    const q = new URLSearchParams({ from_ts: from.toISOString(), to_ts: to.toISOString() });
+    if (Number.isFinite(svcId)) q.set('service_id', String(svcId));
+
+    let response;
+    let rawText = '';
+    try {
+      response = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/availability?' + q, {
+        signal: availabilityRequestController.signal,
+      });
+      rawText = await response.text();
+    } catch (e) {
+      if (e && e.name === 'AbortError') return;
+      loading.hidden = false;
+      loading.textContent = '読み込みに失敗しました。時間をおいて再度お試しください。';
+      grid.hidden = true;
+      empty.hidden = true;
+      return;
+    }
+
+    let payload = {};
+    try {
+      payload = rawText ? JSON.parse(rawText) : {};
+    } catch (e) {
+      payload = {};
+    }
+    if (!response.ok) {
+      loading.hidden = false;
+      let detail =
+        (payload.detail && (typeof payload.detail === 'string' ? payload.detail : JSON.stringify(payload.detail))) || '';
+      if (!detail && rawText && rawText.length < 300) {
+        detail = rawText;
+      }
+      if (response.status === 403) {
+        setLinkDisabledState(detail || '現在この予約リンクは予約を受け付けていません。');
+        return;
+      }
+      loading.textContent =
+        (detail || '空き時間の取得に失敗しました。') + (response.status ? ' (HTTP ' + response.status + ')' : '');
+      grid.hidden = true;
+      empty.hidden = true;
+      return;
+    }
+    if (lastLoadedAvailabilityKey !== cacheKey) return;
+
+    loading.hidden = true;
+    lastAvail = payload;
+    lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
+    availabilityCache.set(cacheKey, payload);
+    const pageMsg = document.getElementById('page-msg');
+    if (pageMsg) pageMsg.textContent = payload.availability_error || '';
+    renderCalendar();
+  };
+
   document.getElementById('booking-cal-prev').addEventListener('click', function () {
-    const d = startOfWeekSunday(cursorDate || new Date());
+    const d = startOfLocalDay(cursorDate || new Date());
     d.setDate(d.getDate() - 7);
     cursorDate = d;
     loadSlots();
   });
   document.getElementById('booking-cal-next').addEventListener('click', function () {
-    const d = startOfWeekSunday(cursorDate || new Date());
+    const d = startOfLocalDay(cursorDate || new Date());
     d.setDate(d.getDate() + 7);
     cursorDate = d;
     loadSlots();
   });
   document.getElementById('booking-cal-today').addEventListener('click', function () {
-    cursorDate = startOfWeekSunday(new Date());
+    cursorDate = startOfLocalDay(new Date());
     loadSlots();
   });
 
@@ -964,7 +1058,7 @@
     successDialogEl.close();
   });
 
-  loadMeta().catch(function (e) {
+  Promise.all([loadMeta(), loadSlots()]).catch(function (e) {
     document.getElementById('page-msg').textContent = String(e);
     document.getElementById('slots-loading').textContent = '読み込みに失敗しました';
   });

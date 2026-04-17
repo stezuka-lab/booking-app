@@ -896,7 +896,7 @@ code {
 
 .booking-scheduler-layout {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr);
+  grid-template-columns: 250px minmax(0, 1fr);
   gap: 0.9rem;
   align-items: start;
 }
@@ -991,14 +991,29 @@ code {
   min-width: 0;
 }
 
+.booking-cal-topline {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  margin-bottom: 0.7rem;
+}
+
+.booking-date-strip-wrap {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.45rem;
+  align-items: center;
+}
+
 .booking-date-strip {
   display: flex;
   gap: 0.45rem;
-  margin-bottom: 0.7rem;
   overflow-x: auto;
-  padding: 0.05rem 0 0.2rem;
+  padding: 0.05rem 0;
   scrollbar-width: none;
-  min-height: 4rem;
+  min-height: 0;
   align-items: stretch;
 }
 
@@ -1009,13 +1024,13 @@ code {
 
 .booking-date-pill {
   flex: 0 0 auto;
-  min-width: 4.1rem;
-  min-height: 3.7rem;
+  min-width: 4.7rem;
+  min-height: 0;
   width: auto !important;
   max-width: none;
-  padding: 0.55rem 0.65rem;
+  padding: 0.55rem 0.7rem;
   border: 1px solid rgba(148, 163, 184, 0.24);
-  border-radius: 16px;
+  border-radius: 14px;
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.96));
   color: #475569;
   text-align: center;
@@ -1037,17 +1052,27 @@ code {
   box-shadow: 0 0 0 2px rgba(37, 99, 235, 0.08);
 }
 
-.booking-date-pill__dow,
-.booking-date-pill__date {
-  display: block;
-  font-size: 0.8rem;
+.booking-date-pill__date,
+.booking-date-pill__dow {
+  display: inline-block;
+  font-size: 0.82rem;
   font-weight: 700;
-  line-height: 1.25;
+  line-height: 1.2;
+  vertical-align: middle;
+}
+.booking-date-pill__date {
+  font-size: 0.92rem;
+  margin-right: 0.22rem;
 }
 
-.booking-date-pill__date {
-  margin-top: 0.2rem;
-  font-size: 0.92rem;
+.booking-strip-arrow {
+  width: 2.8rem;
+  min-width: 2.8rem;
+  padding-inline: 0;
+}
+
+.booking-cal-range-label-hidden {
+  display: none !important;
 }
 
 .booking-cal-toolbar {
@@ -1205,6 +1230,27 @@ code {
 
 .booking-cal-wrap .gcal-body-week {
   grid-template-columns: 44px repeat(7, minmax(74px, 1fr));
+}
+
+.booking-cal-wrap .gcal-head-daycell {
+  padding: 0.45rem 0.2rem;
+}
+
+.booking-cal-wrap .gcal-dom,
+.booking-cal-wrap .gcal-dow {
+  display: inline-block;
+  line-height: 1.1;
+  vertical-align: middle;
+}
+
+.booking-cal-wrap .gcal-dom {
+  margin-right: 0.22rem;
+  font-size: 0.96rem;
+}
+
+.booking-cal-wrap .gcal-dow {
+  font-size: 0.78rem;
+  color: #64748b;
 }
 
 .gcal-rail-closing {
@@ -1527,6 +1573,15 @@ code {
 @media (max-width: 900px) {
   .booking-scheduler-layout {
     grid-template-columns: 1fr;
+  }
+
+  .booking-cal-topline {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .booking-date-strip-wrap {
+    grid-template-columns: auto minmax(0, 1fr) auto;
   }
 
   .booking-slot-sidebar__list {
