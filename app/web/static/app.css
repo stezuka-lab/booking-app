@@ -1629,6 +1629,89 @@ body {
   margin-top: 1.25rem;
 }
 
+.setup-flow {
+  display: grid;
+  gap: 1rem;
+  margin: 0 0 1.75rem;
+}
+
+@media (min-width: 860px) {
+  .setup-flow {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+.setup-flow-card {
+  display: flex;
+  gap: 0.9rem;
+  align-items: flex-start;
+  padding: 1.2rem 1.2rem 1.25rem;
+  border-radius: 22px;
+  background: linear-gradient(180deg, rgba(255, 252, 247, 0.96), rgba(249, 244, 236, 0.88));
+  border: 1px solid var(--border);
+  box-shadow: var(--shadow);
+  color: inherit;
+  text-decoration: none;
+  transition: transform 0.18s ease, box-shadow 0.18s ease, border-color 0.18s ease;
+}
+
+.setup-flow-card:hover {
+  transform: translateY(-2px);
+  border-color: rgba(31, 95, 82, 0.24);
+  box-shadow: 0 18px 36px rgba(31, 95, 82, 0.12);
+}
+
+.setup-flow-card--final {
+  background: linear-gradient(180deg, rgba(245, 250, 247, 0.98), rgba(237, 246, 241, 0.9));
+}
+
+.setup-flow-no {
+  width: 2.35rem;
+  height: 2.35rem;
+  flex: 0 0 2.35rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: #1f5f52;
+  color: #fff;
+  font-size: 1rem;
+  font-weight: 800;
+  line-height: 1;
+  box-shadow: 0 10px 22px rgba(31, 95, 82, 0.22);
+}
+
+.setup-flow-body {
+  min-width: 0;
+}
+
+.setup-flow-body h2 {
+  margin: 0 0 0.45rem;
+  font-size: 1.45rem;
+  line-height: 1.2;
+  color: #1f2937;
+}
+
+.setup-flow-body p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.7;
+}
+
+.setup-flow-action,
+.setup-flow-note {
+  display: inline-flex;
+  margin-top: 0.85rem;
+  font-size: 0.92rem;
+  font-weight: 700;
+  color: #1f5f52;
+}
+
+.setup-flow-action::after {
+  content: "→";
+  margin-left: 0.35rem;
+}
+
 .quick-steps {
   display: grid;
   gap: 0.85rem;
