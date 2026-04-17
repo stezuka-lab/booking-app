@@ -653,10 +653,17 @@ async def pick_staff_for_slot(
     google_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     merged_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
+    staff_list_override: list[StaffMember] | None = None,
     dry_run: bool = False,
 ) -> StaffMember | None:
     """担当のうち、この枠が Google+DB 的に取れる人を列挙し、優先度またはラウンドロビンで1名を返す。"""
-    staff_list = await eligible_staff(session, org, link_staff_ids, service, settings)
+    staff_list = list(staff_list_override) if staff_list_override is not None else await eligible_staff(
+        session,
+        org,
+        link_staff_ids,
+        service,
+        settings,
+    )
     if not staff_list:
         return None
     buf_min = (
@@ -878,14 +885,15 @@ async def available_slots_for_link(
                         service,
                         cur_u,
                         seg_u,
-                        settings,
-                        link_priority_overrides=link_priority_overrides,
-                        buffer_minutes_override=buffer_minutes_override,
-                        google_busy_map=gmap,
-                        db_busy_map=db_busy_map,
-                        merged_busy_map=merged_busy_map,
-                        dry_run=True,
-                    )
+                    settings,
+                    link_priority_overrides=link_priority_overrides,
+                    buffer_minutes_override=buffer_minutes_override,
+                    google_busy_map=gmap,
+                    db_busy_map=db_busy_map,
+                    merged_busy_map=merged_busy_map,
+                    staff_list_override=staff_list,
+                    dry_run=True,
+                )
                 except Exception as exc:
                     had_slot_errors = True
                     if slot_error_message is None:
