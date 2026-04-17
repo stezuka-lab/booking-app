@@ -205,6 +205,17 @@ def _clear_public_availability_cache(token: str | None = None) -> None:
         _PUBLIC_AVAILABILITY_CACHE.pop(key, None)
 
 
+async def _clear_public_availability_cache_for_org(db: AsyncSession, org_id: int) -> None:
+    rows = await db.scalars(
+        select(PublicBookingLink.token).where(PublicBookingLink.org_id == org_id)
+    )
+    tokens = [str(token).strip() for token in rows.all() if str(token).strip()]
+    if not tokens:
+        return
+    for token in tokens:
+        _clear_public_availability_cache(token)
+
+
 async def _reconcile_staff_calendar_blocks(
     db: AsyncSession,
     settings: Settings,
@@ -888,17 +899,6 @@ async def link_availability(
 ) -> dict[str, Any]:
     req_started = time_module.monotonic()
     cached_payload = _get_cached_public_availability(token, from_ts, to_ts, service_id, settings)
-    if cached_payload is not None:
-        logger.info(
-            "booking.availability cache_hit token=%s service_id=%s from=%s to=%s total_ms=%s",
-            token,
-            service_id,
-            from_ts.isoformat(),
-            to_ts.isoformat(),
-            round((time_module.monotonic() - req_started) * 1000, 1),
-        )
-        cached_payload["cached"] = True
-        return cached_payload
     link = await db.scalar(select(PublicBookingLink).where(PublicBookingLink.token == token))
     if not link:
         raise HTTPException(404, "link not found")
@@ -947,6 +947,18 @@ async def link_availability(
             if released_missing:
                 await db.commit()
                 _invalidate_public_availability_cache(token)
+        if cached_payload is not None and not released_missing:
+            logger.info(
+                "booking.availability cache_hit token=%s service_id=%s from=%s to=%s released_missing=%s total_ms=%s",
+                token,
+                service_id,
+                from_ts.isoformat(),
+                to_ts.isoformat(),
+                released_missing,
+                round((time_module.monotonic() - req_started) * 1000, 1),
+            )
+            cached_payload["cached"] = True
+            return cached_payload
         linked_staff_ids = {
             s.id for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip()
         }
@@ -1795,6 +1807,7 @@ async def admin_patch_org(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(400, "この slug は既に使われています")
+    await _clear_public_availability_cache_for_org(db, org.id)
     return {"ok": True, "slug": org.slug, "name": org.name}
 
 
