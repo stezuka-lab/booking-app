@@ -935,6 +935,18 @@ async def link_availability(
         fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
         resolve_ms = (time_module.monotonic() - resolve_started) * 1000
+        released_missing = 0
+        if staff_list:
+            released_missing = await _release_bookings_with_missing_google_events(
+                db,
+                settings,
+                staff_list,
+                fts,
+                tts + AVAILABILITY_RANGE_END_SLACK,
+            )
+            if released_missing:
+                await db.commit()
+                _invalidate_public_availability_cache(token)
         linked_staff_ids = {
             s.id for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip()
         }
@@ -1068,13 +1080,14 @@ async def link_availability(
             },
         }
         logger.info(
-            "booking.availability token=%s service_id=%s staff_total=%s linked_staff=%s slots=%s "
+            "booking.availability token=%s service_id=%s staff_total=%s linked_staff=%s slots=%s released_missing=%s "
             "resolve_ms=%s google_busy_ms=%s db_busy_ms=%s slots_ms=%s total_ms=%s gmap_failed=%s slot_errors=%s",
             token,
             effective_sid,
             len(staff_list),
             linked_n,
             len(slots),
+            released_missing,
             round(resolve_ms, 1),
             round(google_busy_ms, 1),
             round(db_busy_ms, 1),
