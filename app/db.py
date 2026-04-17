@@ -117,10 +117,23 @@ def _get_engine():
     if _engine is None:
         settings = get_settings()
         database_url, connect_args = _normalize_database_url(settings.database_url)
+        engine_kwargs: dict[str, Any] = {
+            "echo": False,
+            "connect_args": connect_args,
+        }
+        if database_url.startswith("postgresql+asyncpg://"):
+            engine_kwargs.update(
+                {
+                    "pool_size": max(1, int(settings.db_pool_size or 5)),
+                    "max_overflow": max(0, int(settings.db_max_overflow or 5)),
+                    "pool_timeout": max(1, int(settings.db_pool_timeout_sec or 30)),
+                    "pool_recycle": max(60, int(settings.db_pool_recycle_sec or 1800)),
+                    "pool_pre_ping": bool(settings.db_pool_pre_ping),
+                }
+            )
         _engine = create_async_engine(
             database_url,
-            echo=False,
-            connect_args=connect_args,
+            **engine_kwargs,
         )
     return _engine
 

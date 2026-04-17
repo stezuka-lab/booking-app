@@ -886,8 +886,17 @@ async def link_availability(
     to_ts: datetime,
     service_id: int | None = None,
 ) -> dict[str, Any]:
+    req_started = time_module.monotonic()
     cached_payload = _get_cached_public_availability(token, from_ts, to_ts, service_id, settings)
     if cached_payload is not None:
+        logger.info(
+            "booking.availability cache_hit token=%s service_id=%s from=%s to=%s total_ms=%s",
+            token,
+            service_id,
+            from_ts.isoformat(),
+            to_ts.isoformat(),
+            round((time_module.monotonic() - req_started) * 1000, 1),
+        )
         cached_payload["cached"] = True
         return cached_payload
     link = await db.scalar(select(PublicBookingLink).where(PublicBookingLink.token == token))
@@ -912,6 +921,7 @@ async def link_availability(
         else availability_defaults_positive_int(defaults, "duration", BOOKING_SLOT_STEP_MINUTES)
     )
     try:
+        resolve_started = time_module.monotonic()
         staff_ids = await _resolve_valid_link_staff_ids(
             db,
             org.id,
@@ -924,12 +934,14 @@ async def link_availability(
         staff_list = await eligible_staff(db, org, staff_ids, service, settings)
         fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
+        resolve_ms = (time_module.monotonic() - resolve_started) * 1000
         linked_staff_ids = {
             s.id for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip()
         }
         _gpad = timedelta(minutes=max(0, buf_min))
         gmap_failed = False
         google_busy_errors: dict[int, str] = {}
+        google_busy_started = time_module.monotonic()
         try:
             gmap, google_busy_errors = _coerce_google_busy_result(
                 await _load_google_busy_map(
@@ -953,13 +965,17 @@ async def link_availability(
             logger.exception("Public link Google busy load failed: token=%s org_id=%s", token, org.id)
             gmap = {}
             google_busy_errors = {}
+        google_busy_ms = (time_module.monotonic() - google_busy_started) * 1000
+        db_busy_started = time_module.monotonic()
         db_busy_map = await _db_booking_intervals_map_for_staff(
             db,
             [int(s.id) for s in staff_list],
             fts,
             tts + AVAILABILITY_RANGE_END_SLACK,
         )
+        db_busy_ms = (time_module.monotonic() - db_busy_started) * 1000
         lead_blocked = link_lead_blocked_dates(org, link)
+        slot_started = time_module.monotonic()
         slots, slot_generation_step, had_slot_errors, slot_error_message = await available_slots_for_link(
             db,
             org,
@@ -978,6 +994,7 @@ async def link_availability(
             max_advance_days_override=link_max_adv_days,
             bookable_until_date_override=link_cutoff_date,
         )
+        slot_ms = (time_module.monotonic() - slot_started) * 1000
         oauth_on = settings.is_google_oauth_configured()
         linked_n = sum(1 for s in staff_list if (_staff_google_refresh_token(s, settings) or "").strip())
         allow_open_hours_fallback = False
@@ -1050,6 +1067,22 @@ async def link_availability(
                 ),
             },
         }
+        logger.info(
+            "booking.availability token=%s service_id=%s staff_total=%s linked_staff=%s slots=%s "
+            "resolve_ms=%s google_busy_ms=%s db_busy_ms=%s slots_ms=%s total_ms=%s gmap_failed=%s slot_errors=%s",
+            token,
+            effective_sid,
+            len(staff_list),
+            linked_n,
+            len(slots),
+            round(resolve_ms, 1),
+            round(google_busy_ms, 1),
+            round(db_busy_ms, 1),
+            round(slot_ms, 1),
+            round((time_module.monotonic() - req_started) * 1000, 1),
+            gmap_failed,
+            had_slot_errors,
+        )
         _store_cached_public_availability(token, from_ts, to_ts, service_id, response_payload, settings)
         response_payload["cached"] = False
         return response_payload

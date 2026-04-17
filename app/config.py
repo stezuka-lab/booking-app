@@ -77,8 +77,14 @@ class Settings(BaseSettings):
     password_reset_rate_limit_max_attempts: int = 5
     booking_public_rate_limit_window_sec: int = 3600
     booking_public_rate_limit_max_requests: int = 40
-    booking_public_availability_cache_sec: int = 0
+    booking_public_availability_cache_sec: int = 60
+    booking_google_busy_cache_sec: int = 60
     db_startup_maintenance_timeout_sec: int = 20
+    db_pool_size: int = 5
+    db_max_overflow: int = 5
+    db_pool_timeout_sec: int = 30
+    db_pool_recycle_sec: int = 1800
+    db_pool_pre_ping: bool = True
     api_docs_enabled: bool = True
     # DB にユーザーが 1 人もいないときだけ 1 回だけ作成（初期管理者）
     booking_bootstrap_admin_user: str = ""

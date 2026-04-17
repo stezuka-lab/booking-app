@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import time as time_module
 from datetime import date, datetime, time, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo
@@ -22,6 +23,11 @@ from app.config import Settings
 from app.security.crypto import decrypt_secret
 
 logger = logging.getLogger(__name__)
+
+_GOOGLE_BUSY_CACHE: dict[
+    tuple[int, str, str, str],
+    tuple[float, list[tuple[datetime, datetime]], str | None],
+] = {}
 
 # 予約開始時刻の既定刻み（分）。実際の刻みは min(この値, 所要時間) とし、所要より粗い刻みで枠を落とさない。
 BOOKING_SLOT_STEP_MINUTES = 30
@@ -427,12 +433,8 @@ async def eligible_staff(
         q = q.where(StaffMember.id.in_(link_staff_ids))
     rows = (await session.scalars(q)).all()
     rows = list(rows)
-    # Google OAuth が有効なときは原則、連携済み（refresh_token あり）の担当のみ。
-    # ただし誰も未連携のときに rows を空にすると予約枠が常に 0 件になる（初期導入で多発）ため、
-    # その場合だけ全員を対象に戻す（FreeBusy は未連携は [] ＝ Google 上は空き扱い）。
     if settings.is_google_oauth_configured():
-        linked = [s for s in rows if (decrypt_secret(s.google_refresh_token, settings) or "").strip()]
-        rows = linked if linked else rows
+        rows = [s for s in rows if (decrypt_secret(s.google_refresh_token, settings) or "").strip()]
     return rows
 
 
@@ -462,6 +464,7 @@ async def _load_google_busy_map(
     """担当 id ごとに必ずキーを返す。トークンが無い担当は []（未連携＝Google 上は空き扱い）。"""
     tmin = window_start.isoformat()
     tmax = window_end.isoformat()
+    ttl = max(0, int(getattr(settings, "booking_google_busy_cache_sec", 0) or 0))
 
     async def load_for_staff(
         s: StaffMember,
@@ -469,6 +472,14 @@ async def _load_google_busy_map(
         refresh_token = decrypt_secret(s.google_refresh_token, settings)
         if not refresh_token:
             return s.id, [], None
+        cache_key = (int(s.id), str(s.google_calendar_id or "primary"), tmin, tmax)
+        if ttl > 0:
+            cached = _GOOGLE_BUSY_CACHE.get(cache_key)
+            if cached:
+                expires_at, intervals, err = cached
+                if expires_at > time_module.monotonic():
+                    return s.id, list(intervals), err
+                _GOOGLE_BUSY_CACHE.pop(cache_key, None)
         try:
             intervals = await freebusy_busy_intervals(
                 refresh_token,
@@ -477,10 +488,24 @@ async def _load_google_busy_map(
                 tmax,
                 settings,
             )
-            return s.id, list(intervals) if intervals else [], None
+            materialized = list(intervals) if intervals else []
+            if ttl > 0:
+                _GOOGLE_BUSY_CACHE[cache_key] = (
+                    time_module.monotonic() + ttl,
+                    list(materialized),
+                    None,
+                )
+            return s.id, materialized, None
         except Exception as exc:
             logger.exception("Google FreeBusy failed for staff_id=%s", s.id)
-            return s.id, [], (str(exc).strip() or exc.__class__.__name__)[:500]
+            err = (str(exc).strip() or exc.__class__.__name__)[:500]
+            if ttl > 0:
+                _GOOGLE_BUSY_CACHE[cache_key] = (
+                    time_module.monotonic() + ttl,
+                    [],
+                    err,
+                )
+            return s.id, [], err
 
     pairs = await asyncio.gather(*(load_for_staff(s) for s in staff_list))
     gmap = {staff_id: intervals for staff_id, intervals, _err in pairs}

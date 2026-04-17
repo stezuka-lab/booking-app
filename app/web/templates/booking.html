@@ -27,12 +27,8 @@
       </aside>
       <div class="booking-calendar-main">
         <div class="booking-cal-topline">
-          <button type="button" class="btn gcal-today" id="booking-cal-today">本日</button>
-          <div class="booking-date-strip-wrap">
-            <button type="button" class="btn secondary gcal-arrow booking-strip-arrow" id="booking-cal-prev" aria-label="前の週">‹</button>
-            <div id="booking-date-strip" class="booking-date-strip" aria-label="表示開始日を選択"></div>
-            <button type="button" class="btn secondary gcal-arrow booking-strip-arrow" id="booking-cal-next" aria-label="次の週">›</button>
-          </div>
+          <button type="button" class="booking-date-pill booking-date-pill--today" id="booking-cal-today">本日</button>
+          <div id="booking-date-strip" class="booking-date-strip" aria-label="表示開始日を選択"></div>
           <span class="gcal-title booking-cal-range-label-hidden" id="booking-cal-range-label" hidden></span>
         </div>
         <div class="gcal-wrap booking-cal-wrap" id="booking-cal-wrap">
@@ -655,16 +651,21 @@
     renderSlotsSidebar(days, slots);
     const nothing = !slots.length;
     empty.hidden = !nothing;
-    grid.hidden = nothing;
-    if (nothing) {
-      empty.textContent = 'この週に予約可能な時間帯がありません。別の週を試してください。';
-      return;
-    }
+    grid.hidden = false;
+    if (nothing) empty.textContent = 'この週に予約可能な時間帯がありません。別の週を試してください。';
     const START_H = getGridHours().START_H;
     const END_H = getGridHours().END_H;
-    const hp = HOUR_PX;
+    const hp = 32;
     const totalHMain = (END_H - START_H) * hp;
-    const CLOSING_STRIP_PX = 36;
+    const CLOSING_STRIP_PX = 20;
+
+    const headTools = document.createElement('div');
+    headTools.className = 'booking-grid-nav';
+    headTools.innerHTML =
+      '<button type="button" class="btn secondary gcal-arrow booking-grid-nav__arrow" id="booking-grid-prev" aria-label="前の週">‹</button>' +
+      '<div class="booking-grid-nav__spacer"></div>' +
+      '<button type="button" class="btn secondary gcal-arrow booking-grid-nav__arrow" id="booking-grid-next" aria-label="次の週">›</button>';
+    grid.appendChild(headTools);
 
     const headW = document.createElement('div');
     headW.className = 'gcal-head gcal-head-week';
@@ -676,7 +677,7 @@
       c.innerHTML =
         '<span class="gcal-dom">' +
         d.getDate() +
-        '</span><span class="gcal-dow">' +
+        '</span><span class="gcal-dow gcal-dow-inline">' +
         new Intl.DateTimeFormat('ja-JP', { weekday: 'short' }).format(d) +
         '</span>';
       headW.appendChild(c);
@@ -729,6 +730,25 @@
       bodyW.appendChild(col);
     });
     grid.appendChild(bodyW);
+
+    const prevBtn = document.getElementById('booking-grid-prev');
+    const nextBtn = document.getElementById('booking-grid-next');
+    if (prevBtn) {
+      prevBtn.addEventListener('click', function () {
+        const d = startOfLocalDay(cursorDate || new Date());
+        d.setDate(d.getDate() - 7);
+        cursorDate = d;
+        loadSlots();
+      });
+    }
+    if (nextBtn) {
+      nextBtn.addEventListener('click', function () {
+        const d = startOfLocalDay(cursorDate || new Date());
+        d.setDate(d.getDate() + 7);
+        cursorDate = d;
+        loadSlots();
+      });
+    }
   }
 
   function renderCalendar() {
@@ -947,18 +967,6 @@
     renderCalendar();
   };
 
-  document.getElementById('booking-cal-prev').addEventListener('click', function () {
-    const d = startOfLocalDay(cursorDate || new Date());
-    d.setDate(d.getDate() - 7);
-    cursorDate = d;
-    loadSlots();
-  });
-  document.getElementById('booking-cal-next').addEventListener('click', function () {
-    const d = startOfLocalDay(cursorDate || new Date());
-    d.setDate(d.getDate() + 7);
-    cursorDate = d;
-    loadSlots();
-  });
   document.getElementById('booking-cal-today').addEventListener('click', function () {
     cursorDate = startOfLocalDay(new Date());
     loadSlots();
