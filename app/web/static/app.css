@@ -1098,6 +1098,7 @@ code {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.98), rgba(248, 250, 252, 0.94));
   padding: 0.35rem;
+  position: relative;
 }
 
 .booking-grid-head-row {
@@ -1120,6 +1121,15 @@ code {
   border-radius: 14px;
   overflow: hidden;
   background: #fff;
+}
+
+.booking-grid-corner {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.76rem;
+  font-weight: 700;
+  color: #64748b;
 }
 
 .booking-grid-date-btn {
@@ -1284,11 +1294,16 @@ code {
 }
 
 .booking-cal-wrap .gcal-head-week {
-  grid-template-columns: 40px repeat(7, minmax(72px, 1fr));
+  grid-template-columns: var(--booking-rail-width, 40px) repeat(7, minmax(72px, 1fr));
 }
 
 .booking-cal-wrap .gcal-body-week {
-  grid-template-columns: 40px repeat(7, minmax(72px, 1fr));
+  grid-template-columns: var(--booking-rail-width, 40px) repeat(7, minmax(72px, 1fr));
+}
+
+.booking-cal-wrap .gcal-corner,
+.booking-cal-wrap .gcal-rail {
+  width: var(--booking-rail-width, 40px);
 }
 
 .booking-cal-wrap .gcal-head-daycell {
@@ -2445,6 +2460,20 @@ body {
   margin: 0.5rem 0 0;
   color: var(--muted);
   font-size: 0.92rem;
+}
+
+.booking-cal-loading {
+  position: absolute;
+  top: 0.45rem;
+  right: 0.65rem;
+  margin: 0;
+  z-index: 3;
+  padding: 0.18rem 0.45rem;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.92);
+  border: 1px solid #e2e8f0;
+  font-size: 0.8rem;
+  box-shadow: 0 2px 8px rgba(15, 23, 42, 0.06);
 }
 
 .app-busy-indicator {

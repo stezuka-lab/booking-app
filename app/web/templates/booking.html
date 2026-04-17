@@ -33,7 +33,7 @@
           </div>
         </div>
         <div class="gcal-wrap booking-cal-wrap" id="booking-cal-wrap">
-          <p id="slots-loading" class="loading-text">読み込み中…</p>
+          <p id="slots-loading" class="loading-text booking-cal-loading">読み込み中…</p>
           <div class="cal-grid gcal-grid" id="booking-cal-grid" hidden></div>
         </div>
       </div>
@@ -662,7 +662,7 @@
 
     const headW = document.createElement('div');
     headW.className = 'gcal-head gcal-head-week booking-grid-date-row';
-    headW.innerHTML = '<div class="gcal-corner"></div>';
+    headW.innerHTML = '<div class="gcal-corner booking-grid-corner">時間</div>';
     const headCells = [];
     for (let i = 0; i < 7; i++) {
       const c = document.createElement('div');
@@ -1175,6 +1175,7 @@
     successDialogEl.close();
   });
 
+  renderLoadingCalendarFrame();
   loadMeta()
     .then(function () {
       return loadSlots();
