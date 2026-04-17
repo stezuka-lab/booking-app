@@ -5,62 +5,57 @@
 <section class="hero-home">
   <div class="hero-home-inner">
     <span class="page-kicker">ダッシュボード</span>
-    <h1>予約設定をここから進めます</h1>
-    <p class="hero-home-lead">最初にカレンダーを連携し、そのあと予約リンクを 1 つ作って、最後に公開ページで予約できるかを確認すると迷いません。</p>
+    <h1>予約受付の準備をここから進めます</h1>
+    <p class="hero-home-lead">進め方は 4 つです。カレンダーを連携し、設定を整え、予約リンクを発行し、最後に発行した予約リンクを開いて予約受付ページを確認します。</p>
     <div class="hero-home-actions">
       <a class="btn primary" href="/app/calendar">カレンダー認証を始める</a>
-      <a class="btn secondary" href="/app/campaigns">予約リンクを作る</a>
+      <a class="btn secondary" href="/app/settings">全体設定を確認する</a>
     </div>
   </div>
 </section>
 
-<section class="quick-steps">
-  <article class="quick-step">
-    <span class="quick-step-no">1</span>
-    <div>
+<section class="setup-flow">
+  <a class="setup-flow-card" href="/app/calendar">
+    <span class="setup-flow-no">1</span>
+    <div class="setup-flow-body">
       <h2>カレンダーを連携</h2>
-      <p>使う担当だけを追加して Google カレンダーを連携します。予定が入っている時間は自動で予約不可になります。</p>
+      <p>予約を受け付ける担当を追加して Google カレンダーを連携します。予定が入っている時間は自動で予約不可になります。</p>
+      <span class="setup-flow-action">カレンダー認証へ進む</span>
     </div>
-  </article>
-  <article class="quick-step">
-    <span class="quick-step-no">2</span>
-    <div>
+  </a>
+  <a class="setup-flow-card" href="/app/settings">
+    <span class="setup-flow-no">2</span>
+    <div class="setup-flow-body">
       <h2>設定を確認</h2>
-      <p>受付時間、通知、カレンダー予定の件名など、全体設定を先に整えます。</p>
+      <p>受付時間、通知、予約完了後の案内文など、全体で使う設定を整えます。</p>
+      <span class="setup-flow-action">設定を開く</span>
     </div>
-  </article>
-  <article class="quick-step">
-    <span class="quick-step-no">3</span>
-    <div>
+  </a>
+  <a class="setup-flow-card" href="/app/campaigns">
+    <span class="setup-flow-no">3</span>
+    <div class="setup-flow-body">
       <h2>予約リンクを発行</h2>
-      <p>リンク名と所要時間を入れて公開 URL を作ります。必要なら担当を選んで、その担当だけに予約を割り当てられます。</p>
+      <p>リンク名と所要時間を入れて公開 URL を作成します。必要なら担当を選び、その担当だけに予約を割り当てられます。</p>
+      <span class="setup-flow-action">予約リンクを作る</span>
+    </div>
+  </a>
+  <article class="setup-flow-card setup-flow-card--final">
+    <span class="setup-flow-no">4</span>
+    <div class="setup-flow-body">
+      <h2>発行した予約リンクを開く</h2>
+      <p>発行した公開 URL を開き、顧客が見る予約ページからそのまま予約受付を始められます。</p>
+      <span class="setup-flow-note">最後は発行済みリンクの「開く」から予約ページを確認します。</span>
     </div>
   </article>
 </section>
 
-<section class="panel admin-section">
+<section class="panel admin-section home-checklist">
   <h2 class="panel-title">この画面の進め方</h2>
-  <p class="muted panel-hint">流れは <strong>カレンダー連携 → 設定 → 予約リンク作成</strong> です。最後に発行した予約リンクを開いて、実際に予約できることを確認すれば準備完了です。</p>
-</section>
-
-<section class="feature-grid">
-  <article class="feature-card">
-    <div class="feature-card-icon feature-card-icon--adm" aria-hidden="true"></div>
-    <h2>設定</h2>
-    <p>受付時間、通知、カレンダー予定の件名など、全体設定をまとめて見直せます。</p>
-    <a class="btn primary" href="/app/settings">開く</a>
-  </article>
-  <article class="feature-card">
-    <div class="feature-card-icon feature-card-icon--book" aria-hidden="true"></div>
-    <h2>予約リンク</h2>
-    <p>顧客向けの予約ページを作る場所です。リンク名と所要時間だけで公開 URL を発行できます。</p>
-    <a class="btn secondary" href="/app/campaigns">開く</a>
-  </article>
-  <article class="feature-card">
-    <div class="feature-card-icon feature-card-icon--cal" aria-hidden="true"></div>
-    <h2>カレンダー認証</h2>
-    <p>担当の予定連携、接続状態の確認、Zoom URL の登録を行います。</p>
-    <a class="btn secondary" href="/app/calendar">開く</a>
-  </article>
+  <ul class="home-checklist-list">
+    <li>1. カレンダー認証で予約受付に使う担当を連携する</li>
+    <li>2. 設定で受付時間や案内文など全体設定を整える</li>
+    <li>3. 予約リンクで公開 URL を 1 本発行する</li>
+    <li>4. 発行した予約リンクを開いて、そのまま予約受付ページとして使う</li>
+  </ul>
 </section>
 {% endblock %}
