@@ -17,7 +17,7 @@
     <div class="booking-scheduler-layout">
       <aside class="booking-slot-sidebar">
         <div class="booking-slot-sidebar__head">
-          <p class="booking-slot-sidebar__lead">ご予約前にご確認ください。</p>
+          <p class="booking-slot-sidebar__lead" id="booking-notice-intro" hidden>ご予約前にご確認ください。</p>
           <p class="booking-slot-sidebar__title">お知らせ</p>
           <p class="booking-link-notice booking-multiline-note" id="booking-link-notice" hidden></p>
           <h2 class="booking-slot-sidebar__title">予約可能な時間帯</h2>
@@ -877,10 +877,14 @@
     const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
     document.getElementById('page-heading').textContent = lt;
     const noticeWrap = document.getElementById('booking-link-notice');
+    const noticeIntro = document.getElementById('booking-notice-intro');
     const preBookingNotice = m.link && m.link.pre_booking_notice ? m.link.pre_booking_notice : '';
     if (noticeWrap) {
       noticeWrap.hidden = !preBookingNotice;
       noticeWrap.textContent = preBookingNotice;
+    }
+    if (noticeIntro) {
+      noticeIntro.hidden = !preBookingNotice;
     }
     const ga = m.ga4_measurement_id;
     if (ga) {
