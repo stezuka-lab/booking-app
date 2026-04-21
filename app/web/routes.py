@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any
 from urllib.parse import quote
 
@@ -56,11 +57,50 @@ def _viewer_payload(user: Any) -> dict[str, Any]:
     }
 
 
+def _session_user_snapshot(request: Request) -> Any | None:
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return None
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        request.session.clear()
+        return None
+    role = (request.session.get("user_role") or "").strip()
+    username = (request.session.get("username") or "").strip()
+    if not role or not username:
+        return None
+    return SimpleNamespace(
+        id=uid,
+        username=username,
+        display_name=(request.session.get("display_name") or "").strip() or None,
+        role=role,
+        default_org_slug=(request.session.get("default_org_slug") or "").strip() or None,
+        _default_org_name=(request.session.get("default_org_name") or "").strip() or None,
+    )
+
+
+def _store_session_user_snapshot(request: Request, user: Any) -> None:
+    if not user:
+        return
+    request.session["user_id"] = getattr(user, "id", None)
+    request.session["username"] = getattr(user, "username", None) or ""
+    request.session["display_name"] = getattr(user, "display_name", None) or ""
+    request.session["user_role"] = getattr(user, "role", None) or ""
+    request.session["default_org_slug"] = getattr(user, "default_org_slug", None) or ""
+    request.session["default_org_name"] = getattr(user, "_default_org_name", None) or ""
+
+
 async def _session_user(request: Request):
+    snap = _session_user_snapshot(request)
+    if snap:
+        return snap
     factory = get_session_factory()
     async with factory() as db:
         try:
-            return await get_current_app_user(request, db)
+            user = await get_current_app_user(request, db)
+            _store_session_user_snapshot(request, user)
+            return user
         except Exception:
             logger.exception("Failed to resolve session user for path %s", getattr(request.url, "path", ""))
             request.session.clear()
@@ -68,6 +108,9 @@ async def _session_user(request: Request):
 
 
 async def _load_session_user_with_org(request: Request) -> Any:
+    snap = _session_user_snapshot(request)
+    if snap and getattr(snap, "_default_org_name", None):
+        return snap
     factory = get_session_factory()
     async with factory() as db:
         try:
@@ -87,8 +130,7 @@ async def _load_session_user_with_org(request: Request) -> Any:
             org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == user.default_org_slug))
             org_name = org.name if org else None
             setattr(user, "_default_org_name", org_name)
-            request.session["default_org_slug"] = user.default_org_slug or ""
-            request.session["default_org_name"] = org_name or ""
+            _store_session_user_snapshot(request, user)
         except Exception:
             logger.exception("Failed to resolve default org for user %s", getattr(user, "id", None))
             setattr(user, "_default_org_name", None)

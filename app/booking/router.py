@@ -55,6 +55,7 @@ from app.booking.routing_service import (
     availability_zone,
     available_slots_for_link,
     blocked_iso_dates_in_range_for_link,
+    busy_intervals_union_for_link,
     link_lead_blocked_dates,
     booking_conflict_detail_json,
     db_booking_busy_intervals_for_staff,
@@ -194,6 +195,9 @@ def _store_cached_public_availability(
         time_module.monotonic() + ttl,
         copy.deepcopy(payload),
     )
+
+
+_set_cached_public_availability = _store_cached_public_availability
 
 
 def _clear_public_availability_cache(token: str | None = None) -> None:

@@ -15,7 +15,7 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 # プレースホルダ: {service} {name} {company} {phone} {note}
-DEFAULT_CALENDAR_TITLE_TEMPLATE = "{service} — {name}"
+DEFAULT_CALENDAR_TITLE_TEMPLATE = "{service} - {name}"
 
 _MAX_TITLE_LEN = 1024
 
@@ -52,9 +52,9 @@ def format_calendar_event_title(
         out = tpl.format_map(_Default(mapping))
     except Exception:
         logger.exception("calendar_title_template format failed; fallback")
-        out = f"{mapping['service']} — {mapping['name']}"
+        out = f"{mapping['service']} - {mapping['name']}"
 
     out = re.sub(r"\s+", " ", out.replace("\n", " ")).strip()
     if len(out) > _MAX_TITLE_LEN:
         out = out[: _MAX_TITLE_LEN - 1] + "…"
-    return out or f"{mapping['service']} — {mapping['name']}"
+    return out or f"{mapping['service']} - {mapping['name']}"

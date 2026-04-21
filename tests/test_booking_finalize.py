@@ -601,7 +601,7 @@ def test_public_availability_survives_malformed_google_busy_interval(client, mon
     assert isinstance(body.get("slots"), list)
 
 
-def test_public_availability_falls_back_to_open_hours_when_slots_empty(client, monkeypatch) -> None:
+def test_public_availability_blocks_unlinked_staff_when_slots_empty(client, monkeypatch) -> None:
     import app.booking.router as booking_router
     import app.booking.routing_service as routing_service
 
@@ -631,10 +631,10 @@ def test_public_availability_falls_back_to_open_hours_when_slots_empty(client, m
 
     assert response.status_code == 200
     body = response.json()
-    assert body.get("availability_error") in (None, "")
-    assert body.get("slots")
+    assert body.get("slots") == []
     warning = (((body.get("calendar_integration") or {}).get("warning_ja")) or "")
-    assert "受付時間ベース" in warning
+    assert body.get("availability_error") in (None, "")
+    assert warning in ("", None)
 
 
 def test_public_availability_fallback_respects_blocked_dates(client, monkeypatch) -> None:

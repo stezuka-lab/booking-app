@@ -201,6 +201,9 @@ async def login(
     clear_login_failures(request, username)
     await _repair_default_org_for_user(db, u)
     request.session["user_id"] = u.id
+    request.session["username"] = u.username or ""
+    request.session["display_name"] = u.display_name or ""
+    request.session["user_role"] = u.role or ""
     request.session["default_org_slug"] = u.default_org_slug or ""
     request.session["default_org_name"] = await _default_org_name(db, u.default_org_slug) or ""
     return {

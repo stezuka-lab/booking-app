@@ -26,7 +26,7 @@
     </p>
     <div class="admin-row">
       <div class="admin-field grow">
-        <label for="new-link-title">リンク名（予約画面の見出しにも使われます）</label>
+        <label for="new-link-title">予約タイトル（予約画面の見出しにも使われます）</label>
         <p class="muted small">顧客に見えるタイトルです。用途が分かる名前にしてください。</p>
         <input type="text" id="new-link-title" placeholder="例: 初回オンライン" />
       </div>
@@ -85,7 +85,7 @@
       <table class="admin-table">
         <thead>
           <tr>
-            <th>リンク名</th>
+            <th>予約タイトル</th>
             <th>所要</th>
             <th>担当</th>
             <th>直近ブロック</th>
@@ -144,7 +144,7 @@
     <h2 class="booking-dialog__title" id="edit-campaign-dialog-title">予約リンクを編集</h2>
     <input type="hidden" id="edit-campaign-id" />
     <div class="admin-field" style="margin-bottom: 0.75rem">
-      <label for="edit-campaign-title">リンク名</label>
+      <label for="edit-campaign-title">予約タイトル</label>
       <p class="muted small">顧客に見えるタイトルです。用途がひと目で分かる名前にします。</p>
       <input type="text" id="edit-campaign-title" class="booking-dialog__input-wide" autocomplete="off" />
     </div>
@@ -216,7 +216,7 @@
   let currentBookings = [];
   let bookingsLoaded = false;
   let bookingsLoading = false;
-  const summaryCacheTtlMs = 60000;
+  const summaryCacheTtlMs = 120000;
 
   function esc(value) {
     return String(value == null ? '' : value)

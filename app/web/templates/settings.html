@@ -123,20 +123,31 @@
         <div class="cal-title-template-box">
           <div class="cal-preset-row">
             <span class="muted small">よく使う並び:</span>
-            <button type="button" class="btn sm secondary" id="cal-tpl-preset-1" data-tpl="{service} — {name}">区分 → お名前</button>
-            <button type="button" class="btn sm secondary" id="cal-tpl-preset-2" data-tpl="{name}（{service}）">お名前 → 区分</button>
-            <button type="button" class="btn sm secondary" id="cal-tpl-preset-3" data-tpl="{company} {name} / {service}">会社名 → お名前 → 区分</button>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-1" data-tpl="{service} - {name}">予約タイトル - お名前</button>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-2" data-tpl="{name}（{service}）">お名前 → 予約タイトル</button>
+            <button type="button" class="btn sm secondary" id="cal-tpl-preset-3" data-tpl="{company} {name} / {service}">会社名 → お名前 → 予約タイトル</button>
           </div>
           <div class="cal-title-chips" role="group" aria-label="プレースホルダを挿入">
             <span class="cal-title-chip-label">追加する項目</span>
-            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{service}">区分名</button>
+            <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{service}">予約タイトル</button>
             <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{name}">お名前</button>
             <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{company}">会社名</button>
             <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{phone}">電話</button>
             <button type="button" class="btn sm secondary cal-title-insert-btn" data-token="{customer_number}">顧客番号</button>
-            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token=" — ">—</button>
+            <button type="button" class="btn sm ghost cal-title-insert-btn" data-token=" - ">-</button>
             <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="（">（</button>
             <button type="button" class="btn sm ghost cal-title-insert-btn" data-token="）">）</button>
+          </div>
+          <div class="cal-title-free-text-row">
+            <label class="cal-title-chip-label" for="cal-title-free-text">自由入力を追加</label>
+            <input
+              type="text"
+              id="cal-title-free-text"
+              class="cal-title-free-text-input"
+              placeholder="例: 様、予約、-、/ など"
+              autocomplete="off"
+            />
+            <button type="button" class="btn sm secondary" id="cal-title-add-free-text">追加</button>
           </div>
           <div class="cal-title-builder-field">
             <div class="cal-title-builder" id="cal-title-builder" aria-live="polite"></div>
@@ -145,7 +156,7 @@
             type="text"
             id="org-cal-title-template"
             class="admin-input-wide cal-title-template-input"
-            placeholder="{service} — {name}（{company}）"
+            placeholder="{service} - {name}（{company}）"
             autocomplete="off"
             spellcheck="false"
             hidden
@@ -184,7 +195,7 @@
   var patchSlug = null;
   var currentSummaryData = null;
   var ORG_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
-  const summaryCacheTtlMs = 60000;
+  const summaryCacheTtlMs = 120000;
 
   function formatApiDetail(detail) {
     if (detail == null || detail === '') return '';
@@ -355,7 +366,7 @@
 
   function tokenLabel(token) {
     return {
-      '{service}': '区分名',
+      '{service}': '予約タイトル',
       '{name}': 'お名前',
       '{company}': '会社名',
       '{phone}': '電話',
@@ -389,7 +400,7 @@
     root.innerHTML = '';
     parts.forEach(function (part, idx) {
       const labelText = part.isToken ? tokenLabel(part.raw) : part.raw.trim();
-      const isSymbol = !part.isToken && (labelText === '—' || labelText === '（' || labelText === '）');
+      const isSymbol = !part.isToken && (labelText === '-' || labelText === '（' || labelText === '）');
       const chip = document.createElement('span');
       chip.className =
         'cal-title-builder-chip' +
@@ -417,7 +428,7 @@
     const wrap = document.getElementById('org-cal-title-preview-wrap');
     const out = document.getElementById('org-cal-title-preview');
     if (!el || !wrap || !out) return;
-    const tpl = (el.value || '').trim() || '{service} — {name}';
+    const tpl = (el.value || '').trim() || '{service} - {name}';
     const sample = {
       service: '30分相談',
       name: '山田太郎',
@@ -487,7 +498,7 @@
     document.getElementById('org-cal-title-template').value =
       adv.calendar_title_template != null && String(adv.calendar_title_template).trim() !== ''
         ? String(adv.calendar_title_template)
-        : '{service} — {name}';
+        : '{service} - {name}';
     updateCalendarTitlePreview();
 
     showPanels(true);
@@ -605,7 +616,7 @@
       block_holidays: document.getElementById('org-block-holidays').checked,
       start: normalizeTimeForInput(document.getElementById('org-avail-start').value, '08:00'),
       end: normalizeTimeForInput(document.getElementById('org-avail-end').value, '22:00'),
-      calendar_title_template: tplRaw || '{service} — {name}',
+      calendar_title_template: tplRaw || '{service} - {name}',
     });
     delete merged.buffer_minutes;
     delete merged.max_advance_booking_days;
@@ -630,6 +641,27 @@
       insertCalendarTitleToken(b.getAttribute('data-token') || '');
     });
   });
+  var freeTextInput = document.getElementById('cal-title-free-text');
+  var freeTextBtn = document.getElementById('cal-title-add-free-text');
+  function addCalendarTitleFreeText() {
+    if (!freeTextInput) return;
+    const text = freeTextInput.value || '';
+    if (!text.trim()) return;
+    insertCalendarTitleToken(text);
+    freeTextInput.value = '';
+    freeTextInput.focus();
+  }
+  if (freeTextBtn) {
+    freeTextBtn.addEventListener('click', addCalendarTitleFreeText);
+  }
+  if (freeTextInput) {
+    freeTextInput.addEventListener('keydown', function (ev) {
+      if (ev.key === 'Enter') {
+        ev.preventDefault();
+        addCalendarTitleFreeText();
+      }
+    });
+  }
   ['cal-tpl-preset-1', 'cal-tpl-preset-2', 'cal-tpl-preset-3'].forEach(function (id) {
     var el = document.getElementById(id);
     if (!el) return;
