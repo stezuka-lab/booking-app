@@ -42,6 +42,7 @@
   <script>
   (function () {
     var orig = window.fetch;
+    window.__appRawFetch = orig.bind(window);
     var busyEl = document.getElementById('app-busy-indicator');
     var busyCount = 0;
     var busyTimer = null;
@@ -143,6 +144,53 @@
         window.__setAppBusy('画面を読み込み中…');
       }
     }, true);
+    if (j.authenticated) {
+      var prefetched = Object.create(null);
+      var prefetchQueue = ['/app', '/app/calendar', '/app/settings', '/app/campaigns'];
+      if (isAdmin) prefetchQueue.push('/app/accounts');
+      function canPrefetch(href) {
+        return href && href.indexOf('/app') === 0 && href !== window.location.pathname && !prefetched[href];
+      }
+      function prefetchPage(href) {
+        if (!canPrefetch(href)) return;
+        prefetched[href] = true;
+        var rawFetch = window.__appRawFetch || window.fetch;
+        rawFetch(href, {
+          credentials: 'same-origin',
+          headers: { 'X-Booking-Prefetch': '1' },
+          cache: 'force-cache',
+        }).catch(function () {
+          prefetched[href] = false;
+        });
+      }
+      function scheduleIdle(fn, timeout) {
+        if ('requestIdleCallback' in window) {
+          window.requestIdleCallback(fn, { timeout: timeout || 2500 });
+        } else {
+          window.setTimeout(fn, timeout || 900);
+        }
+      }
+      scheduleIdle(function () {
+        var i = 0;
+        function next() {
+          if (i >= prefetchQueue.length) return;
+          prefetchPage(prefetchQueue[i++]);
+          window.setTimeout(next, 300);
+        }
+        next();
+      }, 1000);
+      document.addEventListener('pointerenter', function (ev) {
+        var link = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+        if (!link) return;
+        var href = link.getAttribute('href') || '';
+        prefetchPage(href);
+      }, true);
+      document.addEventListener('focusin', function (ev) {
+        var link = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
+        if (!link) return;
+        prefetchPage(link.getAttribute('href') || '');
+      }, true);
+    }
   })();
   </script>
 </body>
