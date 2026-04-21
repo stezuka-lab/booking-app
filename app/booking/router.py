@@ -103,6 +103,8 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["booking"])
 
 _PUBLIC_AVAILABILITY_CACHE: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
+_ADMIN_SUMMARY_COUNTS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_ADMIN_SUMMARY_COUNTS_CACHE_TTL_SEC = 120.0
 
 
 def _coerce_google_busy_result(
@@ -219,6 +221,37 @@ async def _clear_public_availability_cache_for_org(db: AsyncSession, org_id: int
         return
     for token in tokens:
         _clear_public_availability_cache(token)
+
+
+def _get_cached_admin_summary_counts(slug: str) -> dict[str, Any] | None:
+    key = slug.strip()
+    if not key:
+        return None
+    cached = _ADMIN_SUMMARY_COUNTS_CACHE.get(key)
+    if not cached:
+        return None
+    expires_at, payload = cached
+    if expires_at <= time_module.monotonic():
+        _ADMIN_SUMMARY_COUNTS_CACHE.pop(key, None)
+        return None
+    return copy.deepcopy(payload)
+
+
+def _store_cached_admin_summary_counts(slug: str, payload: dict[str, Any]) -> None:
+    key = slug.strip()
+    if not key:
+        return
+    _ADMIN_SUMMARY_COUNTS_CACHE[key] = (
+        time_module.monotonic() + _ADMIN_SUMMARY_COUNTS_CACHE_TTL_SEC,
+        copy.deepcopy(payload),
+    )
+
+
+def _clear_admin_summary_counts_cache(slug: str | None = None) -> None:
+    if slug is None:
+        _ADMIN_SUMMARY_COUNTS_CACHE.clear()
+        return
+    _ADMIN_SUMMARY_COUNTS_CACHE.pop(slug.strip(), None)
 
 
 async def _reconcile_staff_calendar_blocks(
@@ -1772,6 +1805,7 @@ async def admin_create_org(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(400, "この slug は既に使われています")
+    _clear_admin_summary_counts_cache(org.slug)
     return {"id": org.id, "slug": org.slug}
 
 
@@ -1815,6 +1849,8 @@ async def admin_patch_org(
     except IntegrityError:
         await db.rollback()
         raise HTTPException(400, "この slug は既に使われています")
+    _clear_admin_summary_counts_cache(slug)
+    _clear_admin_summary_counts_cache(org.slug)
     await _clear_public_availability_cache_for_org(db, org.id)
     return {"ok": True, "slug": org.slug, "name": org.name}
 
@@ -1941,6 +1977,19 @@ async def _counts_only_summary_fast_path(
     if not secret_ok and not _session_allows_summary_read(request, slug):
         return None
     auth_ms = (time_module.monotonic() - req_started) * 1000
+    cached_payload = _get_cached_admin_summary_counts(slug)
+    if cached_payload is not None:
+        total_ms = (time_module.monotonic() - req_started) * 1000
+        logger.info(
+            "booking.admin.summary slug=%s include_staff=False include_services=False include_links=False include_forms=False "
+            "include_counts=True staff_rows=0 service_rows=0 link_rows=0 form_rows=0 fast_path=True counts_cache_hit=True "
+            "auth_ms=%s org_ms=0.0 staff_ms=0.0 services_ms=0.0 links_ms=0.0 forms_ms=0.0 active_staff_ms=0.0 "
+            "counts_ms=0.0 links_payload_ms=0.0 payload_ms=0.0 total_ms=%s",
+            slug,
+            round(auth_ms, 1),
+            round(total_ms, 1),
+        )
+        return cached_payload
     section_started = time_module.monotonic()
     row = (
         await db.execute(
@@ -2007,7 +2056,7 @@ async def _counts_only_summary_fast_path(
     total_ms = (time_module.monotonic() - req_started) * 1000
     logger.info(
         "booking.admin.summary slug=%s include_staff=False include_services=False include_links=False include_forms=False "
-        "include_counts=True staff_rows=0 service_rows=0 link_rows=0 form_rows=0 fast_path=True "
+        "include_counts=True staff_rows=0 service_rows=0 link_rows=0 form_rows=0 fast_path=True counts_cache_hit=False "
         "auth_ms=%s org_ms=0.0 staff_ms=0.0 services_ms=0.0 links_ms=0.0 forms_ms=0.0 active_staff_ms=0.0 "
         "counts_ms=%s links_payload_ms=0.0 payload_ms=%s total_ms=%s",
         slug,
@@ -2016,6 +2065,7 @@ async def _counts_only_summary_fast_path(
         round(payload_ms, 1),
         round(total_ms, 1),
     )
+    _store_cached_admin_summary_counts(slug, payload)
     return payload
 
 
@@ -2551,6 +2601,7 @@ async def admin_add_staff(
     )
     await db.commit()
     await db.refresh(s)
+    _clear_admin_summary_counts_cache(org.slug)
     return {"id": s.id}
 
 
@@ -2597,6 +2648,7 @@ async def admin_patch_staff(
         detail={"name": s.name, "active": s.active, "cleared_google": body.clear_google_oauth is True},
     )
     await db.commit()
+    _clear_admin_summary_counts_cache(org.slug)
     return {"ok": True}
 
 
@@ -2648,6 +2700,7 @@ async def admin_delete_staff(
     )
     await db.execute(delete(StaffMember).where(StaffMember.id == staff_id))
     await db.commit()
+    _clear_admin_summary_counts_cache(org.slug)
     return {"ok": True, "deleted_id": staff_id}
 
 
@@ -2673,6 +2726,7 @@ async def admin_upsert_form(
     db.add(f)
     await db.commit()
     await db.refresh(f)
+    _clear_admin_summary_counts_cache(org.slug)
     return {"id": f.id}
 
 
@@ -2696,6 +2750,7 @@ async def admin_put_form(
     f.fields_json = body.fields_json
     f.active = True
     await db.commit()
+    _clear_admin_summary_counts_cache(org.slug)
     return {"ok": True}
 
 
@@ -2723,6 +2778,7 @@ async def admin_add_service(
     db.add(s)
     await db.commit()
     await db.refresh(s)
+    _clear_admin_summary_counts_cache(org.slug)
     return {"id": s.id}
 
 
@@ -2756,6 +2812,7 @@ async def admin_patch_service(
         svc.active = body.active
     await db.commit()
     await db.refresh(svc)
+    _clear_admin_summary_counts_cache(org.slug)
     return {
         "id": svc.id,
         "name": svc.name,
@@ -2910,6 +2967,7 @@ async def admin_add_link(
     )
     await db.commit()
     await db.refresh(link)
+    _clear_admin_summary_counts_cache(org.slug)
     _clear_public_availability_cache(token)
     base = settings.public_base_url_value()
     app_path = f"{base}/app/booking/{token}"
@@ -3017,6 +3075,7 @@ async def admin_patch_link(
     if old_service_id != link.service_id:
         async with db.begin():
             await _delete_orphaned_service(db, old_service_id)
+    _clear_admin_summary_counts_cache(org.slug)
     _clear_public_availability_cache(link.token)
     base = settings.public_base_url_value()
     valid_staff_ids = await _resolve_valid_link_staff_ids(
@@ -3085,6 +3144,7 @@ async def admin_delete_link(
     await db.commit()
     async with db.begin():
         await _delete_orphaned_service(db, old_service_id)
+    _clear_admin_summary_counts_cache(org.slug)
     _clear_public_availability_cache(link.token)
     return {"ok": True}
 
