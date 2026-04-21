@@ -10,6 +10,7 @@ from urllib.parse import urlparse
 from fastapi import Depends, FastAPI, HTTPException
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette.middleware.httpsredirect import HTTPSRedirectMiddleware
 from starlette.middleware.sessions import SessionMiddleware
@@ -281,3 +282,12 @@ async def health(settings: SettingsDep) -> dict[str, Any]:
     if demo and settings.should_expose_demo_info():
         out["booking_demo"] = demo
     return out
+
+
+@app.get("/api/booking/keepalive")
+async def booking_keepalive() -> dict[str, Any]:
+    """Vercel Cron 用。個人情報を返さず、DB接続を軽く起こす。"""
+    factory = get_session_factory()
+    async with factory() as session:
+        await session.execute(text("SELECT 1"))
+    return {"status": "ok"}
