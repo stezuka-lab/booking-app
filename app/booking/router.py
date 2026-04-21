@@ -885,6 +885,36 @@ async def _assert_staff_belong_to_org(
         raise HTTPException(400, "staff_ids must belong to this org")
 
 
+async def _load_public_link_context(
+    db: AsyncSession,
+    token: str,
+    service_id: int | None = None,
+) -> tuple[PublicBookingLink, BookingOrg, BookingService | None]:
+    row = (
+        await db.execute(
+            select(PublicBookingLink, BookingOrg, BookingService)
+            .join(BookingOrg, BookingOrg.id == PublicBookingLink.org_id)
+            .outerjoin(
+                BookingService,
+                BookingService.id == PublicBookingLink.service_id,
+            )
+            .where(PublicBookingLink.token == token)
+        )
+    ).one_or_none()
+    if not row:
+        raise HTTPException(404, "link not found")
+    link, org, fixed_service = row
+    if getattr(link, "active", True) is False:
+        raise HTTPException(403, "この予約リンクは無効です")
+    effective_sid = link.service_id if link.service_id is not None else service_id
+    service = fixed_service
+    if effective_sid and (service is None or int(service.id) != int(effective_sid)):
+        service = await db.get(BookingService, effective_sid)
+    if effective_sid and (not service or service.org_id != org.id):
+        raise HTTPException(400, "invalid service")
+    return link, org, service
+
+
 @router.get("/booking/public/{token}")
 async def legacy_booking_public_redirect(token: str) -> RedirectResponse:
     """旧 URL → Web アプリの予約画面へリダイレクト。"""
@@ -893,14 +923,7 @@ async def legacy_booking_public_redirect(token: str) -> RedirectResponse:
 
 @router.get("/api/booking/links/{token}/meta")
 async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[str, Any]:
-    link = await db.scalar(select(PublicBookingLink).where(PublicBookingLink.token == token))
-    if not link:
-        raise HTTPException(404, "link not found")
-    if getattr(link, "active", True) is False:
-        raise HTTPException(403, "この予約リンクは無効です")
-    org = await db.get(BookingOrg, link.org_id)
-    if not org:
-        raise HTTPException(404, "org missing")
+    link, org, fixed_service_row = await _load_public_link_context(db, token)
     initial_service: dict[str, Any] | None = None
     if link.service_id is None:
         initial_service_row = await db.scalar(
@@ -926,16 +949,15 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
     )
     fixed_service: dict[str, Any] | None = None
     if link.service_id:
-        fs = await db.get(BookingService, link.service_id)
-        if not fs or fs.org_id != org.id:
+        if not fixed_service_row or fixed_service_row.org_id != org.id:
             raise HTTPException(
                 404,
                 "この予約リンクに紐づく予約区分が見つかりません。設定で予約区分を確認してください。",
             )
         fixed_service = {
-            "id": fs.id,
-            "name": fs.name,
-            "duration_minutes": fs.duration_minutes,
+            "id": fixed_service_row.id,
+            "name": fixed_service_row.name,
+            "duration_minutes": fixed_service_row.duration_minutes,
         }
     return {
         "fixed_service": fixed_service,
@@ -967,18 +989,8 @@ async def link_availability(
     req_started = time_module.monotonic()
     cached_payload = _get_cached_public_availability(token, from_ts, to_ts, service_id, settings)
     initial_started = time_module.monotonic()
-    link = await db.scalar(select(PublicBookingLink).where(PublicBookingLink.token == token))
-    if not link:
-        raise HTTPException(404, "link not found")
-    if getattr(link, "active", True) is False:
-        raise HTTPException(403, "この予約リンクは無効です")
-    org = await db.get(BookingOrg, link.org_id)
-    if not org:
-        raise HTTPException(404, "org missing")
+    link, org, service = await _load_public_link_context(db, token, service_id)
     effective_sid = link.service_id if link.service_id is not None else service_id
-    service = await db.get(BookingService, effective_sid) if effective_sid else None
-    if effective_sid and (not service or service.org_id != org.id):
-        raise HTTPException(400, "invalid service")
     defaults = json_object_or_empty(org.availability_defaults_json)
     buf_min = link_buffer_minutes(link, org, settings)
     link_max_adv_days = link_max_advance_booking_days(link, org)
