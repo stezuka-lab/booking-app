@@ -43,7 +43,12 @@
     window.__clearAppBusy = hideBusy;
     window.fetch = function (input, init) {
       init = init || {};
+      var skipBusy = !!init.__skipBusy;
+      if (skipBusy) delete init.__skipBusy;
       if (init.credentials == null) init.credentials = 'same-origin';
+      if (skipBusy) {
+        return orig.call(this, input, init);
+      }
       busyCount += 1;
       if (busyTimer) clearTimeout(busyTimer);
       busyTimer = setTimeout(function () {

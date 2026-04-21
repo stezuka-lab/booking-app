@@ -118,6 +118,9 @@
   let availabilityRequestController = null;
   let lastLoadedAvailabilityKey = '';
   const availabilityCache = new Map();
+  const META_CACHE_TTL_MS = 60000;
+  const AVAILABILITY_CACHE_TTL_MS = 30000;
+  const META_CACHE_KEY = 'booking.link.meta.' + token;
   let bookingGridState = null;
   const HOUR_PX = 40;
   const fmtSlot = new Intl.DateTimeFormat('ja-JP', {
@@ -132,6 +135,43 @@
 
   const dialogEl = document.getElementById('booking-dialog');
   const successDialogEl = document.getElementById('booking-success-dialog');
+
+  function readTimedSessionCache(key, ttlMs) {
+    try {
+      const raw = sessionStorage.getItem(key);
+      if (!raw) return null;
+      const parsed = JSON.parse(raw);
+      if (!parsed || !parsed.ts || (Date.now() - Number(parsed.ts)) > ttlMs) return null;
+      return parsed.data || null;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeTimedSessionCache(key, data) {
+    try {
+      sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: data }));
+    } catch (e) {
+      /* storage may be unavailable */
+    }
+  }
+
+  function availabilityStorageKey(cacheKey) {
+    return 'booking.link.availability.' + token + '.' + cacheKey;
+  }
+
+  function clearAvailabilityCaches() {
+    availabilityCache.clear();
+    try {
+      const prefix = 'booking.link.availability.' + token + '.';
+      for (let i = sessionStorage.length - 1; i >= 0; i--) {
+        const key = sessionStorage.key(i);
+        if (key && key.indexOf(prefix) === 0) sessionStorage.removeItem(key);
+      }
+    } catch (e) {
+      /* storage may be unavailable */
+    }
+  }
 
   function setLinkDisabledState(message) {
     linkDisabled = true;
@@ -851,29 +891,10 @@
     grid.hidden = false;
   }
 
-  async function loadMeta() {
-    const r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/meta');
-    if (!r.ok) {
-      let detail = '現在この予約リンクでは予約を受け付けていません。';
-      try {
-        const t = await r.text();
-        const j = t ? JSON.parse(t) : {};
-        if (j.detail) {
-          detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
-        }
-      } catch (e) {
-        /* keep default */
-      }
-      if (r.status === 403) {
-        setLinkDisabledState(detail);
-        return;
-      }
-      throw new Error(detail + (r.status ? '（HTTP ' + r.status + '）' : ''));
-    }
-    const m = await r.json();
+  function applyMeta(m) {
     lastMeta = m;
     metaAvailability = m.availability_defaults || {};
-    cursorDate = todayLocal();
+    if (!cursorDate) cursorDate = todayLocal();
     const lt = m.link && m.link.title ? m.link.title : 'オンライン予約';
     document.getElementById('page-heading').textContent = lt;
     const noticeWrap = document.getElementById('booking-link-notice');
@@ -912,6 +933,35 @@
       fixedServiceId = firstService.id;
     }
     renderExtraFields(m.form_fields || []);
+  }
+
+  async function loadMeta() {
+    const cached = readTimedSessionCache(META_CACHE_KEY, META_CACHE_TTL_MS);
+    if (cached) {
+      applyMeta(cached);
+      return;
+    }
+    const r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/meta', { __skipBusy: true });
+    if (!r.ok) {
+      let detail = '現在この予約リンクでは予約を受け付けていません。';
+      try {
+        const t = await r.text();
+        const j = t ? JSON.parse(t) : {};
+        if (j.detail) {
+          detail = typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail);
+        }
+      } catch (e) {
+        /* keep default */
+      }
+      if (r.status === 403) {
+        setLinkDisabledState(detail);
+        return;
+      }
+      throw new Error(detail + (r.status ? '（HTTP ' + r.status + '）' : ''));
+    }
+    const m = await r.json();
+    applyMeta(m);
+    writeTimedSessionCache(META_CACHE_KEY, m);
   }
 
   async function loadSlots() {
@@ -1012,6 +1062,19 @@
       renderCalendar();
       return;
     }
+    if (!forceRefresh) {
+      const cachedAvailability = readTimedSessionCache(availabilityStorageKey(cacheKey), AVAILABILITY_CACHE_TTL_MS);
+      if (cachedAvailability) {
+        availabilityCache.set(cacheKey, cachedAvailability);
+        lastAvail = cachedAvailability;
+        lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
+        loading.hidden = true;
+        const cachedMsg = document.getElementById('page-msg');
+        if (cachedMsg) cachedMsg.textContent = lastAvail.availability_error || '';
+        renderCalendar();
+        return;
+      }
+    }
 
     if (availabilityRequestController) {
       availabilityRequestController.abort();
@@ -1027,6 +1090,7 @@
     try {
       response = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/availability?' + q, {
         signal: availabilityRequestController.signal,
+        __skipBusy: true,
       });
       rawText = await response.text();
     } catch (e) {
@@ -1069,6 +1133,9 @@
     lastAvail = payload;
     lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
     availabilityCache.set(cacheKey, payload);
+    if (!payload.availability_error) {
+      writeTimedSessionCache(availabilityStorageKey(cacheKey), payload);
+    }
     const pageMsg = document.getElementById('page-msg');
     if (pageMsg) pageMsg.textContent = payload.availability_error || '';
     renderCalendar();
@@ -1160,7 +1227,7 @@
         msg.textContent = conflictMsg;
         selectedBookingStartIso = null;
         highlightSlot('');
-        availabilityCache.clear();
+        clearAvailabilityCaches();
         await loadSlots(true);
         return;
       }

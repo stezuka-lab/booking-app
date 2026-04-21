@@ -183,7 +183,7 @@
       showOAuthStatus(cached);
       return Promise.resolve(cached);
     }
-    return fetch('/api/booking/oauth/google/status')
+    return fetch('/api/booking/oauth/google/status', { __skipBusy: true })
       .then(function (r) { return r.json(); })
       .then(function (data) {
         writeTimedCache(cacheKey, data);
@@ -452,6 +452,7 @@
     return fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString(), {
       credentials: 'same-origin',
       headers: headers(),
+      __skipBusy: !forceRefresh,
     })
       .then(function (r) {
         return r.json().then(function (j) {

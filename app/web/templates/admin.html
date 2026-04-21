@@ -711,9 +711,10 @@
     }
   }
 
-  async function getJson(path) {
+  async function getJson(path, options) {
     setMsg('');
-    const r = await fetch(path, { credentials: 'same-origin', headers: headersJson() });
+    const opts = options || {};
+    const r = await fetch(path, Object.assign({ credentials: 'same-origin', headers: headersJson() }, opts));
     const text = await r.text();
     let data;
     try {
@@ -745,7 +746,7 @@
       include_forms: 'false',
       include_counts: 'false'
     });
-    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString());
+    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString(), { __skipBusy: !forceRefresh });
     if (data) {
       writeSummaryCache(data);
       renderLinksSummary(data);

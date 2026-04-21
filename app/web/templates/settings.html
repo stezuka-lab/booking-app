@@ -545,7 +545,7 @@
       include_forms: 'false',
       include_counts: 'true'
     });
-    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary?' + q.toString());
+    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()) + '/summary?' + q.toString(), { __skipBusy: !forceRefresh });
     if (data) {
       writeSummaryCache(data);
       renderSummary(data);
