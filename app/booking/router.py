@@ -104,7 +104,9 @@ router = APIRouter(tags=["booking"])
 
 _PUBLIC_AVAILABILITY_CACHE: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
 _ADMIN_SUMMARY_COUNTS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
+_ADMIN_ORG_SUMMARY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _ADMIN_SUMMARY_COUNTS_CACHE_TTL_SEC = 120.0
+_ADMIN_ORG_SUMMARY_CACHE_TTL_SEC = 120.0
 
 
 def _coerce_google_busy_result(
@@ -250,8 +252,35 @@ def _store_cached_admin_summary_counts(slug: str, payload: dict[str, Any]) -> No
 def _clear_admin_summary_counts_cache(slug: str | None = None) -> None:
     if slug is None:
         _ADMIN_SUMMARY_COUNTS_CACHE.clear()
+        _ADMIN_ORG_SUMMARY_CACHE.clear()
         return
-    _ADMIN_SUMMARY_COUNTS_CACHE.pop(slug.strip(), None)
+    key = slug.strip()
+    _ADMIN_SUMMARY_COUNTS_CACHE.pop(key, None)
+    _ADMIN_ORG_SUMMARY_CACHE.pop(key, None)
+
+
+def _get_cached_admin_org_summary(slug: str) -> dict[str, Any] | None:
+    key = slug.strip()
+    if not key:
+        return None
+    cached = _ADMIN_ORG_SUMMARY_CACHE.get(key)
+    if not cached:
+        return None
+    expires_at, payload = cached
+    if expires_at <= time_module.monotonic():
+        _ADMIN_ORG_SUMMARY_CACHE.pop(key, None)
+        return None
+    return copy.deepcopy(payload)
+
+
+def _store_cached_admin_org_summary(slug: str, payload: dict[str, Any]) -> None:
+    key = slug.strip()
+    if not key:
+        return
+    _ADMIN_ORG_SUMMARY_CACHE[key] = (
+        time_module.monotonic() + _ADMIN_ORG_SUMMARY_CACHE_TTL_SEC,
+        copy.deepcopy(payload),
+    )
 
 
 async def _reconcile_staff_calendar_blocks(
@@ -1947,6 +1976,11 @@ async def _load_summary_org_for_admin(
         if not org:
             raise HTTPException(404, "org not found")
         return org
+    if _session_allows_summary_read(request, slug):
+        org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+        if not org:
+            raise HTTPException(404, "org not found")
+        return org
     uid = request.session.get("user_id")
     if uid is None:
         raise HTTPException(status_code=401, detail="ログインするか、正しい X-Admin-Secret を指定してください")
@@ -2101,6 +2135,28 @@ async def admin_org_summary(
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     req_started = time_module.monotonic()
+    org_only_summary = (
+        not include_staff
+        and not include_services
+        and not include_links
+        and not include_forms
+        and not include_counts
+    )
+    sec = (settings.booking_admin_secret or "").strip()
+    secret_ok = bool(sec and (x_admin_secret or "").strip() == sec)
+    if org_only_summary and (secret_ok or _session_allows_summary_read(request, slug)):
+        cached_payload = _get_cached_admin_org_summary(slug)
+        if cached_payload is not None:
+            total_ms = (time_module.monotonic() - req_started) * 1000
+            logger.info(
+                "booking.admin.summary slug=%s include_staff=False include_services=False include_links=False "
+                "include_forms=False include_counts=False staff_rows=0 service_rows=0 link_rows=0 form_rows=0 "
+                "org_cache_hit=True auth_ms=0.0 org_ms=0.0 staff_ms=0.0 services_ms=0.0 links_ms=0.0 "
+                "forms_ms=0.0 active_staff_ms=0.0 counts_ms=0.0 links_payload_ms=0.0 payload_ms=0.0 total_ms=%s",
+                slug,
+                round(total_ms, 1),
+            )
+            return cached_payload
     if include_counts and not include_staff and not include_services and not include_links and not include_forms:
         fast_payload = await _counts_only_summary_fast_path(request, slug, db, settings, x_admin_secret, req_started)
         if fast_payload is not None:
@@ -2325,6 +2381,8 @@ async def admin_org_summary(
         round(payload_ms, 1),
         round(total_ms, 1),
     )
+    if org_only_summary:
+        _store_cached_admin_org_summary(slug, response_payload)
     return response_payload
 
 
