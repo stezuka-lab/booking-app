@@ -1919,6 +1919,106 @@ async def _load_summary_org_for_admin(
     raise HTTPException(status_code=403, detail="この組織を操作する権限がありません")
 
 
+def _session_allows_summary_read(request: Request, slug: str) -> bool:
+    if request.session.get("user_id") is None:
+        return False
+    role = (request.session.get("user_role") or "").strip()
+    if role == "admin":
+        return True
+    return (request.session.get("default_org_slug") or "").strip() == slug.strip()
+
+
+async def _counts_only_summary_fast_path(
+    request: Request,
+    slug: str,
+    db: AsyncSession,
+    settings: Settings,
+    x_admin_secret: str | None,
+    req_started: float,
+) -> dict[str, Any] | None:
+    sec = (settings.booking_admin_secret or "").strip()
+    secret_ok = bool(sec and (x_admin_secret or "").strip() == sec)
+    if not secret_ok and not _session_allows_summary_read(request, slug):
+        return None
+    auth_ms = (time_module.monotonic() - req_started) * 1000
+    section_started = time_module.monotonic()
+    row = (
+        await db.execute(
+            select(
+                BookingOrg,
+                select(func.count())
+                .select_from(StaffMember)
+                .where(
+                    StaffMember.org_id == BookingOrg.id,
+                    StaffMember.active.is_(True),
+                    StaffMember.google_refresh_token.is_not(None),
+                )
+                .scalar_subquery()
+                .label("staff_count"),
+                select(func.count())
+                .select_from(BookingService)
+                .where(BookingService.org_id == BookingOrg.id)
+                .scalar_subquery()
+                .label("services_count"),
+                select(func.count())
+                .select_from(PublicBookingLink)
+                .where(PublicBookingLink.org_id == BookingOrg.id)
+                .scalar_subquery()
+                .label("links_count"),
+                select(func.count())
+                .select_from(BookingFormDefinition)
+                .where(BookingFormDefinition.org_id == BookingOrg.id)
+                .scalar_subquery()
+                .label("forms_count"),
+            ).where(BookingOrg.slug == slug)
+        )
+    ).one_or_none()
+    counts_ms = (time_module.monotonic() - section_started) * 1000
+    if not row:
+        raise HTTPException(404, "org not found")
+    org, staff_count, services_count, links_count, forms_count = row
+    section_started = time_module.monotonic()
+    payload = {
+        "public_base_url": settings.public_base_url_value(),
+        "org": {
+            "id": org.id,
+            "name": org.name,
+            "slug": org.slug,
+            "routing_mode": org.routing_mode,
+            "auto_confirm": org.auto_confirm,
+            "ga4_measurement_id": org.ga4_measurement_id,
+            "cancel_policy_json": org.cancel_policy_json,
+            "availability_defaults_json": org.availability_defaults_json,
+            "email_settings_json": getattr(org, "email_settings_json", None) or {},
+        },
+        "staff": [],
+        "services": [],
+        "links": [],
+        "google_oauth_ready": settings.is_google_oauth_configured(),
+        "counts": {
+            "staff": int(staff_count or 0),
+            "services": int(services_count or 0),
+            "links": int(links_count or 0),
+            "forms": int(forms_count or 0),
+        },
+        "forms": [],
+    }
+    payload_ms = (time_module.monotonic() - section_started) * 1000
+    total_ms = (time_module.monotonic() - req_started) * 1000
+    logger.info(
+        "booking.admin.summary slug=%s include_staff=False include_services=False include_links=False include_forms=False "
+        "include_counts=True staff_rows=0 service_rows=0 link_rows=0 form_rows=0 fast_path=True "
+        "auth_ms=%s org_ms=0.0 staff_ms=0.0 services_ms=0.0 links_ms=0.0 forms_ms=0.0 active_staff_ms=0.0 "
+        "counts_ms=%s links_payload_ms=0.0 payload_ms=%s total_ms=%s",
+        slug,
+        round(auth_ms, 1),
+        round(counts_ms, 1),
+        round(payload_ms, 1),
+        round(total_ms, 1),
+    )
+    return payload
+
+
 @router.get("/api/booking/admin/orgs/{slug}/summary")
 async def admin_org_summary(
     request: Request,
@@ -1933,6 +2033,10 @@ async def admin_org_summary(
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     req_started = time_module.monotonic()
+    if include_counts and not include_staff and not include_services and not include_links and not include_forms:
+        fast_payload = await _counts_only_summary_fast_path(request, slug, db, settings, x_admin_secret, req_started)
+        if fast_payload is not None:
+            return fast_payload
     section_started = req_started
     org = await _load_summary_org_for_admin(request, slug, db, settings, x_admin_secret)
     auth_ms = (time_module.monotonic() - section_started) * 1000
