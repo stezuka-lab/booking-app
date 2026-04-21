@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import logging
+import time as time_module
 from pathlib import Path
 from types import SimpleNamespace
 from typing import Any
@@ -174,11 +175,31 @@ async def _require_login_html(request: Request, next_path: str) -> RedirectRespo
 
 @router.get("/app", response_class=HTMLResponse)
 async def app_home(request: Request) -> Any:
+    started = time_module.perf_counter()
     settings = get_settings()
+    had_snapshot = _session_user_snapshot(request) is not None
+    user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
+    user_ms = (time_module.perf_counter() - user_started) * 1000
     if not u:
+        logger.info(
+            "web.app_home authenticated=False snapshot=%s user_ms=%.1f total_ms=%.1f",
+            had_snapshot,
+            user_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
         return RedirectResponse(url="/app/login", status_code=302)
-    return _html("home.html", request, settings, app_viewer=_viewer_payload(u))
+    render_started = time_module.perf_counter()
+    response = _html("home.html", request, settings, app_viewer=_viewer_payload(u))
+    render_ms = (time_module.perf_counter() - render_started) * 1000
+    logger.info(
+        "web.app_home authenticated=True snapshot=%s user_ms=%.1f render_ms=%.1f total_ms=%.1f",
+        had_snapshot,
+        user_ms,
+        render_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
+    return response
 
 
 @router.get("/app/login", response_class=HTMLResponse)

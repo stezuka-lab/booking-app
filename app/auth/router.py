@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import hashlib
+import logging
 import re
 import secrets
+import time as time_module
 from datetime import datetime, timedelta, timezone
 from typing import Annotated, Any
 
@@ -43,8 +45,10 @@ from app.db import get_session_factory
 from app.security.audit import write_audit_log
 
 router = APIRouter(tags=["auth"])
+logger = logging.getLogger(__name__)
 _ORG_SLUG_SANITIZE_RE = re.compile(r"[^a-z0-9]+")
 _LEGACY_DEMO_ORG_SLUG = "demo-shop"
+_AUTH_ME_SESSION_TTL_SEC = 300
 
 
 async def _session_db() -> AsyncSession:
@@ -64,6 +68,57 @@ async def _default_org_name(db: AsyncSession, org_slug: str | None) -> str | Non
     if org_row is None:
         return None
     return (org_row.name or "").strip() or None
+
+
+def _auth_me_from_session(request: Request) -> dict[str, Any] | None:
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return None
+    try:
+        snapshot_at = float(request.session.get("auth_snapshot_at") or 0)
+    except (TypeError, ValueError):
+        snapshot_at = 0
+    if snapshot_at <= 0 or time_module.time() - snapshot_at > _AUTH_ME_SESSION_TTL_SEC:
+        return None
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        request.session.clear()
+        return None
+    username = (request.session.get("username") or "").strip()
+    role = (request.session.get("user_role") or "").strip()
+    if not username or not role:
+        return None
+    default_org_slug = (request.session.get("default_org_slug") or "").strip() or None
+    default_org_name = (request.session.get("default_org_name") or "").strip() or None
+    return {
+        "authenticated": True,
+        "user": {
+            "id": uid,
+            "username": username,
+            "role": role,
+            "display_name": (request.session.get("display_name") or "").strip(),
+            "email": (request.session.get("email") or "").strip() or None,
+            "default_org_slug": default_org_slug,
+            "default_org_name": default_org_name,
+        },
+    }
+
+
+def _store_auth_session_snapshot(
+    request: Request,
+    user: AppUser,
+    *,
+    default_org_name: str | None = None,
+) -> None:
+    request.session["user_id"] = user.id
+    request.session["username"] = user.username or ""
+    request.session["display_name"] = user.display_name or ""
+    request.session["user_role"] = user.role or ""
+    request.session["email"] = user.email or ""
+    request.session["default_org_slug"] = user.default_org_slug or ""
+    request.session["default_org_name"] = default_org_name or ""
+    request.session["auth_snapshot_at"] = time_module.time()
 
 
 async def _materialize_org_assignment(
@@ -200,12 +255,8 @@ async def login(
         raise HTTPException(401, "ユーザーIDまたはパスワードが正しくありません")
     clear_login_failures(request, username)
     await _repair_default_org_for_user(db, u)
-    request.session["user_id"] = u.id
-    request.session["username"] = u.username or ""
-    request.session["display_name"] = u.display_name or ""
-    request.session["user_role"] = u.role or ""
-    request.session["default_org_slug"] = u.default_org_slug or ""
-    request.session["default_org_name"] = await _default_org_name(db, u.default_org_slug) or ""
+    org_name = await _default_org_name(db, u.default_org_slug)
+    _store_auth_session_snapshot(request, u, default_org_name=org_name)
     return {
         "ok": True,
         "user": {
@@ -226,15 +277,42 @@ async def logout(request: Request) -> dict:
 
 @router.get("/api/auth/me")
 async def me(request: Request, db: AuthDb) -> dict:
+    started = time_module.perf_counter()
+    snap = _auth_me_from_session(request)
+    if snap is not None:
+        logger.info(
+            "auth.me fast_path=True total_ms=%.1f",
+            (time_module.perf_counter() - started) * 1000,
+        )
+        return snap
+    user_started = time_module.perf_counter()
     u = await get_current_app_user(request, db)
+    user_ms = (time_module.perf_counter() - user_started) * 1000
     if not u:
+        logger.info(
+            "auth.me fast_path=False authenticated=False user_ms=%.1f total_ms=%.1f",
+            user_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
         return {"authenticated": False}
+    repair_started = time_module.perf_counter()
     await _repair_default_org_for_user(db, u)
+    repair_ms = (time_module.perf_counter() - repair_started) * 1000
     default_org_name: str | None = None
+    org_started = time_module.perf_counter()
     if u.default_org_slug:
         org_row = await db.scalar(select(BookingOrg).where(BookingOrg.slug == u.default_org_slug))
         if org_row is not None:
             default_org_name = (org_row.name or "").strip() or None
+    org_ms = (time_module.perf_counter() - org_started) * 1000
+    _store_auth_session_snapshot(request, u, default_org_name=default_org_name)
+    logger.info(
+        "auth.me fast_path=False authenticated=True user_ms=%.1f repair_ms=%.1f org_ms=%.1f total_ms=%.1f",
+        user_ms,
+        repair_ms,
+        org_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
     return {
         "authenticated": True,
         "user": {
@@ -270,8 +348,8 @@ async def patch_me_preferences(
             u.default_org_slug = slug
     await db.commit()
     await db.refresh(u)
-    request.session["default_org_slug"] = u.default_org_slug or ""
-    request.session["default_org_name"] = await _default_org_name(db, u.default_org_slug) or ""
+    org_name = await _default_org_name(db, u.default_org_slug)
+    _store_auth_session_snapshot(request, u, default_org_name=org_name)
     return {"ok": True, "default_org_slug": u.default_org_slug}
 
 

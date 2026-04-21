@@ -165,9 +165,9 @@
       }
       function scheduleIdle(fn, timeout) {
         if ('requestIdleCallback' in window) {
-          window.requestIdleCallback(fn, { timeout: timeout || 2500 });
+          window.requestIdleCallback(fn, { timeout: timeout || 3500 });
         } else {
-          window.setTimeout(fn, timeout || 900);
+          window.setTimeout(fn, timeout || 2500);
         }
       }
       scheduleIdle(function () {
@@ -175,10 +175,10 @@
         function next() {
           if (i >= prefetchQueue.length) return;
           prefetchPage(prefetchQueue[i++]);
-          window.setTimeout(next, 300);
+          window.setTimeout(next, 600);
         }
         next();
-      }, 1000);
+      }, 2500);
       document.addEventListener('pointerenter', function (ev) {
         var link = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
         if (!link) return;
