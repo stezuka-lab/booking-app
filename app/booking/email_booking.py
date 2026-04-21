@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import logging
 import smtplib
 from datetime import datetime, timezone as dt_timezone
@@ -228,8 +229,6 @@ async def send_customer_confirmation_email(
     if dry_run:
         logger.info("DRY-RUN customer booking email booking_id=%s", getattr(booking, "id", None))
         return True, None
-    import asyncio
-
     try:
         await asyncio.to_thread(
             _send_sync,
@@ -271,8 +270,6 @@ async def send_staff_notification_email(
     if dry_run:
         logger.info("DRY-RUN staff booking email booking_id=%s", getattr(booking, "id", None))
         return True, None
-    import asyncio
-
     try:
         await asyncio.to_thread(
             _send_sync,
@@ -304,25 +301,27 @@ async def send_booking_emails(
         logger.warning("SMTP not configured; skip booking emails")
         return {"customer": False, "staff": False}
 
-    ok_c, err_c = await send_customer_confirmation_email(
-        settings,
-        org,
-        booking,
-        staff,
-        booking_link_title=booking_link_title,
-        manage_url=manage_url,
-        post_booking_message=post_booking_message,
-        dry_run=dry_run,
-    )
-    ok_s, err_s = await send_staff_notification_email(
-        settings,
-        org,
-        booking,
-        staff,
-        booking_link_title=booking_link_title,
-        manage_url=manage_url,
-        post_booking_message=post_booking_message,
-        dry_run=dry_run,
+    (ok_c, err_c), (ok_s, err_s) = await asyncio.gather(
+        send_customer_confirmation_email(
+            settings,
+            org,
+            booking,
+            staff,
+            booking_link_title=booking_link_title,
+            manage_url=manage_url,
+            post_booking_message=post_booking_message,
+            dry_run=dry_run,
+        ),
+        send_staff_notification_email(
+            settings,
+            org,
+            booking,
+            staff,
+            booking_link_title=booking_link_title,
+            manage_url=manage_url,
+            post_booking_message=post_booking_message,
+            dry_run=dry_run,
+        ),
     )
     return {
         "customer": ok_c,

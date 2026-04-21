@@ -1248,6 +1248,16 @@ async def _create_booking_from_body(
     db: AsyncSession,
     settings: Settings,
 ) -> tuple[Booking, StaffMember, bool, str, str]:
+    t_total = time_module.perf_counter()
+    t = t_total
+    timings: dict[str, float] = {}
+
+    def mark(name: str) -> None:
+        nonlocal t
+        now = time_module.perf_counter()
+        timings[name] = (now - t) * 1000
+        t = now
+
     if body.link_token != token:
         raise HTTPException(400, "token mismatch")
     link = await db.scalar(select(PublicBookingLink).where(PublicBookingLink.token == token))
@@ -1279,6 +1289,7 @@ async def _create_booking_from_body(
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
     staff_probe_list = await eligible_staff(db, org, staff_ids, service, settings)
+    mark("resolve_ms")
     gmap_probe, gmap_probe_errors = _coerce_google_busy_result(
         await _load_google_busy_map(
             staff_probe_list,
@@ -1287,6 +1298,7 @@ async def _create_booking_from_body(
             settings,
         )
     )
+    mark("google_probe_ms")
     await _release_bookings_with_missing_google_events(
         db,
         settings,
@@ -1294,6 +1306,7 @@ async def _create_booking_from_body(
         start - timedelta(days=1),
         start + timedelta(days=1) + timedelta(minutes=max(1, int(service.duration_minutes or 30))),
     )
+    mark("release_ms")
     await _reconcile_staff_calendar_blocks(
         db,
         settings,
@@ -1303,6 +1316,7 @@ async def _create_booking_from_body(
         google_busy_map=gmap_probe,
         google_busy_errors=gmap_probe_errors,
     )
+    mark("reconcile_ms")
     end = start + timedelta(minutes=service.duration_minutes)
 
     defaults_avail = json_object_or_empty(org.availability_defaults_json)
@@ -1335,47 +1349,25 @@ async def _create_booking_from_body(
         )
 
     buf_org = link_buffer_minutes(link, org, settings)
-    fb_a = body.availability_from_ts
-    fb_b = body.availability_to_ts
-    if fb_a is not None and fb_b is not None:
-        if fb_a.tzinfo is None:
-            fb_a = fb_a.replace(tzinfo=timezone.utc)
-        if fb_b.tzinfo is None:
-            fb_b = fb_b.replace(tzinfo=timezone.utc)
-        if fb_a > fb_b:
-            fb_a, fb_b = fb_b, fb_a
-        fb_from, fb_to = fb_a, fb_b
-    else:
-        fb_from = start - timedelta(days=7)
-        fb_to = start + timedelta(days=7)
-    # 予約開始・終了が FreeBusy の窓ぴったりだと欠けることがあるため必ず含める
-    fb_pad = timedelta(minutes=max(0, buf_org))
-    fb_from = min(fb_from, start - fb_pad)
-    fb_to = max(fb_to, end + fb_pad)
-    if fb_from >= fb_to:
-        fb_to = fb_from + timedelta(seconds=1)
 
     staff: StaffMember | None = None
     if body.staff_id:
         staff = await db.get(StaffMember, body.staff_id)
         if not staff or staff.org_id != org.id:
             raise HTTPException(400, "invalid staff")
-        eligible_for_link = await eligible_staff(db, org, staff_ids, service, settings)
+        eligible_for_link = staff_probe_list
         if not any(s.id == staff.id for s in eligible_for_link):
             raise HTTPException(
                 400,
                 "この担当はこの予約リンク・区分の対象外です（担当割当・スキル・Google連携をご確認ください）",
             )
-        gmap, _google_busy_errors = _coerce_google_busy_result(
-            await _load_google_busy_map([staff], fb_from, fb_to, settings)
-        )
         if not await staff_is_free(
             db,
             staff,
             start,
             end,
             settings,
-            gmap,
+            gmap_probe,
             buffer_minutes=buf_org,
         ):
             logger.warning(
@@ -1395,7 +1387,7 @@ async def _create_booking_from_body(
                 ),
             )
     else:
-        staff_list = await eligible_staff(db, org, staff_ids, service, settings)
+        staff_list = staff_probe_list
         if not staff_list:
             raise HTTPException(
                 status_code=409,
@@ -1406,9 +1398,6 @@ async def _create_booking_from_body(
                     buffer_minutes=buf_org,
                 ),
             )
-        gmap, _google_busy_errors = _coerce_google_busy_result(
-            await _load_google_busy_map(staff_list, fb_from, fb_to, settings)
-        )
         picked = await pick_staff_for_slot(
             db,
             org,
@@ -1419,7 +1408,7 @@ async def _create_booking_from_body(
             settings,
             link_priority_overrides=link_priority_overrides,
             buffer_minutes_override=buf_org,
-            google_busy_map=gmap,
+            google_busy_map=gmap_probe,
             dry_run=False,
         )
         if not picked:
@@ -1440,6 +1429,7 @@ async def _create_booking_from_body(
                 ),
             )
         staff = picked
+    mark("staff_pick_ms")
 
     if not org.auto_confirm:
         raise HTTPException(
@@ -1479,6 +1469,7 @@ async def _create_booking_from_body(
     )
     db.add(b)
     await db.flush()
+    mark("insert_flush_ms")
 
     customer_cal = False
     if status == "confirmed":
@@ -1497,6 +1488,24 @@ async def _create_booking_from_body(
         except Exception:
             logger.exception("booking finalize failed booking_id=%s staff_id=%s", b.id, staff.id)
             customer_cal = False
+    mark("finalize_ms")
+    logger.info(
+        "booking.create token=%s booking_id=%s staff_id=%s service_id=%s "
+        "resolve_ms=%.1f google_probe_ms=%.1f release_ms=%.1f reconcile_ms=%.1f "
+        "staff_pick_ms=%.1f insert_flush_ms=%.1f finalize_ms=%.1f total_ms=%.1f",
+        token,
+        b.id,
+        staff.id,
+        service.id,
+        timings.get("resolve_ms", 0.0),
+        timings.get("google_probe_ms", 0.0),
+        timings.get("release_ms", 0.0),
+        timings.get("reconcile_ms", 0.0),
+        timings.get("staff_pick_ms", 0.0),
+        timings.get("insert_flush_ms", 0.0),
+        timings.get("finalize_ms", 0.0),
+        (time_module.perf_counter() - t_total) * 1000,
+    )
     return (
         b,
         staff,
@@ -1555,21 +1564,27 @@ async def book_appointment(
     db: DbSession,
     settings: SettingsDep,
 ) -> dict[str, Any]:
+    t_total = time_module.perf_counter()
     check_public_booking_rate_limit(
         request,
         max_requests=max(1, int(settings.booking_public_rate_limit_max_requests or 40)),
         window_sec=max(60, int(settings.booking_public_rate_limit_window_sec or 3600)),
     )
+    t_create = time_module.perf_counter()
     b, staff, customer_cal, booking_link_title, post_booking_message = await _create_booking_from_body(token, body, db, settings)
+    create_ms = (time_module.perf_counter() - t_create) * 1000
+    t_commit = time_module.perf_counter()
     await db.commit()
+    commit_ms = (time_module.perf_counter() - t_commit) * 1000
     _clear_public_availability_cache(token)
+    t_response = time_module.perf_counter()
     org = await db.get(BookingOrg, b.org_id)
     svc = await db.get(BookingService, b.service_id) if b.service_id else None
     service_name = svc.name if svc else "予約"
     if not org:
         raise HTTPException(500, "org missing")
     try:
-        return _public_booking_response(
+        payload = _public_booking_response(
             settings,
             org,
             b,
@@ -1579,6 +1594,18 @@ async def book_appointment(
             customer_calendar_added=customer_cal,
             post_booking_message=post_booking_message,
         )
+        response_ms = (time_module.perf_counter() - t_response) * 1000
+        logger.info(
+            "booking.submit token=%s booking_id=%s create_ms=%.1f commit_ms=%.1f "
+            "response_ms=%.1f total_ms=%.1f",
+            token,
+            b.id,
+            create_ms,
+            commit_ms,
+            response_ms,
+            (time_module.perf_counter() - t_total) * 1000,
+        )
+        return payload
     except Exception:
         logger.exception("public booking response build failed booking_id=%s", b.id)
         base = settings.public_base_url_value()
@@ -1609,6 +1636,17 @@ async def _finalize_confirmed_booking(
     customer_google_access_token: str | None = None,
 ) -> bool:
     """カレンダー反映・会議 URL・メール・CRM。顧客の Google カレンダー追加に成功したら True。"""
+    t_total = time_module.perf_counter()
+    t = t_total
+    timings: dict[str, float] = {}
+
+    def mark(name: str) -> None:
+        nonlocal t
+        now = time_module.perf_counter()
+        timings[name] = (now - t) * 1000
+        t = now
+
+    summary = format_calendar_event_title(org, service_name, b)
     customer_name = _booking_customer_name(b, settings)
     customer_email = _booking_customer_email(b, settings)
     manage_url = f"{settings.public_base_url_value()}/app/manage/{b.manage_token}"
@@ -1624,6 +1662,7 @@ async def _finalize_confirmed_booking(
             booking_link_title=booking_link_title,
             post_booking_message=post_booking_message,
         )
+        mark("staff_calendar_ms")
         meeting_url = _booking_meeting_url(b, settings)
         cust_tok = (customer_google_access_token or "").strip()
         if cust_tok:
@@ -1653,6 +1692,7 @@ async def _finalize_confirmed_booking(
                 location=meeting_url or None,
             )
             customer_cal_ok = ev_c is not None
+        mark("customer_calendar_ms")
 
         email_results = await send_booking_emails(
             settings,
@@ -1665,6 +1705,7 @@ async def _finalize_confirmed_booking(
             post_booking_message=post_booking_message,
             dry_run=settings.actions_dry_run,
         )
+        mark("email_ms")
         email_now = datetime.now(timezone.utc)
         b.customer_confirmation_email_last_attempt_at = email_now
         if email_results.get("customer"):
@@ -1679,6 +1720,19 @@ async def _finalize_confirmed_booking(
         elif email_results.get("staff_error"):
             b.staff_notification_email_error = str(email_results.get("staff_error"))[:500]
         await session.flush()
+        mark("flush_ms")
+        logger.info(
+            "booking.finalize booking_id=%s staff_calendar_ms=%.1f customer_calendar_ms=%.1f "
+            "email_ms=%.1f flush_ms=%.1f total_ms=%.1f customer_email=%s staff_email=%s",
+            b.id,
+            timings.get("staff_calendar_ms", 0.0),
+            timings.get("customer_calendar_ms", 0.0),
+            timings.get("email_ms", 0.0),
+            timings.get("flush_ms", 0.0),
+            (time_module.perf_counter() - t_total) * 1000,
+            bool(email_results.get("customer")),
+            bool(email_results.get("staff")),
+        )
         return customer_cal_ok
     finally:
         _scrub_booking_personal_data(b)
