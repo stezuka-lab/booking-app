@@ -937,6 +937,7 @@ async def link_availability(
 ) -> dict[str, Any]:
     req_started = time_module.monotonic()
     cached_payload = _get_cached_public_availability(token, from_ts, to_ts, service_id, settings)
+    initial_started = time_module.monotonic()
     link = await db.scalar(select(PublicBookingLink).where(PublicBookingLink.token == token))
     if not link:
         raise HTTPException(404, "link not found")
@@ -958,26 +959,35 @@ async def link_availability(
         if service
         else availability_defaults_positive_int(defaults, "duration", BOOKING_SLOT_STEP_MINUTES)
     )
+    initial_ms = (time_module.monotonic() - initial_started) * 1000
     try:
         resolve_started = time_module.monotonic()
-        staff_ids = await _resolve_valid_link_staff_ids(
-            db,
-            org.id,
-            json_list_or_empty(link.staff_ids_json),
-        )
+        raw_staff_ids: list[int] = []
+        seen_staff_ids: set[int] = set()
+        for raw_staff_id in json_list_or_empty(link.staff_ids_json):
+            try:
+                sid = int(raw_staff_id)
+            except (TypeError, ValueError):
+                continue
+            if sid in seen_staff_ids:
+                continue
+            seen_staff_ids.add(sid)
+            raw_staff_ids.append(sid)
+        staff_list = await eligible_staff(db, org, raw_staff_ids, service, settings)
+        staff_ids = [int(s.id) for s in staff_list]
         link_priority_overrides = _normalize_link_priority_overrides(
             getattr(link, "staff_priority_overrides_json", None),
             staff_ids,
         )
-        staff_list = await eligible_staff(db, org, staff_ids, service, settings)
         fts = from_ts if from_ts.tzinfo else from_ts.replace(tzinfo=timezone.utc)
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
         resolve_ms = (time_module.monotonic() - resolve_started) * 1000
         released_missing = 0
+        release_ms = 0.0
         if staff_list:
-            release_horizon_days = max(14, min(90, int(link_max_adv_days or 30)))
+            release_started = time_module.monotonic()
             release_start = min(fts, datetime.now(timezone.utc) - timedelta(days=1))
-            release_end = max(tts + AVAILABILITY_RANGE_END_SLACK, datetime.now(timezone.utc) + timedelta(days=release_horizon_days))
+            release_end = tts + AVAILABILITY_RANGE_END_SLACK
             released_missing = await _release_bookings_with_missing_google_events(
                 db,
                 settings,
@@ -988,14 +998,19 @@ async def link_availability(
             if released_missing:
                 await db.commit()
                 _clear_public_availability_cache(token)
+            release_ms = (time_module.monotonic() - release_started) * 1000
         if cached_payload is not None and not released_missing:
             logger.info(
-                "booking.availability cache_hit token=%s service_id=%s from=%s to=%s released_missing=%s total_ms=%s",
+                "booking.availability cache_hit token=%s service_id=%s from=%s to=%s released_missing=%s "
+                "initial_ms=%s resolve_ms=%s release_ms=%s total_ms=%s",
                 token,
                 service_id,
                 from_ts.isoformat(),
                 to_ts.isoformat(),
                 released_missing,
+                round(initial_ms, 1),
+                round(resolve_ms, 1),
+                round(release_ms, 1),
                 round((time_module.monotonic() - req_started) * 1000, 1),
             )
             cached_payload["cached"] = True
@@ -1134,14 +1149,17 @@ async def link_availability(
         }
         logger.info(
             "booking.availability token=%s service_id=%s staff_total=%s linked_staff=%s slots=%s released_missing=%s "
-            "resolve_ms=%s google_busy_ms=%s db_busy_ms=%s slots_ms=%s total_ms=%s gmap_failed=%s slot_errors=%s",
+            "initial_ms=%s resolve_ms=%s release_ms=%s google_busy_ms=%s db_busy_ms=%s slots_ms=%s total_ms=%s "
+            "gmap_failed=%s slot_errors=%s",
             token,
             effective_sid,
             len(staff_list),
             linked_n,
             len(slots),
             released_missing,
+            round(initial_ms, 1),
             round(resolve_ms, 1),
+            round(release_ms, 1),
             round(google_busy_ms, 1),
             round(db_busy_ms, 1),
             round(slot_ms, 1),
