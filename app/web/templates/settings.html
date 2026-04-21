@@ -19,11 +19,6 @@
     </div>
   </div>
 
-  <section class="panel admin-section" id="summary-panel" hidden>
-    <h2 class="panel-title">概要</h2>
-    <div class="summary-cards" id="summary-cards"></div>
-  </section>
-
   <section class="panel admin-section" id="org-settings-panel" hidden>
     <h2 class="panel-title">担当の割り当て方</h2>
     <p class="muted panel-hint">予約が入ったときに、誰へ割り当てるかを決めます。迷う場合は「優先度順」で問題ありません。</p>
@@ -324,7 +319,6 @@
   }
 
   function showPanels(show) {
-    document.getElementById('summary-panel').hidden = !show;
     document.getElementById('org-settings-panel').hidden = !show;
     document.getElementById('org-email-panel').hidden = !show;
     document.getElementById('org-availability-panel').hidden = !show;
@@ -454,26 +448,6 @@
       var selP = document.getElementById('pref-org-select');
       if (selP) selP.value = org.slug;
     }
-    const cards = document.getElementById('summary-cards');
-    cards.innerHTML = '';
-    function card(title, body) {
-      const el = document.createElement('div');
-      el.className = 'summary-card';
-      el.innerHTML = '<h3>' + title + '</h3><p>' + body + '</p>';
-      cards.appendChild(el);
-    }
-    if (VIEWER_IS_ADMIN) {
-      card('組織', (org.name || '') + ' <code>' + (org.slug || '') + '</code>');
-    } else {
-      card('組織', org.name || '—');
-    }
-    card('公開ベース URL', '<code>' + (data.public_base_url || '') + '</code>');
-    const counts = data.counts || null;
-    if (counts) {
-      card('連携担当', String(counts.staff != null ? counts.staff : (data.staff || []).length) + ' 名');
-      card('予約リンク', String(counts.links != null ? counts.links : (data.links || []).length) + ' 件');
-    }
-    card('カレンダー認証', data.google_oauth_ready ? '設定済み' : '未設定');
     document.getElementById('org-routing-mode').value = org.routing_mode || 'priority';
 
     const em = org.email_settings_json || {};
