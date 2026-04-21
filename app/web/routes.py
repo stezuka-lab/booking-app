@@ -81,6 +81,26 @@ def _session_user_snapshot(request: Request) -> Any | None:
     )
 
 
+def _partial_session_user_snapshot(request: Request) -> Any | None:
+    user_id = request.session.get("user_id")
+    if user_id is None:
+        return None
+    try:
+        uid = int(user_id)
+    except (TypeError, ValueError):
+        request.session.clear()
+        return None
+    return SimpleNamespace(
+        id=uid,
+        username=(request.session.get("username") or "").strip() or None,
+        display_name=(request.session.get("display_name") or "").strip() or None,
+        role=(request.session.get("user_role") or "").strip() or None,
+        default_org_slug=(request.session.get("default_org_slug") or "").strip() or None,
+        _default_org_name=(request.session.get("default_org_name") or "").strip() or None,
+        _partial_session=True,
+    )
+
+
 def _store_session_user_snapshot(request: Request, user: Any) -> None:
     if not user:
         return
@@ -177,7 +197,20 @@ async def _require_login_html(request: Request, next_path: str) -> RedirectRespo
 async def app_home(request: Request) -> Any:
     started = time_module.perf_counter()
     settings = get_settings()
-    had_snapshot = _session_user_snapshot(request) is not None
+    full_snapshot = _session_user_snapshot(request)
+    had_snapshot = full_snapshot is not None
+    if full_snapshot is None:
+        partial = _partial_session_user_snapshot(request)
+        if partial is not None:
+            render_started = time_module.perf_counter()
+            response = _html("home.html", request, settings, app_viewer=_viewer_payload(partial))
+            render_ms = (time_module.perf_counter() - render_started) * 1000
+            logger.info(
+                "web.app_home authenticated=True snapshot=False optimistic=True user_ms=0.0 render_ms=%.1f total_ms=%.1f",
+                render_ms,
+                (time_module.perf_counter() - started) * 1000,
+            )
+            return response
     user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
     user_ms = (time_module.perf_counter() - user_started) * 1000

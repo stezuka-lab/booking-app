@@ -127,6 +127,31 @@
           });
         });
       }
+      if (!j.user || !j.user.role || !j.user.default_org_slug) {
+        var rawFetchForSession = window.__appRawFetch || window.fetch;
+        window.setTimeout(function () {
+          rawFetchForSession('/api/auth/me', { credentials: 'same-origin' })
+            .then(function (r) { return r.json(); })
+            .then(function (live) {
+              if (!live || !live.authenticated || !live.user) return;
+              window.__APP_VIEWER__ = live;
+              var liveIsAdmin = live.user.role === 'admin';
+              document.querySelectorAll('.nav-admin-only').forEach(function (n) {
+                n.hidden = !liveIsAdmin;
+              });
+              document.querySelectorAll('.nav-auth-only').forEach(function (n) {
+                n.hidden = false;
+              });
+              var liveOrgChip = document.getElementById('app-org-chip');
+              if (liveOrgChip) {
+                var liveOrgName = live.user.default_org_name ? String(live.user.default_org_name) : '';
+                liveOrgChip.textContent = liveOrgName || '';
+                liveOrgChip.hidden = !liveOrgName;
+              }
+            })
+            .catch(function () {});
+        }, 250);
+      }
     } else {
       var orgChipOff = document.getElementById('app-org-chip');
       if (orgChipOff) {
