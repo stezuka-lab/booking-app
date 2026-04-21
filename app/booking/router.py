@@ -1892,30 +1892,44 @@ async def admin_org_summary(
     include_counts: bool = False,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
+    req_started = time_module.monotonic()
+    section_started = req_started
     await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=slug)
+    auth_ms = (time_module.monotonic() - section_started) * 1000
+    section_started = time_module.monotonic()
     org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+    org_ms = (time_module.monotonic() - section_started) * 1000
     if not org:
         raise HTTPException(404, "org not found")
+    section_started = time_module.monotonic()
     staff = (
         (await db.scalars(select(StaffMember).where(StaffMember.org_id == org.id))).all()
         if include_staff
         else []
     )
+    staff_ms = (time_module.monotonic() - section_started) * 1000
+    section_started = time_module.monotonic()
     services = (
         (await db.scalars(select(BookingService).where(BookingService.org_id == org.id))).all()
         if include_services or include_links
         else []
     )
+    services_ms = (time_module.monotonic() - section_started) * 1000
+    section_started = time_module.monotonic()
     links = (
         (await db.scalars(select(PublicBookingLink).where(PublicBookingLink.org_id == org.id))).all()
         if include_links
         else []
     )
+    links_ms = (time_module.monotonic() - section_started) * 1000
+    section_started = time_module.monotonic()
     forms = (
         (await db.scalars(select(BookingFormDefinition).where(BookingFormDefinition.org_id == org.id))).all()
         if include_forms
         else []
     )
+    forms_ms = (time_module.monotonic() - section_started) * 1000
+    section_started = time_module.monotonic()
     base = settings.public_base_url_value()
     service_map = {int(s.id): s for s in services}
     if include_staff:
@@ -1934,6 +1948,8 @@ async def admin_org_summary(
         }
     else:
         active_staff_ids = set()
+    active_staff_ms = (time_module.monotonic() - section_started) * 1000
+    section_started = time_module.monotonic()
     counts: dict[str, int] = {}
     if include_counts:
         if include_staff:
@@ -1966,6 +1982,8 @@ async def admin_org_summary(
         counts["forms"] = len(forms) if include_forms else int(
             await db.scalar(select(func.count()).select_from(BookingFormDefinition).where(BookingFormDefinition.org_id == org.id)) or 0
         )
+    counts_ms = (time_module.monotonic() - section_started) * 1000
+    section_started = time_module.monotonic()
     links_payload: list[dict[str, Any]] = []
     for l in links:
         raw_staff_ids = json_list_or_empty(l.staff_ids_json)
@@ -2012,7 +2030,9 @@ async def admin_org_summary(
                 "public_path": f"/app/booking/{l.token}",
             }
         )
-    return {
+    links_payload_ms = (time_module.monotonic() - section_started) * 1000
+    section_started = time_module.monotonic()
+    response_payload = {
         "public_base_url": base,
         "org": {
             "id": org.id,
@@ -2046,6 +2066,36 @@ async def admin_org_summary(
         "counts": counts,
         "forms": [{"id": f.id, "name": f.name, "active": f.active} for f in forms],
     }
+    payload_ms = (time_module.monotonic() - section_started) * 1000
+    total_ms = (time_module.monotonic() - req_started) * 1000
+    logger.info(
+        "booking.admin.summary slug=%s include_staff=%s include_services=%s include_links=%s include_forms=%s "
+        "include_counts=%s staff_rows=%s service_rows=%s link_rows=%s form_rows=%s "
+        "auth_ms=%s org_ms=%s staff_ms=%s services_ms=%s links_ms=%s forms_ms=%s active_staff_ms=%s "
+        "counts_ms=%s links_payload_ms=%s payload_ms=%s total_ms=%s",
+        slug,
+        include_staff,
+        include_services,
+        include_links,
+        include_forms,
+        include_counts,
+        len(staff),
+        len(services),
+        len(links),
+        len(forms),
+        round(auth_ms, 1),
+        round(org_ms, 1),
+        round(staff_ms, 1),
+        round(services_ms, 1),
+        round(links_ms, 1),
+        round(forms_ms, 1),
+        round(active_staff_ms, 1),
+        round(counts_ms, 1),
+        round(links_payload_ms, 1),
+        round(payload_ms, 1),
+        round(total_ms, 1),
+    )
+    return response_payload
 
 
 @router.get("/api/booking/admin/orgs/{slug}/calendar-diagnostics")
