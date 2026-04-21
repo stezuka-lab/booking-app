@@ -171,8 +171,6 @@
     }, true);
     if (j.authenticated) {
       var prefetched = Object.create(null);
-      var prefetchQueue = ['/app', '/app/calendar', '/app/settings', '/app/campaigns'];
-      if (isAdmin) prefetchQueue.push('/app/accounts');
       function canPrefetch(href) {
         return href && href.indexOf('/app') === 0 && href !== window.location.pathname && !prefetched[href];
       }
@@ -188,22 +186,6 @@
           prefetched[href] = false;
         });
       }
-      function scheduleIdle(fn, timeout) {
-        if ('requestIdleCallback' in window) {
-          window.requestIdleCallback(fn, { timeout: timeout || 3500 });
-        } else {
-          window.setTimeout(fn, timeout || 2500);
-        }
-      }
-      scheduleIdle(function () {
-        var i = 0;
-        function next() {
-          if (i >= prefetchQueue.length) return;
-          prefetchPage(prefetchQueue[i++]);
-          window.setTimeout(next, 600);
-        }
-        next();
-      }, 2500);
       document.addEventListener('pointerenter', function (ev) {
         var link = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
         if (!link) return;

@@ -112,6 +112,50 @@ def _store_session_user_snapshot(request: Request, user: Any) -> None:
     request.session["default_org_name"] = getattr(user, "_default_org_name", None) or ""
 
 
+def _quick_session_user_for_shell(request: Request) -> tuple[Any | None, bool]:
+    snap = _session_user_snapshot(request)
+    if snap is not None:
+        return snap, False
+    partial = _partial_session_user_snapshot(request)
+    if partial is not None:
+        return partial, True
+    return None, False
+
+
+def _render_optimistic_app_page(
+    template_name: str,
+    request: Request,
+    settings: Settings,
+    *,
+    path: str,
+    started: float,
+    viewer_is_admin: bool | None = None,
+) -> HTMLResponse | None:
+    user, optimistic = _quick_session_user_for_shell(request)
+    if user is None:
+        return None
+    render_started = time_module.perf_counter()
+    if viewer_is_admin is None:
+        viewer_is_admin = bool(getattr(user, "role", None) == "admin")
+    response = _html(
+        template_name,
+        request,
+        settings,
+        viewer_is_admin=viewer_is_admin,
+        app_viewer=_viewer_payload(user),
+    )
+    render_ms = (time_module.perf_counter() - render_started) * 1000
+    logger.info(
+        "web.app_page path=%s authenticated=True snapshot=%s optimistic=%s user_ms=0.0 render_ms=%.1f total_ms=%.1f",
+        path,
+        not optimistic,
+        optimistic,
+        render_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
+    return response
+
+
 async def _session_user(request: Request):
     snap = _session_user_snapshot(request)
     if snap:
@@ -239,26 +283,46 @@ async def app_home(request: Request) -> Any:
 async def app_login(request: Request) -> Any:
     settings = get_settings()
     nxt = (request.query_params.get("next") or "").strip() or "/app"
-    return _html("login.html", request, settings, login_next=nxt, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
+    user, _ = _quick_session_user_for_shell(request)
+    return _html("login.html", request, settings, login_next=nxt, app_viewer=_viewer_payload(user))
 
 
 @router.get("/app/forgot-password", response_class=HTMLResponse)
 async def app_forgot_password(request: Request) -> Any:
     settings = get_settings()
-    return _html("forgot_password.html", request, settings, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
+    user, _ = _quick_session_user_for_shell(request)
+    return _html("forgot_password.html", request, settings, app_viewer=_viewer_payload(user))
 
 
 @router.get("/app/reset-password", response_class=HTMLResponse)
 async def app_reset_password(request: Request) -> Any:
     settings = get_settings()
     tok = (request.query_params.get("token") or "").strip()
-    return _html("reset_password.html", request, settings, reset_token=tok, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
+    user, _ = _quick_session_user_for_shell(request)
+    return _html("reset_password.html", request, settings, reset_token=tok, app_viewer=_viewer_payload(user))
 
 
 @router.get("/app/accounts", response_class=HTMLResponse)
 async def app_accounts(request: Request) -> Any:
     started = time_module.perf_counter()
     settings = get_settings()
+    snap = _session_user_snapshot(request)
+    if snap is not None:
+        render_started = time_module.perf_counter()
+        response = _html(
+            "accounts.html",
+            request,
+            settings,
+            viewer_is_admin=bool(snap.role == "admin"),
+            app_viewer=_viewer_payload(snap),
+        )
+        render_ms = (time_module.perf_counter() - render_started) * 1000
+        logger.info(
+            "web.app_page path=/app/accounts authenticated=True snapshot=True optimistic=False user_ms=0.0 render_ms=%.1f total_ms=%.1f",
+            render_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
+        return response
     had_snapshot = _session_user_snapshot(request) is not None
     user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
@@ -287,18 +351,30 @@ async def app_accounts(request: Request) -> Any:
 @router.get("/app/booking/{token}", response_class=HTMLResponse)
 async def app_booking(request: Request, token: str) -> Any:
     settings = get_settings()
-    return _html("booking.html", request, settings, link_token=token, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
+    user, _ = _quick_session_user_for_shell(request)
+    return _html("booking.html", request, settings, link_token=token, app_viewer=_viewer_payload(user))
 
 
 @router.get("/app/manage/{manage_token}", response_class=HTMLResponse)
 async def app_booking_manage(request: Request, manage_token: str) -> Any:
     settings = get_settings()
-    return _html("manage_booking.html", request, settings, manage_token=manage_token, app_viewer=_viewer_payload(await _load_session_user_with_org(request)))
+    user, _ = _quick_session_user_for_shell(request)
+    return _html("manage_booking.html", request, settings, manage_token=manage_token, app_viewer=_viewer_payload(user))
 
 
 @router.get("/app/admin", response_class=HTMLResponse)
 async def app_admin(request: Request) -> Any:
+    started = time_module.perf_counter()
     settings = get_settings()
+    optimistic_response = _render_optimistic_app_page(
+        "admin.html",
+        request,
+        settings,
+        path="/app/admin",
+        started=started,
+    )
+    if optimistic_response is not None:
+        return optimistic_response
     u = await _load_session_user_with_org(request)
     if not u:
         return RedirectResponse(url="/app/login?next=" + quote("/app/admin", safe=""), status_code=302)
@@ -309,6 +385,15 @@ async def app_admin(request: Request) -> Any:
 async def app_campaigns_alias(request: Request) -> Any:
     started = time_module.perf_counter()
     settings = get_settings()
+    optimistic_response = _render_optimistic_app_page(
+        "admin.html",
+        request,
+        settings,
+        path="/app/campaigns",
+        started=started,
+    )
+    if optimistic_response is not None:
+        return optimistic_response
     had_snapshot = _session_user_snapshot(request) is not None
     user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
@@ -338,6 +423,15 @@ async def app_campaigns_alias(request: Request) -> Any:
 async def app_settings(request: Request) -> Any:
     started = time_module.perf_counter()
     settings = get_settings()
+    optimistic_response = _render_optimistic_app_page(
+        "settings.html",
+        request,
+        settings,
+        path="/app/settings",
+        started=started,
+    )
+    if optimistic_response is not None:
+        return optimistic_response
     had_snapshot = _session_user_snapshot(request) is not None
     user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
@@ -367,6 +461,15 @@ async def app_settings(request: Request) -> Any:
 async def app_calendar(request: Request) -> Any:
     started = time_module.perf_counter()
     settings = get_settings()
+    optimistic_response = _render_optimistic_app_page(
+        "calendar.html",
+        request,
+        settings,
+        path="/app/calendar",
+        started=started,
+    )
+    if optimistic_response is not None:
+        return optimistic_response
     had_snapshot = _session_user_snapshot(request) is not None
     user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
