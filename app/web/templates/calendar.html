@@ -65,6 +65,8 @@
   var msgEl = document.getElementById('cal-msg');
   var slugDisplayEl = document.getElementById('cal-slug-display');
   var currentOrgSlug = '';
+  var calendarSummaryCacheTtlMs = 120000;
+  var oauthStatusCacheTtlMs = 300000;
 
   function applyMeSlug() {
     return Promise.resolve().then(function () {
@@ -104,6 +106,41 @@
     return {};
   }
 
+  function safeStorageGet(key) {
+    try {
+      return sessionStorage.getItem(key);
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function safeStorageSet(key, value) {
+    try {
+      sessionStorage.setItem(key, value);
+    } catch (e) {}
+  }
+
+  function readTimedCache(key, ttlMs) {
+    var raw = safeStorageGet(key);
+    if (!raw) return null;
+    try {
+      var parsed = JSON.parse(raw);
+      if (!parsed || !parsed.data || !parsed.ts) return null;
+      if ((Date.now() - Number(parsed.ts)) > ttlMs) return null;
+      return parsed.data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeTimedCache(key, data) {
+    safeStorageSet(key, JSON.stringify({ ts: Date.now(), data: data }));
+  }
+
+  function calendarSummaryCacheKey() {
+    return currentOrgSlug ? 'booking.calendar.summary.' + currentOrgSlug : '';
+  }
+
   function setAddStaffButtonEnabled(enabled) {
     var btn = document.getElementById('btn-add-staff-calendar');
     if (btn) btn.disabled = !enabled;
@@ -140,9 +177,19 @@
   }
 
   function fetchOAuthStatus() {
+    var cacheKey = 'booking.calendar.oauth_status';
+    var cached = readTimedCache(cacheKey, oauthStatusCacheTtlMs);
+    if (cached) {
+      showOAuthStatus(cached);
+      return Promise.resolve(cached);
+    }
     return fetch('/api/booking/oauth/google/status')
       .then(function (r) { return r.json(); })
-      .then(showOAuthStatus)
+      .then(function (data) {
+        writeTimedCache(cacheKey, data);
+        showOAuthStatus(data);
+        return data;
+      })
       .catch(function () { document.getElementById('oauth-setup-panel').hidden = true; });
   }
 
@@ -276,7 +323,7 @@
               return;
             }
             msgEl.textContent = zoomUrl ? 'Zoom URL を保存しました。' : 'Zoom URL を解除しました。';
-            loadAll();
+            loadAll(true);
           })
           .catch(function (e) {
             btn.disabled = false;
@@ -337,7 +384,7 @@
               return;
             }
             msgEl.textContent = '連携行を削除しました。';
-            loadAll();
+            loadAll(true);
           })
           .catch(function (e) {
             msgEl.textContent = String(e);
@@ -384,9 +431,17 @@
       '</tbody></table>';
   }
 
-  function loadAll() {
+  function loadAll(forceRefresh) {
     if (!ensureOrgSelected()) return;
     msgEl.textContent = '';
+    var cacheKey = calendarSummaryCacheKey();
+    if (!forceRefresh && cacheKey) {
+      var cached = readTimedCache(cacheKey, calendarSummaryCacheTtlMs);
+      if (cached) {
+        renderStaffTable(cached);
+        return Promise.resolve(cached);
+      }
+    }
     var q = new URLSearchParams({
       include_staff: 'true',
       include_services: 'false',
@@ -394,7 +449,7 @@
       include_forms: 'false',
       include_counts: 'false'
     });
-    fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString(), {
+    return fetch('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString(), {
       credentials: 'same-origin',
       headers: headers(),
     })
@@ -419,7 +474,9 @@
           }
           return;
         }
+        if (cacheKey) writeTimedCache(cacheKey, x.j);
         renderStaffTable(x.j);
+        return x.j;
       })
       .catch(function (e) {
         msgEl.textContent = String(e);
@@ -466,7 +523,7 @@
             if (!y.r.ok || !y.j.url) {
               msgEl.textContent =
                 typeof y.j.detail === 'object' ? JSON.stringify(y.j.detail) : y.j.detail || y.r.statusText;
-              loadAll();
+              loadAll(true);
               return;
             }
             window.location.href = y.j.url;
@@ -509,13 +566,20 @@
 
   var q = window.location.search;
   var qp = new URLSearchParams(q);
+  var forceCalendarRefresh = false;
   if (qp.get('google_oauth') === 'ok') {
+    forceCalendarRefresh = true;
+    try {
+      sessionStorage.removeItem('booking.calendar.oauth_status');
+      if (currentOrgSlug) sessionStorage.removeItem('booking.calendar.summary.' + currentOrgSlug);
+    } catch (e) {}
     var b = document.getElementById('oauth-banner');
     b.hidden = false;
     b.textContent = 'カレンダー認証が完了しました（担当 ID: ' + (qp.get('staff_id') || '') + '）。';
     window.history.replaceState({}, '', '/app/calendar');
   }
   if (qp.get('google_oauth') === 'err') {
+    forceCalendarRefresh = true;
     var be = document.getElementById('oauth-banner-err');
     be.hidden = false;
     be.textContent =
@@ -530,7 +594,7 @@
     .then(function () {
       return Promise.all([
         fetchOAuthStatus(),
-        Promise.resolve().then(function () { loadAll(); }),
+        Promise.resolve().then(function () { return loadAll(forceCalendarRefresh); }),
       ]);
     });
 })();

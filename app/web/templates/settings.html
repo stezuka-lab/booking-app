@@ -684,7 +684,7 @@
   function maybeAutoLoadSummary() {
     applyMeOrgPreference()
       .then(function () {
-        return loadSummary(true);
+        return loadSummary(false);
       })
       .catch(function () {});
   }

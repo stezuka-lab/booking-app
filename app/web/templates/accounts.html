@@ -125,6 +125,7 @@
 <script>
 (function () {
   const msg = document.getElementById('acct-msg');
+  const usersCacheTtlMs = 60000;
 
   function setMsg(text, kind) {
     msg.textContent = text || '';
@@ -133,6 +134,31 @@
 
   {% if viewer_is_admin | default(false) %}
   var ORG_SLUG_RE = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+  function readUsersCache() {
+    try {
+      var raw = sessionStorage.getItem('booking.accounts.users');
+      if (!raw) return null;
+      var parsed = JSON.parse(raw);
+      if (!parsed || !parsed.data || !parsed.ts) return null;
+      if ((Date.now() - Number(parsed.ts)) > usersCacheTtlMs) return null;
+      return parsed.data;
+    } catch (e) {
+      return null;
+    }
+  }
+
+  function writeUsersCache(data) {
+    try {
+      sessionStorage.setItem('booking.accounts.users', JSON.stringify({ ts: Date.now(), data: data }));
+    } catch (e) {}
+  }
+
+  function clearUsersCache() {
+    try {
+      sessionStorage.removeItem('booking.accounts.users');
+    } catch (e) {}
+  }
 
   function esc(value) {
     return String(value == null ? '' : value)
@@ -283,8 +309,15 @@
       .join(' ');
   }
 
-  async function loadUsers() {
+  async function loadUsers(forceRefresh) {
     setMsg('');
+    if (!forceRefresh) {
+      var cached = readUsersCache();
+      if (cached) {
+        renderUsers(cached);
+        return cached;
+      }
+    }
     const r = await fetch('/api/auth/admin/users', { credentials: 'same-origin' });
     const j = await r.json().catch(function () {
       return {};
@@ -293,6 +326,12 @@
       setMsg(formatApiError(j) || r.statusText, 'err');
       return;
     }
+    writeUsersCache(j);
+    renderUsers(j);
+    return j;
+  }
+
+  function renderUsers(j) {
     const tb = document.getElementById('users-tbody');
     tb.innerHTML = '';
     (j.users || []).forEach(function (u) {
@@ -380,6 +419,7 @@
         }
         inOrgName.value = jOrg.org_name || '';
         inOrgSlug.value = jOrg.default_org_slug || '';
+        clearUsersCache();
         setMsg('ユーザー「' + (u.username || '') + '」の組織を保存しました', 'ok');
         setTimeout(function () {
           setMsg('');
@@ -433,7 +473,8 @@
           alert(formatApiError(j3) || 'エラー');
           return;
         }
-        await loadUsers();
+        clearUsersCache();
+        await loadUsers(true);
       });
       td.appendChild(b0);
       td.appendChild(b1);
@@ -548,14 +589,18 @@
     document.getElementById('new-password').value = '';
     if (orgNameEl) orgNameEl.value = '';
     if (orgSlugEl) orgSlugEl.value = '';
-    await loadUsers();
+    clearUsersCache();
+    await loadUsers(true);
   });
 
   document.getElementById('btn-refresh-audit').addEventListener('click', function () {
     loadAuditLogs().catch(function () {});
   });
 
-  Promise.all([loadUsers(), loadAuditLogs()]).catch(function () {});
+  loadUsers(false).catch(function () {});
+  window.setTimeout(function () {
+    loadAuditLogs().catch(function () {});
+  }, 1200);
   {% endif %}
 })();
 </script>

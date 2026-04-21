@@ -224,11 +224,31 @@ async def app_reset_password(request: Request) -> Any:
 
 @router.get("/app/accounts", response_class=HTMLResponse)
 async def app_accounts(request: Request) -> Any:
+    started = time_module.perf_counter()
     settings = get_settings()
+    had_snapshot = _session_user_snapshot(request) is not None
+    user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
+    user_ms = (time_module.perf_counter() - user_started) * 1000
     if not u:
+        logger.info(
+            "web.app_page path=/app/accounts authenticated=False snapshot=%s user_ms=%.1f total_ms=%.1f",
+            had_snapshot,
+            user_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
         return RedirectResponse(url="/app/login?next=" + quote("/app/accounts", safe=""), status_code=302)
-    return _html("accounts.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
+    render_started = time_module.perf_counter()
+    response = _html("accounts.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
+    render_ms = (time_module.perf_counter() - render_started) * 1000
+    logger.info(
+        "web.app_page path=/app/accounts authenticated=True snapshot=%s user_ms=%.1f render_ms=%.1f total_ms=%.1f",
+        had_snapshot,
+        user_ms,
+        render_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
+    return response
 
 
 @router.get("/app/booking/{token}", response_class=HTMLResponse)
@@ -254,26 +274,86 @@ async def app_admin(request: Request) -> Any:
 
 @router.get("/app/campaigns", response_class=HTMLResponse)
 async def app_campaigns_alias(request: Request) -> Any:
+    started = time_module.perf_counter()
     settings = get_settings()
+    had_snapshot = _session_user_snapshot(request) is not None
+    user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
+    user_ms = (time_module.perf_counter() - user_started) * 1000
     if not u:
+        logger.info(
+            "web.app_page path=/app/campaigns authenticated=False snapshot=%s user_ms=%.1f total_ms=%.1f",
+            had_snapshot,
+            user_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
         return RedirectResponse(url="/app/login?next=" + quote("/app/campaigns", safe=""), status_code=302)
-    return _html("admin.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
+    render_started = time_module.perf_counter()
+    response = _html("admin.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
+    render_ms = (time_module.perf_counter() - render_started) * 1000
+    logger.info(
+        "web.app_page path=/app/campaigns authenticated=True snapshot=%s user_ms=%.1f render_ms=%.1f total_ms=%.1f",
+        had_snapshot,
+        user_ms,
+        render_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
+    return response
 
 
 @router.get("/app/settings", response_class=HTMLResponse)
 async def app_settings(request: Request) -> Any:
+    started = time_module.perf_counter()
     settings = get_settings()
+    had_snapshot = _session_user_snapshot(request) is not None
+    user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
+    user_ms = (time_module.perf_counter() - user_started) * 1000
     if not u:
+        logger.info(
+            "web.app_page path=/app/settings authenticated=False snapshot=%s user_ms=%.1f total_ms=%.1f",
+            had_snapshot,
+            user_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
         return RedirectResponse(url="/app/login?next=" + quote("/app/settings", safe=""), status_code=302)
-    return _html("settings.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
+    render_started = time_module.perf_counter()
+    response = _html("settings.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
+    render_ms = (time_module.perf_counter() - render_started) * 1000
+    logger.info(
+        "web.app_page path=/app/settings authenticated=True snapshot=%s user_ms=%.1f render_ms=%.1f total_ms=%.1f",
+        had_snapshot,
+        user_ms,
+        render_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
+    return response
 
 
 @router.get("/app/calendar", response_class=HTMLResponse)
 async def app_calendar(request: Request) -> Any:
+    started = time_module.perf_counter()
     settings = get_settings()
+    had_snapshot = _session_user_snapshot(request) is not None
+    user_started = time_module.perf_counter()
     u = await _load_session_user_with_org(request)
+    user_ms = (time_module.perf_counter() - user_started) * 1000
     if not u:
+        logger.info(
+            "web.app_page path=/app/calendar authenticated=False snapshot=%s user_ms=%.1f total_ms=%.1f",
+            had_snapshot,
+            user_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
         return RedirectResponse(url="/app/login?next=" + quote("/app/calendar", safe=""), status_code=302)
-    return _html("calendar.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
+    render_started = time_module.perf_counter()
+    response = _html("calendar.html", request, settings, viewer_is_admin=bool(u and u.role == "admin"), app_viewer=_viewer_payload(u))
+    render_ms = (time_module.perf_counter() - render_started) * 1000
+    logger.info(
+        "web.app_page path=/app/calendar authenticated=True snapshot=%s user_ms=%.1f render_ms=%.1f total_ms=%.1f",
+        had_snapshot,
+        user_ms,
+        render_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
+    return response
