@@ -18,6 +18,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.deps import ensure_booking_admin, get_current_app_user
+from app.auth.models import AppUser
 from app.booking.calendar_policy import day_is_blocked_for_booking
 from app.booking.calendar_title import format_calendar_event_title
 from app.booking.calendar_google import (
@@ -1879,6 +1880,45 @@ async def admin_list_orgs(
     }
 
 
+async def _load_summary_org_for_admin(
+    request: Request,
+    slug: str,
+    db: AsyncSession,
+    settings: Settings,
+    x_admin_secret: str | None,
+) -> BookingOrg:
+    sec = (settings.booking_admin_secret or "").strip()
+    if sec and (x_admin_secret or "").strip() == sec:
+        org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
+        if not org:
+            raise HTTPException(404, "org not found")
+        return org
+    uid = request.session.get("user_id")
+    if uid is None:
+        raise HTTPException(status_code=401, detail="ログインするか、正しい X-Admin-Secret を指定してください")
+    try:
+        user_id = int(uid)
+    except (TypeError, ValueError):
+        request.session.pop("user_id", None)
+        raise HTTPException(status_code=401, detail="ログインするか、正しい X-Admin-Secret を指定してください")
+    row = (
+        await db.execute(
+            select(AppUser.role, AppUser.is_active, AppUser.default_org_slug, BookingOrg)
+            .select_from(AppUser)
+            .join(BookingOrg, BookingOrg.slug == slug)
+            .where(AppUser.id == user_id)
+        )
+    ).one_or_none()
+    if not row:
+        raise HTTPException(status_code=401, detail="ログインするか、正しい X-Admin-Secret を指定してください")
+    role, is_active, default_org_slug, org = row
+    if not is_active:
+        raise HTTPException(status_code=401, detail="ログインするか、正しい X-Admin-Secret を指定してください")
+    if role == "admin" or (default_org_slug or "").strip() == slug.strip():
+        return org
+    raise HTTPException(status_code=403, detail="この組織を操作する権限がありません")
+
+
 @router.get("/api/booking/admin/orgs/{slug}/summary")
 async def admin_org_summary(
     request: Request,
@@ -1894,13 +1934,9 @@ async def admin_org_summary(
 ) -> dict[str, Any]:
     req_started = time_module.monotonic()
     section_started = req_started
-    await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=slug)
+    org = await _load_summary_org_for_admin(request, slug, db, settings, x_admin_secret)
     auth_ms = (time_module.monotonic() - section_started) * 1000
-    section_started = time_module.monotonic()
-    org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
-    org_ms = (time_module.monotonic() - section_started) * 1000
-    if not org:
-        raise HTTPException(404, "org not found")
+    org_ms = 0.0
     section_started = time_module.monotonic()
     staff = (
         (await db.scalars(select(StaffMember).where(StaffMember.org_id == org.id))).all()
@@ -1952,7 +1988,7 @@ async def admin_org_summary(
     section_started = time_module.monotonic()
     counts: dict[str, int] = {}
     if include_counts:
-        if include_staff:
+        if include_staff and include_services and include_links and include_forms:
             counts["staff"] = len(
                 [
                     s
@@ -1960,28 +1996,50 @@ async def admin_org_summary(
                     if bool(getattr(s, "active", True)) and bool(getattr(s, "google_refresh_token", None))
                 ]
             )
+            counts["services"] = len(services)
+            counts["links"] = len(links)
+            counts["forms"] = len(forms)
         else:
-            counts["staff"] = int(
-                await db.scalar(
-                    select(func.count())
-                    .select_from(StaffMember)
-                    .where(
-                        StaffMember.org_id == org.id,
-                        StaffMember.active.is_(True),
-                        StaffMember.google_refresh_token.is_not(None),
+            row = (
+                await db.execute(
+                    select(
+                        select(func.count())
+                        .select_from(StaffMember)
+                        .where(
+                            StaffMember.org_id == org.id,
+                            StaffMember.active.is_(True),
+                            StaffMember.google_refresh_token.is_not(None),
+                        )
+                        .scalar_subquery()
+                        .label("staff_count"),
+                        select(func.count())
+                        .select_from(BookingService)
+                        .where(BookingService.org_id == org.id)
+                        .scalar_subquery()
+                        .label("services_count"),
+                        select(func.count())
+                        .select_from(PublicBookingLink)
+                        .where(PublicBookingLink.org_id == org.id)
+                        .scalar_subquery()
+                        .label("links_count"),
+                        select(func.count())
+                        .select_from(BookingFormDefinition)
+                        .where(BookingFormDefinition.org_id == org.id)
+                        .scalar_subquery()
+                        .label("forms_count"),
                     )
                 )
-                or 0
-            )
-        counts["services"] = len(services) if include_services else int(
-            await db.scalar(select(func.count()).select_from(BookingService).where(BookingService.org_id == org.id)) or 0
-        )
-        counts["links"] = len(links) if include_links else int(
-            await db.scalar(select(func.count()).select_from(PublicBookingLink).where(PublicBookingLink.org_id == org.id)) or 0
-        )
-        counts["forms"] = len(forms) if include_forms else int(
-            await db.scalar(select(func.count()).select_from(BookingFormDefinition).where(BookingFormDefinition.org_id == org.id)) or 0
-        )
+            ).one()
+            counts["staff"] = len(
+                [
+                    s
+                    for s in staff
+                    if bool(getattr(s, "active", True)) and bool(getattr(s, "google_refresh_token", None))
+                ]
+            ) if include_staff else int(row.staff_count or 0)
+            counts["services"] = len(services) if include_services else int(row.services_count or 0)
+            counts["links"] = len(links) if include_links else int(row.links_count or 0)
+            counts["forms"] = len(forms) if include_forms else int(row.forms_count or 0)
     counts_ms = (time_module.monotonic() - section_started) * 1000
     section_started = time_module.monotonic()
     links_payload: list[dict[str, Any]] = []
