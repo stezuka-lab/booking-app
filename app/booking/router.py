@@ -1024,31 +1024,41 @@ async def link_availability(
         tts = to_ts if to_ts.tzinfo else to_ts.replace(tzinfo=timezone.utc)
         resolve_ms = (time_module.monotonic() - resolve_started) * 1000
         released_missing = 0
+        released_total = 0
+        released_stale = 0
         release_ms = 0.0
         if staff_list:
             release_started = time_module.monotonic()
             release_start = min(fts, datetime.now(timezone.utc) - timedelta(days=1))
             release_end = tts + AVAILABILITY_RANGE_END_SLACK
-            released_missing = await _release_bookings_with_missing_google_events(
-                db,
-                settings,
-                staff_list,
-                release_start,
-                release_end,
-            )
-            if released_missing:
+            if cached_payload is not None:
+                reconcile = await _reconcile_staff_calendar_blocks(db, settings, staff_list, release_start, release_end)
+                released_missing = int(reconcile.get("released_missing_google_events") or 0)
+                released_stale = int(reconcile.get("released_stale_synced") or 0)
+                released_total = int(reconcile.get("released_total") or 0)
+            else:
+                released_missing = await _release_bookings_with_missing_google_events(
+                    db,
+                    settings,
+                    staff_list,
+                    release_start,
+                    release_end,
+                )
+                released_total = released_missing
+            if released_total:
                 await db.commit()
                 _clear_public_availability_cache(token)
             release_ms = (time_module.monotonic() - release_started) * 1000
-        if cached_payload is not None and not released_missing:
+        if cached_payload is not None and not released_total:
             logger.info(
-                "booking.availability cache_hit token=%s service_id=%s from=%s to=%s released_missing=%s "
+                "booking.availability cache_hit token=%s service_id=%s from=%s to=%s released_missing=%s released_stale=%s "
                 "initial_ms=%s resolve_ms=%s release_ms=%s total_ms=%s",
                 token,
                 service_id,
                 from_ts.isoformat(),
                 to_ts.isoformat(),
                 released_missing,
+                released_stale,
                 round(initial_ms, 1),
                 round(resolve_ms, 1),
                 round(release_ms, 1),
@@ -1087,6 +1097,24 @@ async def link_availability(
             gmap = {}
             google_busy_errors = {}
         google_busy_ms = (time_module.monotonic() - google_busy_started) * 1000
+        if staff_list:
+            reconcile_started = time_module.monotonic()
+            reconcile = await _reconcile_staff_calendar_blocks(
+                db,
+                settings,
+                staff_list,
+                fts,
+                tts,
+                google_busy_map=gmap,
+                google_busy_errors=google_busy_errors,
+            )
+            released_missing = int(reconcile.get("released_missing_google_events") or released_missing)
+            released_stale = int(reconcile.get("released_stale_synced") or 0)
+            released_total = int(reconcile.get("released_total") or released_total)
+            if released_total:
+                await db.commit()
+                _clear_public_availability_cache(token)
+            release_ms += (time_module.monotonic() - reconcile_started) * 1000
         db_busy_started = time_module.monotonic()
         db_busy_map = await _db_booking_intervals_map_for_staff(
             db,
@@ -1189,7 +1217,7 @@ async def link_availability(
             },
         }
         logger.info(
-            "booking.availability token=%s service_id=%s staff_total=%s linked_staff=%s slots=%s released_missing=%s "
+            "booking.availability token=%s service_id=%s staff_total=%s linked_staff=%s slots=%s released_missing=%s released_stale=%s "
             "initial_ms=%s resolve_ms=%s release_ms=%s google_busy_ms=%s db_busy_ms=%s slots_ms=%s total_ms=%s "
             "gmap_failed=%s slot_errors=%s",
             token,
@@ -1198,6 +1226,7 @@ async def link_availability(
             linked_n,
             len(slots),
             released_missing,
+            released_stale,
             round(initial_ms, 1),
             round(resolve_ms, 1),
             round(release_ms, 1),
@@ -1430,6 +1459,40 @@ async def _create_booking_from_body(
             )
         staff = picked
     mark("staff_pick_ms")
+    final_gmap, _final_google_busy_errors = _coerce_google_busy_result(
+        await _load_google_busy_map(
+            [staff],
+            start - timedelta(minutes=max(0, buf_org)),
+            end + timedelta(minutes=max(0, buf_org)),
+            settings,
+        )
+    )
+    if not await staff_is_free(
+        db,
+        staff,
+        start,
+        end,
+        settings,
+        final_gmap,
+        buffer_minutes=buf_org,
+    ):
+        logger.warning(
+            "booking rejected final_slot_not_available staff_id=%s start=%s end=%s buf=%s",
+            staff.id,
+            start.isoformat(),
+            end.isoformat(),
+            buf_org,
+        )
+        raise HTTPException(
+            status_code=409,
+            detail=booking_conflict_detail_json(
+                "slot_not_available",
+                "この時間は直前に予約済みになりました。別の枠を選び直してください。",
+                duration_minutes=service.duration_minutes,
+                buffer_minutes=buf_org,
+            ),
+        )
+    mark("final_check_ms")
 
     if not org.auto_confirm:
         raise HTTPException(
@@ -1492,7 +1555,7 @@ async def _create_booking_from_body(
     logger.info(
         "booking.create token=%s booking_id=%s staff_id=%s service_id=%s "
         "resolve_ms=%.1f google_probe_ms=%.1f release_ms=%.1f reconcile_ms=%.1f "
-        "staff_pick_ms=%.1f insert_flush_ms=%.1f finalize_ms=%.1f total_ms=%.1f",
+        "staff_pick_ms=%.1f final_check_ms=%.1f insert_flush_ms=%.1f finalize_ms=%.1f total_ms=%.1f",
         token,
         b.id,
         staff.id,
@@ -1502,6 +1565,7 @@ async def _create_booking_from_body(
         timings.get("release_ms", 0.0),
         timings.get("reconcile_ms", 0.0),
         timings.get("staff_pick_ms", 0.0),
+        timings.get("final_check_ms", 0.0),
         timings.get("insert_flush_ms", 0.0),
         timings.get("finalize_ms", 0.0),
         (time_module.perf_counter() - t_total) * 1000,
