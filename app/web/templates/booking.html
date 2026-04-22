@@ -120,7 +120,6 @@
   let lastLoadedAvailabilityKey = '';
   const availabilityCache = new Map();
   const META_CACHE_TTL_MS = 60000;
-  const AVAILABILITY_CACHE_TTL_MS = 30000;
   const META_CACHE_KEY = 'booking.link.meta.' + token;
   let bookingGridState = null;
   const HOUR_PX = 40;
@@ -155,10 +154,6 @@
     } catch (e) {
       /* storage may be unavailable */
     }
-  }
-
-  function availabilityStorageKey(cacheKey) {
-    return 'booking.link.availability.' + token + '.' + cacheKey;
   }
 
   function clearAvailabilityCaches() {
@@ -1063,20 +1058,6 @@
       renderCalendar();
       return;
     }
-    if (!forceRefresh) {
-      const cachedAvailability = readTimedSessionCache(availabilityStorageKey(cacheKey), AVAILABILITY_CACHE_TTL_MS);
-      if (cachedAvailability) {
-        availabilityCache.set(cacheKey, cachedAvailability);
-        lastAvail = cachedAvailability;
-        lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
-        loading.hidden = true;
-        const cachedMsg = document.getElementById('page-msg');
-        if (cachedMsg) cachedMsg.textContent = lastAvail.availability_error || '';
-        renderCalendar();
-        return;
-      }
-    }
-
     if (availabilityRequestController) {
       availabilityRequestController.abort();
     }
@@ -1134,9 +1115,6 @@
     lastAvail = payload;
     lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
     availabilityCache.set(cacheKey, payload);
-    if (!payload.availability_error) {
-      writeTimedSessionCache(availabilityStorageKey(cacheKey), payload);
-    }
     const pageMsg = document.getElementById('page-msg');
     if (pageMsg) pageMsg.textContent = payload.availability_error || '';
     renderCalendar();
