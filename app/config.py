@@ -77,7 +77,7 @@ class Settings(BaseSettings):
     password_reset_rate_limit_max_attempts: int = 5
     booking_public_rate_limit_window_sec: int = 3600
     booking_public_rate_limit_max_requests: int = 40
-    booking_public_availability_cache_sec: int = 180
+    booking_public_availability_cache_sec: int = 30
     booking_google_busy_cache_sec: int = 120
     db_startup_maintenance_timeout_sec: int = 20
     db_pool_size: int = 8
