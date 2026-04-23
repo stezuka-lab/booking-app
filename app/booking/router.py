@@ -70,6 +70,7 @@ from app.booking.routing_service import (
     json_list_or_empty,
     json_object_or_empty,
     link_max_advance_booking_days,
+    normalize_link_routing_mode,
     pick_staff_for_slot,
     scheduling_hints_json,
     staff_is_free,
@@ -94,7 +95,7 @@ from app.booking.schemas import (
     StaffPatch,
 )
 from app.config import Settings, get_settings
-from app.db import get_session_factory
+from app.db import ensure_runtime_schema_compat, get_session_factory
 from app.security.crypto import decrypt_secret, encrypt_secret
 from app.security.audit import write_audit_log
 
@@ -890,6 +891,7 @@ async def _load_public_link_context(
     token: str,
     service_id: int | None = None,
 ) -> tuple[PublicBookingLink, BookingOrg, BookingService | None]:
+    await ensure_runtime_schema_compat()
     row = (
         await db.execute(
             select(PublicBookingLink, BookingOrg, BookingService)
@@ -1139,6 +1141,7 @@ async def link_availability(
             db_busy_map=db_busy_map,
             extra_blocked_dates=lead_blocked,
             link_priority_overrides=link_priority_overrides,
+            routing_mode_override=normalize_link_routing_mode(getattr(link, "routing_mode", None)),
             buffer_minutes_override=buf_min,
             max_advance_days_override=link_max_adv_days,
             bookable_until_date_override=link_cutoff_date,
@@ -1277,6 +1280,7 @@ async def _create_booking_from_body(
     db: AsyncSession,
     settings: Settings,
 ) -> tuple[Booking, StaffMember, bool, str, str]:
+    await ensure_runtime_schema_compat()
     t_total = time_module.perf_counter()
     t = t_total
     timings: dict[str, float] = {}
@@ -1436,6 +1440,7 @@ async def _create_booking_from_body(
             end,
             settings,
             link_priority_overrides=link_priority_overrides,
+            routing_mode_override=normalize_link_routing_mode(getattr(link, "routing_mode", None)),
             buffer_minutes_override=buf_org,
             google_busy_map=gmap_probe,
             dry_run=False,
@@ -2048,7 +2053,6 @@ async def admin_list_orgs(
                     "id": o.id,
                     "name": o.name,
                     "slug": o.slug,
-                    "routing_mode": o.routing_mode,
                     "auto_confirm": o.auto_confirm,
                 }
                 for o in rows
@@ -2068,7 +2072,6 @@ async def admin_list_orgs(
                     "id": o.id,
                     "name": o.name,
                     "slug": o.slug,
-                    "routing_mode": o.routing_mode,
                     "auto_confirm": o.auto_confirm,
                 }
                 for o in rows
@@ -2086,7 +2089,6 @@ async def admin_list_orgs(
                 "id": org.id,
                 "name": org.name,
                 "slug": org.slug,
-                "routing_mode": org.routing_mode,
                 "auto_confirm": org.auto_confirm,
             }
         ]
@@ -2215,7 +2217,6 @@ async def _counts_only_summary_fast_path(
             "id": org.id,
             "name": org.name,
             "slug": org.slug,
-            "routing_mode": org.routing_mode,
             "auto_confirm": org.auto_confirm,
             "ga4_measurement_id": org.ga4_measurement_id,
             "cancel_policy_json": org.cancel_policy_json,
@@ -2264,6 +2265,7 @@ async def admin_org_summary(
     include_counts: bool = False,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
+    await ensure_runtime_schema_compat()
     req_started = time_module.monotonic()
     org_only_summary = (
         not include_staff
@@ -2429,6 +2431,7 @@ async def admin_org_summary(
                     getattr(l, "staff_priority_overrides_json", None),
                     valid_staff_ids,
                 ),
+                "routing_mode": normalize_link_routing_mode(getattr(l, "routing_mode", None)),
                 "buffer_minutes": _normalize_optional_non_negative_int(
                     getattr(l, "buffer_minutes", None),
                     max_value=180,
@@ -2454,7 +2457,6 @@ async def admin_org_summary(
             "id": org.id,
             "name": org.name,
             "slug": org.slug,
-            "routing_mode": org.routing_mode,
             "auto_confirm": org.auto_confirm,
             "ga4_measurement_id": org.ga4_measurement_id,
             "cancel_policy_json": org.cancel_policy_json,
@@ -2525,6 +2527,7 @@ async def admin_calendar_diagnostics(
     include_write_check: bool = False,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
+    await ensure_runtime_schema_compat()
     await ensure_booking_admin(request, settings, db, x_admin_secret, org_slug=slug)
     org = await db.scalar(select(BookingOrg).where(BookingOrg.slug == slug))
     if not org:
@@ -3144,6 +3147,7 @@ async def admin_add_link(
     bookable_until_date = _normalize_optional_iso_date(body.bookable_until_date)
     pre_booking_notice = _normalize_optional_text(body.pre_booking_notice, max_length=4000)
     post_booking_message = _normalize_optional_text(body.post_booking_message, max_length=4000)
+    routing_mode = normalize_link_routing_mode(body.routing_mode)
     token = secrets.token_urlsafe(16)
     bnd = max(0, min(366, int(body.block_next_days)))
     link = PublicBookingLink(
@@ -3153,6 +3157,7 @@ async def admin_add_link(
         service_id=svc.id,
         staff_ids_json=ids,
         staff_priority_overrides_json=pri_map,
+        routing_mode=routing_mode,
         buffer_minutes=buffer_minutes,
         max_advance_booking_days=max_advance_days,
         bookable_until_date=bookable_until_date,
@@ -3186,6 +3191,7 @@ async def admin_add_link(
         "service_duration_minutes": svc.duration_minutes,
         "staff_ids": ids,
         "staff_priority_overrides": pri_map,
+        "routing_mode": routing_mode,
         "buffer_minutes": buffer_minutes,
         "max_advance_booking_days": max_advance_days,
         "bookable_until_date": bookable_until_date or "",
@@ -3208,6 +3214,7 @@ async def admin_patch_link(
     settings: SettingsDep,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
+    await ensure_runtime_schema_compat()
     link = await db.get(PublicBookingLink, link_id)
     if not link:
         raise HTTPException(404, "link not found")
@@ -3253,6 +3260,8 @@ async def admin_patch_link(
             body.buffer_minutes,
             max_value=180,
         )
+    if body.routing_mode is not None:
+        link.routing_mode = normalize_link_routing_mode(body.routing_mode)
     if body.max_advance_booking_days is not None:
         link.max_advance_booking_days = _normalize_optional_non_negative_int(
             body.max_advance_booking_days,
@@ -3303,6 +3312,7 @@ async def admin_patch_link(
             getattr(link, "staff_priority_overrides_json", None),
             valid_staff_ids,
         ),
+        "routing_mode": normalize_link_routing_mode(getattr(link, "routing_mode", None)),
         "buffer_minutes": _normalize_optional_non_negative_int(
             getattr(link, "buffer_minutes", None),
             max_value=180,
@@ -3329,6 +3339,7 @@ async def admin_delete_link(
     settings: SettingsDep,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
+    await ensure_runtime_schema_compat()
     link = await db.get(PublicBookingLink, link_id)
     if not link:
         raise HTTPException(404, "link not found")

@@ -455,6 +455,13 @@ def link_priority_rank_for_staff(
     return max(0, int(getattr(staff, "priority_rank", 100) or 100))
 
 
+def normalize_link_routing_mode(value: str | None) -> str:
+    mode = (value or "").strip().lower()
+    if mode == "round_robin":
+        return "round_robin"
+    return "priority"
+
+
 async def _load_google_busy_map(
     staff_list: list[StaffMember],
     window_start: datetime,
@@ -654,6 +661,7 @@ async def pick_staff_for_slot(
     db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     merged_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     staff_list_override: list[StaffMember] | None = None,
+    routing_mode_override: str | None = None,
     dry_run: bool = False,
 ) -> StaffMember | None:
     """担当のうち、この枠が Google+DB 的に取れる人を列挙し、優先度またはラウンドロビンで1名を返す。"""
@@ -694,7 +702,8 @@ async def pick_staff_for_slot(
         return None
     free.sort(key=lambda s: (link_priority_rank_for_staff(s, link_priority_overrides), s.id))
     # 複数担当が空いていても calendar には1名分のみ。優先度（小さいほど先）で決定。
-    if org.routing_mode == "round_robin":
+    routing_mode = normalize_link_routing_mode(routing_mode_override)
+    if routing_mode == "round_robin":
         best_rank = link_priority_rank_for_staff(free[0], link_priority_overrides)
         tier = [s for s in free if link_priority_rank_for_staff(s, link_priority_overrides) == best_rank]
         if dry_run:
@@ -786,6 +795,7 @@ async def available_slots_for_link(
     db_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     extra_blocked_dates: set[date] | None = None,
     link_priority_overrides: dict[str, int] | None = None,
+    routing_mode_override: str | None = None,
     buffer_minutes_override: int | None = None,
     max_advance_days_override: int | None = None,
     bookable_until_date_override: date | None = None,
@@ -887,6 +897,7 @@ async def available_slots_for_link(
                         seg_u,
                     settings,
                     link_priority_overrides=link_priority_overrides,
+                    routing_mode_override=routing_mode_override,
                     buffer_minutes_override=buffer_minutes_override,
                     google_busy_map=gmap,
                     db_busy_map=db_busy_map,

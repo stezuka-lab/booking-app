@@ -111,6 +111,7 @@ class PublicBookingLink(Base):
     )
     # 表示する staff_id のリスト。空なら org 内の全 active 担当
     staff_ids_json: Mapped[Any] = mapped_column(JSON, default=list)
+    routing_mode: Mapped[str] = mapped_column(String(32), default="priority")
     # リンクごとの担当優先度上書き。{"12": 10, "15": 30} のように staff_id -> priority_rank。
     staff_priority_overrides_json: Mapped[Any] = mapped_column(JSON, default=dict)
     # リンクごとの予約前後余白（分）。NULL のときは組織設定を使用。

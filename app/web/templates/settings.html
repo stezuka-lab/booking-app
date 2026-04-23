@@ -319,7 +319,6 @@
   }
 
   function showPanels(show) {
-    document.getElementById('org-settings-panel').hidden = !show;
     document.getElementById('org-email-panel').hidden = !show;
     document.getElementById('org-availability-panel').hidden = !show;
   }
@@ -448,8 +447,6 @@
       var selP = document.getElementById('pref-org-select');
       if (selP) selP.value = org.slug;
     }
-    document.getElementById('org-routing-mode').value = org.routing_mode || 'priority';
-
     const em = org.email_settings_json || {};
     document.getElementById('email-send-customer').checked = em.send_customer_confirmation !== false;
     document.getElementById('email-send-staff').checked = em.send_staff_notification !== false;

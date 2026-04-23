@@ -35,6 +35,14 @@
         <p class="muted small">このリンクの予約枠の長さです。30 や 60 などで入力します。</p>
         <input type="number" id="new-link-duration" min="5" max="480" step="5" value="30" class="admin-input-sm" />
       </div>
+      <div class="admin-field">
+        <label for="new-link-routing-mode">割り振り方法</label>
+        <p class="muted small">この予約リンクだけの担当割り振り方法です。</p>
+        <select id="new-link-routing-mode" class="admin-input-sm">
+          <option value="priority">優先度順</option>
+          <option value="round_robin">均等割り</option>
+        </select>
+      </div>
     </div>
     <fieldset class="staff-checks" id="new-link-staff-wrap">
       <legend class="field-label">対象担当（任意）</legend>
@@ -152,6 +160,14 @@
       <label for="edit-campaign-duration">所要（分）</label>
       <p class="muted small">このリンクの予約枠の長さです。</p>
       <input type="number" id="edit-campaign-duration" class="booking-dialog__input-wide" min="5" max="480" step="5" value="30" />
+    </div>
+    <div class="admin-field" style="margin-bottom: 0.75rem">
+      <label for="edit-campaign-routing-mode">割り振り方法</label>
+      <p class="muted small">この予約リンクだけに適用する担当割り振り方法です。</p>
+      <select id="edit-campaign-routing-mode" class="booking-dialog__input-wide">
+        <option value="priority">優先度順</option>
+        <option value="round_robin">均等割り</option>
+      </select>
     </div>
     <fieldset class="staff-checks" style="margin: 0.75rem 0">
       <legend class="field-label">対象担当</legend>
@@ -476,6 +492,7 @@
     document.getElementById('edit-campaign-duration').value = String(
       link.service_duration_minutes != null ? link.service_duration_minutes : 30
     );
+    document.getElementById('edit-campaign-routing-mode').value = link.routing_mode || 'priority';
     fillStaffCheckboxes(
       document.getElementById('edit-campaign-staff'),
       data,
@@ -768,6 +785,7 @@
     const blockDays = parseInt(document.getElementById('new-link-block-days').value, 10);
     const bufferMinutes = parseInt(document.getElementById('new-link-buffer-minutes').value, 10);
     const maxAdvanceDays = parseInt(document.getElementById('new-link-max-advance-days').value, 10);
+    const routingMode = document.getElementById('new-link-routing-mode').value || 'priority';
     const bookableUntilDate = document.getElementById('new-link-bookable-until-date').value.trim();
     const preBookingNotice = document.getElementById('new-link-pre-booking-notice').value.trim();
     const postBookingMessage = document.getElementById('new-link-post-booking-message').value.trim();
@@ -780,6 +798,7 @@
           title: title,
           service_name: title,
           service_duration_minutes: duration,
+          routing_mode: routingMode,
           staff_ids: ids,
           staff_priority_overrides: priorityOverrides,
           buffer_minutes: Number.isFinite(bufferMinutes) ? Math.min(180, Math.max(0, bufferMinutes)) : 0,
@@ -799,6 +818,7 @@
       }
       document.getElementById('new-link-title').value = '';
       document.getElementById('new-link-duration').value = '30';
+      document.getElementById('new-link-routing-mode').value = 'priority';
       document.getElementById('new-link-block-days').value = '0';
       document.getElementById('new-link-buffer-minutes').value = '0';
       document.getElementById('new-link-max-advance-days').value = '0';
@@ -841,6 +861,7 @@
     const blockDays = parseInt(document.getElementById('edit-campaign-block-days').value, 10);
     const bufferMinutes = parseInt(document.getElementById('edit-campaign-buffer-minutes').value, 10);
     const maxAdvanceDays = parseInt(document.getElementById('edit-campaign-max-advance-days').value, 10);
+    const routingMode = document.getElementById('edit-campaign-routing-mode').value || 'priority';
     const bookableUntilDate = document.getElementById('edit-campaign-bookable-until-date').value.trim();
     const preBookingNotice = document.getElementById('edit-campaign-pre-booking-notice').value.trim();
     const postBookingMessage = document.getElementById('edit-campaign-post-booking-message').value.trim();
@@ -849,6 +870,7 @@
         title: title || undefined,
         service_name: title || undefined,
         service_duration_minutes: duration,
+        routing_mode: routingMode,
         staff_ids: ids,
         staff_priority_overrides: priorityOverrides,
         buffer_minutes: Number.isFinite(bufferMinutes) ? Math.min(180, Math.max(0, bufferMinutes)) : 0,

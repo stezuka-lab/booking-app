@@ -27,6 +27,8 @@ import app.auth.models  # noqa: E402, F401
 import app.booking.db_models  # noqa: E402, F401
 
 _engine = None
+_runtime_schema_compat_ready = False
+_runtime_schema_compat_lock = asyncio.Lock()
 
 
 SCHEMA_DRIFT_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
@@ -45,6 +47,7 @@ SCHEMA_DRIFT_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
         ("service_id", '"service_id" INTEGER', '"service_id" INTEGER'),
         ("active", '"active" BOOLEAN NOT NULL DEFAULT 1', '"active" BOOLEAN NOT NULL DEFAULT TRUE'),
         ("block_next_days", '"block_next_days" INTEGER NOT NULL DEFAULT 0', '"block_next_days" INTEGER NOT NULL DEFAULT 0'),
+        ("routing_mode", '"routing_mode" VARCHAR(32) NOT NULL DEFAULT \'priority\'', '"routing_mode" VARCHAR(32) NOT NULL DEFAULT \'priority\''),
         ("staff_priority_overrides_json", '"staff_priority_overrides_json" TEXT', '"staff_priority_overrides_json" JSON'),
         ("buffer_minutes", '"buffer_minutes" INTEGER', '"buffer_minutes" INTEGER'),
         ("max_advance_booking_days", '"max_advance_booking_days" INTEGER', '"max_advance_booking_days" INTEGER'),
@@ -226,6 +229,64 @@ async def _normalize_org_auto_confirm() -> None:
             )
 
 
+async def _normalize_link_routing_modes() -> None:
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        if str(engine.url).startswith("sqlite"):
+            await conn.execute(
+                text(
+                    """
+                    UPDATE booking_public_links
+                    SET routing_mode = CASE
+                        WHEN (
+                            SELECT CASE
+                                WHEN booking_orgs.routing_mode = 'round_robin' THEN 'round_robin'
+                                ELSE 'priority'
+                            END
+                            FROM booking_orgs
+                            WHERE booking_orgs.id = booking_public_links.org_id
+                        ) = 'round_robin' THEN 'round_robin'
+                        ELSE 'priority'
+                    END
+                    WHERE COALESCE(TRIM(routing_mode), '') = ''
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    UPDATE booking_public_links
+                    SET routing_mode = 'priority'
+                    WHERE routing_mode NOT IN ('priority', 'round_robin')
+                    """
+                )
+            )
+        elif str(engine.url).startswith("postgresql"):
+            await conn.execute(
+                text(
+                    """
+                    UPDATE booking_public_links AS l
+                    SET routing_mode = CASE
+                        WHEN o.routing_mode = 'round_robin' THEN 'round_robin'
+                        ELSE 'priority'
+                    END
+                    FROM booking_orgs AS o
+                    WHERE o.id = l.org_id
+                      AND COALESCE(BTRIM(l.routing_mode), '') = ''
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    UPDATE booking_public_links
+                    SET routing_mode = 'priority'
+                    WHERE routing_mode NOT IN ('priority', 'round_robin')
+                    """
+                )
+            )
+
+
 def _sqlite_rebuild_bookings_nullable_staff_sync(connection: Any) -> None:
     """staff_id を NULL 可・ON DELETE SET NULL にしたテーブルへ移行（既存 SQLite）。"""
     from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
@@ -291,6 +352,9 @@ async def init_db() -> None:
         logger.info("DB init: auto_confirm normalize start")
         await _normalize_org_auto_confirm()
         logger.info("DB init: auto_confirm normalize done")
+        logger.info("DB init: link routing normalize start")
+        await _normalize_link_routing_modes()
+        logger.info("DB init: link routing normalize done")
         logger.info("DB init: sqlite staff migration start")
         await _sqlite_migrate_bookings_nullable_staff(engine)
         logger.info("DB init: sqlite staff migration done")
@@ -302,6 +366,19 @@ async def init_db() -> None:
             "DB init maintenance timed out after %ss; continuing startup with runtime schema as-is.",
             maintenance_timeout,
         )
+
+
+async def ensure_runtime_schema_compat() -> None:
+    global _runtime_schema_compat_ready
+    if _runtime_schema_compat_ready:
+        return
+    async with _runtime_schema_compat_lock:
+        if _runtime_schema_compat_ready:
+            return
+        await _sqlite_add_missing_columns()
+        await _postgres_add_missing_columns()
+        await _normalize_link_routing_modes()
+        _runtime_schema_compat_ready = True
 
 
 @lru_cache

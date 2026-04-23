@@ -21,6 +21,15 @@ def validate_org_slug_value(v: str) -> str:
     return t
 
 
+def normalize_routing_mode_value(v: str) -> str:
+    t = (v or "").strip().lower()
+    if t == "priority_fill":
+        return "priority"
+    if t not in {"priority", "round_robin"}:
+        raise ValueError("routing_mode は priority または round_robin を指定してください")
+    return t
+
+
 class CancelPolicy(BaseModel):
     """変更・キャンセル可能までの時間（時間単位）。当日は電話のみなど。"""
 
@@ -93,6 +102,11 @@ class OrgCreate(BaseModel):
             raise ValueError("name は空にできません")
         return t
 
+    @field_validator("routing_mode")
+    @classmethod
+    def routing_mode_ok(cls, v: str) -> str:
+        return normalize_routing_mode_value(v)
+
 
 class OrgPatch(BaseModel):
     name: str | None = None
@@ -120,6 +134,13 @@ class OrgPatch(BaseModel):
         if not t:
             raise ValueError("name は空にできません")
         return t
+
+    @field_validator("routing_mode")
+    @classmethod
+    def routing_mode_patch_ok(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_routing_mode_value(v)
 
 
 class StaffPatch(BaseModel):
@@ -159,6 +180,7 @@ class PublicLinkCreate(BaseModel):
     service_id: int | None = None
     service_name: str | None = None
     service_duration_minutes: int = Field(30, ge=5, le=480)
+    routing_mode: str = "priority"
     staff_ids: list[int] = Field(default_factory=list)
     staff_priority_overrides: dict[str, int] = Field(default_factory=dict)
     buffer_minutes: int | None = Field(None, ge=0, le=180)
@@ -168,12 +190,18 @@ class PublicLinkCreate(BaseModel):
     post_booking_message: str | None = Field(None, max_length=4000)
     block_next_days: int = Field(0, ge=0, le=366)
 
+    @field_validator("routing_mode")
+    @classmethod
+    def public_link_routing_mode_ok(cls, v: str) -> str:
+        return normalize_routing_mode_value(v)
+
 
 class PublicLinkPatch(BaseModel):
     title: str | None = None
     service_id: int | None = None
     service_name: str | None = None
     service_duration_minutes: int | None = Field(None, ge=5, le=480)
+    routing_mode: str | None = None
     staff_ids: list[int] | None = None
     staff_priority_overrides: dict[str, int] | None = None
     buffer_minutes: int | None = Field(None, ge=0, le=180)
@@ -183,6 +211,13 @@ class PublicLinkPatch(BaseModel):
     post_booking_message: str | None = Field(None, max_length=4000)
     active: bool | None = None
     block_next_days: int | None = Field(None, ge=0, le=366)
+
+    @field_validator("routing_mode")
+    @classmethod
+    def public_link_routing_mode_patch_ok(cls, v: str | None) -> str | None:
+        if v is None:
+            return None
+        return normalize_routing_mode_value(v)
 
 
 class OAuthLinkRequest(BaseModel):
