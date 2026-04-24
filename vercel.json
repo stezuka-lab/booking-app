@@ -1,11 +1,5 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "installCommand": "pip install -r requirements.txt",
-  "buildCommand": "python build.py",
-  "crons": [
-    {
-      "path": "/api/booking/keepalive",
-      "schedule": "*/10 * * * *"
-    }
-  ]
+  "buildCommand": "python build.py"
 }
