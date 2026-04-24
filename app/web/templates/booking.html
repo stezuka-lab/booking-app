@@ -43,7 +43,7 @@
     </div>
     <p class="muted" id="slots-empty" hidden>空きがありません。</p>
   </section>
-  <p id="page-msg" class="err booking-page-msg" role="alert"></p>
+  <p id="page-msg" class="err booking-page-msg" role="alert" hidden></p>
 </div>
 
 <dialog id="booking-dialog" class="booking-dialog" aria-labelledby="booking-dialog-title">
@@ -122,6 +122,7 @@
   const META_CACHE_TTL_MS = 60000;
   const META_CACHE_KEY = 'booking.link.meta.' + token;
   let bookingGridState = null;
+  let bookingSubmitInFlight = false;
   const HOUR_PX = 40;
   const fmtSlot = new Intl.DateTimeFormat('ja-JP', {
     weekday: 'short',
@@ -169,14 +170,38 @@
     }
   }
 
+  function setPageMessage(message) {
+    const pageMsg = document.getElementById('page-msg');
+    if (!pageMsg) return;
+    const text = String(message || '').trim();
+    pageMsg.textContent = text;
+    pageMsg.hidden = !text;
+  }
+
+  function setModalSubmitLoading(isLoading) {
+    const submitBtn = document.getElementById('modal-submit');
+    const cancelBtn = document.getElementById('modal-cancel');
+    const msg = document.getElementById('modal-msg');
+    bookingSubmitInFlight = !!isLoading;
+    if (submitBtn) {
+      submitBtn.disabled = bookingSubmitInFlight;
+      submitBtn.textContent = bookingSubmitInFlight ? '予約を確定中…' : '予約を確定する';
+    }
+    if (cancelBtn) {
+      cancelBtn.disabled = bookingSubmitInFlight;
+    }
+    if (msg && bookingSubmitInFlight) {
+      msg.textContent = '送信中です。画面を閉じずにお待ちください。';
+    }
+  }
+
   function setLinkDisabledState(message) {
     linkDisabled = true;
     const detail = message || '現在この予約リンクでは予約を受け付けていません。';
-    const pageMsg = document.getElementById('page-msg');
     const loading = document.getElementById('slots-loading');
     const grid = document.getElementById('booking-cal-grid');
     const empty = document.getElementById('slots-empty');
-    if (pageMsg) pageMsg.textContent = detail;
+    setPageMessage(detail);
     if (loading) loading.hidden = true;
     if (grid) grid.hidden = true;
     if (empty) {
@@ -598,7 +623,7 @@
             new Intl.DateTimeFormat('ja-JP', { hour: '2-digit', minute: '2-digit' }).format(end) +
             '</span><span class="booking-slot-list-btn__action">予約する</span>';
           btn.addEventListener('click', function () {
-            document.getElementById('page-msg').textContent = '';
+            setPageMessage('');
             openBookingModal(slot.start_utc);
           });
           list.appendChild(btn);
@@ -680,7 +705,7 @@
       btn.addEventListener('click', function (ev) {
         ev.preventDefault();
         ev.stopPropagation();
-        document.getElementById('page-msg').textContent = '';
+        setPageMessage('');
         openBookingModal(s.start_utc);
       });
       layer.appendChild(btn);
@@ -1015,11 +1040,9 @@
     lastAvail = j;
     lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
     if (j.availability_error) {
-      const pageMsg = document.getElementById('page-msg');
-      if (pageMsg) pageMsg.textContent = j.availability_error;
+      setPageMessage(j.availability_error);
     } else {
-      const pageMsg = document.getElementById('page-msg');
-      if (pageMsg) pageMsg.textContent = '';
+      setPageMessage('');
     }
     renderCalendar();
   }
@@ -1053,8 +1076,7 @@
       lastAvail = availabilityCache.get(cacheKey);
       lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
       loading.hidden = true;
-      const cachedMsg = document.getElementById('page-msg');
-      if (cachedMsg) cachedMsg.textContent = lastAvail.availability_error || '';
+      setPageMessage(lastAvail.availability_error || '');
       renderCalendar();
       return;
     }
@@ -1077,8 +1099,7 @@
       rawText = await response.text();
     } catch (e) {
       if (e && e.name === 'AbortError') return;
-      const pageMsg = document.getElementById('page-msg');
-      if (pageMsg) pageMsg.textContent = '読み込みに失敗しました。時間をおいて再度お試しください。';
+      setPageMessage('読み込みに失敗しました。時間をおいて再度お試しください。');
       grid.hidden = true;
       empty.hidden = true;
       return;
@@ -1100,11 +1121,7 @@
         setLinkDisabledState(detail || '現在この予約リンクは予約を受け付けていません。');
         return;
       }
-      const pageMsg = document.getElementById('page-msg');
-      if (pageMsg) {
-        pageMsg.textContent =
-          (detail || '空き時間の取得に失敗しました。') + (response.status ? ' (HTTP ' + response.status + ')' : '');
-      }
+      setPageMessage((detail || '空き時間の取得に失敗しました。') + (response.status ? ' (HTTP ' + response.status + ')' : ''));
       grid.hidden = true;
       empty.hidden = true;
       return;
@@ -1115,18 +1132,19 @@
     lastAvail = payload;
     lastAvailabilityRange = { from: from.toISOString(), to: to.toISOString() };
     availabilityCache.set(cacheKey, payload);
-    const pageMsg = document.getElementById('page-msg');
-    if (pageMsg) pageMsg.textContent = payload.availability_error || '';
+    setPageMessage(payload.availability_error || '');
     renderCalendar();
   };
 
   document.getElementById('modal-cancel').addEventListener('click', function () {
+    if (bookingSubmitInFlight) return;
     dialogEl.close();
   });
 
   document.getElementById('modal-submit').addEventListener('click', async function () {
     const msg = document.getElementById('modal-msg');
     msg.textContent = '';
+    if (bookingSubmitInFlight) return;
     const startIsoRaw = selectedBookingStartIso;
     if (!startIsoRaw) {
       msg.textContent = '予約枠を選び直してください';
@@ -1181,48 +1199,55 @@
     if (customerGoogleAccessToken) {
       body.customer_google_access_token = customerGoogleAccessToken;
     }
-    const r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/book', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(body),
-    });
-    const j = await r.json().catch(function () {
-      return {};
-    });
-    if (!r.ok) {
-      const code = conflictCode(j);
-      let detail = formatApiErrorDetail(j);
-      if (!detail) detail = r.statusText || 'エラーが発生しました';
-      if (
-        r.status === 409 ||
-        code === 'slot_not_available' ||
-        code === 'no_staff_for_slot' ||
-        code === 'no_eligible_staff'
-      ) {
-        const pageMsg = document.getElementById('page-msg');
-        const conflictMsg =
-          '選択した枠は先に予約されました。最新の空き状況に更新しました。別の予約可能枠を選んでください。';
-        if (pageMsg) pageMsg.textContent = conflictMsg;
-        msg.textContent = conflictMsg;
-        selectedBookingStartIso = null;
-        highlightSlot('');
-        clearAvailabilityCaches();
-        await loadSlots(true);
+    setModalSubmitLoading(true);
+    try {
+      const r = await fetch('/api/booking/links/' + encodeURIComponent(token) + '/book', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+      });
+      const j = await r.json().catch(function () {
+        return {};
+      });
+      if (!r.ok) {
+        const code = conflictCode(j);
+        let detail = formatApiErrorDetail(j);
+        if (!detail) detail = r.statusText || 'エラーが発生しました';
+        if (
+          r.status === 409 ||
+          code === 'slot_not_available' ||
+          code === 'no_staff_for_slot' ||
+          code === 'no_eligible_staff'
+        ) {
+          const conflictMsg =
+            '選択した枠は先に予約されました。最新の空き状況に更新しました。別の予約可能枠を選んでください。';
+          setPageMessage(conflictMsg);
+          msg.textContent = conflictMsg;
+          selectedBookingStartIso = null;
+          highlightSlot('');
+          clearAvailabilityCaches();
+          await loadSlots(true);
+          return;
+        }
+        if (detail === 'no staff available' || detail.indexOf('no staff available') !== -1) {
+          detail = 'この時間はすでに埋まっているか、担当が割り当てられませんでした。別の緑の枠を選び直してください。';
+        } else if (detail === 'slot not available' || detail.indexOf('slot not available') !== -1) {
+          detail = 'この時間は予約できません。別の枠をお選びください。';
+        }
+        msg.textContent = detail;
         return;
       }
-      if (detail === 'no staff available' || detail.indexOf('no staff available') !== -1) {
-        detail = 'この時間はすでに埋まっているか、担当が割り当てられませんでした。別の緑の枠を選び直してください。';
-      } else if (detail === 'slot not available' || detail.indexOf('slot not available') !== -1) {
-        detail = 'この時間は予約できません。別の枠をお選びください。';
-      }
-      msg.textContent = detail;
-      return;
+      dialogEl.close();
+      openSuccessDialog(j, startIso);
+    } catch (e) {
+      msg.textContent = '通信に失敗しました。時間をおいて再度お試しください。';
+    } finally {
+      setModalSubmitLoading(false);
     }
-    dialogEl.close();
-    openSuccessDialog(j, startIso);
   });
 
   dialogEl.addEventListener('click', function (ev) {
+    if (bookingSubmitInFlight) return;
     if (ev.target === dialogEl) dialogEl.close();
   });
   successDialogEl.addEventListener('click', function (ev) {
@@ -1238,8 +1263,8 @@
       return loadSlots();
     })
     .catch(function (e) {
-    document.getElementById('page-msg').textContent = String(e);
-  });
+      setPageMessage(String(e));
+    });
 })();
 </script>
 {% endblock %}
