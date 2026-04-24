@@ -819,6 +819,16 @@ code {
   overflow-y: auto;
 }
 
+#edit-campaign-dialog {
+  width: min(640px, calc(100vw - 2rem));
+}
+
+#edit-campaign-dialog .booking-dialog__panel {
+  width: 100%;
+  max-width: none;
+  box-sizing: border-box;
+}
+
 .booking-dialog__title {
   margin: 0 0 0.5rem;
   font-size: 1.2rem;
