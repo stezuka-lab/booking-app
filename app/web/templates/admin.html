@@ -43,6 +43,11 @@
           <option value="round_robin">均等割り</option>
         </select>
       </div>
+      <div class="admin-field">
+        <label for="new-link-daily-booking-limit">担当ごとの1日上限</label>
+        <p class="muted small">このリンクで各担当が1日に受けられる予約数です。空欄で上限なしです。</p>
+        <input type="number" id="new-link-daily-booking-limit" min="1" max="50" step="1" placeholder="例: 3" class="admin-input-sm" />
+      </div>
     </div>
     <fieldset class="staff-checks" id="new-link-staff-wrap">
       <legend class="field-label">対象担当（任意）</legend>
@@ -168,6 +173,11 @@
         <option value="priority">優先度順</option>
         <option value="round_robin">均等割り</option>
       </select>
+    </div>
+    <div class="admin-field" style="margin-bottom: 0.75rem">
+      <label for="edit-campaign-daily-booking-limit">担当ごとの1日上限</label>
+      <p class="muted small">このリンクで各担当が1日に受けられる予約数です。空欄で上限なしです。</p>
+      <input type="number" id="edit-campaign-daily-booking-limit" class="booking-dialog__input-wide" min="1" max="50" step="1" placeholder="例: 3" />
     </div>
     <fieldset class="staff-checks" style="margin: 0.75rem 0">
       <legend class="field-label">対象担当</legend>
@@ -493,6 +503,8 @@
       link.service_duration_minutes != null ? link.service_duration_minutes : 30
     );
     document.getElementById('edit-campaign-routing-mode').value = link.routing_mode || 'priority';
+    document.getElementById('edit-campaign-daily-booking-limit').value =
+      link.daily_booking_limit_per_staff != null ? String(link.daily_booking_limit_per_staff) : '';
     fillStaffCheckboxes(
       document.getElementById('edit-campaign-staff'),
       data,
@@ -786,6 +798,8 @@
     const bufferMinutes = parseInt(document.getElementById('new-link-buffer-minutes').value, 10);
     const maxAdvanceDays = parseInt(document.getElementById('new-link-max-advance-days').value, 10);
     const routingMode = document.getElementById('new-link-routing-mode').value || 'priority';
+    const dailyBookingLimitRaw = document.getElementById('new-link-daily-booking-limit').value.trim();
+    const dailyBookingLimit = parseInt(dailyBookingLimitRaw, 10);
     const bookableUntilDate = document.getElementById('new-link-bookable-until-date').value.trim();
     const preBookingNotice = document.getElementById('new-link-pre-booking-notice').value.trim();
     const postBookingMessage = document.getElementById('new-link-post-booking-message').value.trim();
@@ -799,6 +813,7 @@
           service_name: title,
           service_duration_minutes: duration,
           routing_mode: routingMode,
+          daily_booking_limit_per_staff: Number.isFinite(dailyBookingLimit) ? Math.min(50, Math.max(1, dailyBookingLimit)) : null,
           staff_ids: ids,
           staff_priority_overrides: priorityOverrides,
           buffer_minutes: Number.isFinite(bufferMinutes) ? Math.min(180, Math.max(0, bufferMinutes)) : 0,
@@ -819,6 +834,7 @@
       document.getElementById('new-link-title').value = '';
       document.getElementById('new-link-duration').value = '30';
       document.getElementById('new-link-routing-mode').value = 'priority';
+      document.getElementById('new-link-daily-booking-limit').value = '';
       document.getElementById('new-link-block-days').value = '0';
       document.getElementById('new-link-buffer-minutes').value = '0';
       document.getElementById('new-link-max-advance-days').value = '0';
@@ -862,6 +878,8 @@
     const bufferMinutes = parseInt(document.getElementById('edit-campaign-buffer-minutes').value, 10);
     const maxAdvanceDays = parseInt(document.getElementById('edit-campaign-max-advance-days').value, 10);
     const routingMode = document.getElementById('edit-campaign-routing-mode').value || 'priority';
+    const dailyBookingLimitRaw = document.getElementById('edit-campaign-daily-booking-limit').value.trim();
+    const dailyBookingLimit = parseInt(dailyBookingLimitRaw, 10);
     const bookableUntilDate = document.getElementById('edit-campaign-bookable-until-date').value.trim();
     const preBookingNotice = document.getElementById('edit-campaign-pre-booking-notice').value.trim();
     const postBookingMessage = document.getElementById('edit-campaign-post-booking-message').value.trim();
@@ -871,6 +889,7 @@
         service_name: title || undefined,
         service_duration_minutes: duration,
         routing_mode: routingMode,
+        daily_booking_limit_per_staff: Number.isFinite(dailyBookingLimit) ? Math.min(50, Math.max(1, dailyBookingLimit)) : 0,
         staff_ids: ids,
         staff_priority_overrides: priorityOverrides,
         buffer_minutes: Number.isFinite(bufferMinutes) ? Math.min(180, Math.max(0, bufferMinutes)) : 0,

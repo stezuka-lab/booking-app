@@ -462,6 +462,74 @@ def normalize_link_routing_mode(value: str | None) -> str:
     return "priority"
 
 
+def normalize_link_round_robin_counters(value: Any) -> dict[str, int]:
+    raw = json_object_or_empty(value)
+    out: dict[str, int] = {}
+    for key, current in raw.items():
+        try:
+            staff_id = int(key)
+            count = max(0, int(current or 0))
+        except (TypeError, ValueError):
+            continue
+        out[str(staff_id)] = count
+    return out
+
+
+def link_round_robin_count(link: PublicBookingLink | None, staff_id: int) -> int:
+    if link is None:
+        return 0
+    counters = normalize_link_round_robin_counters(getattr(link, "round_robin_counters_json", None))
+    return max(0, int(counters.get(str(int(staff_id)), 0) or 0))
+
+
+def link_daily_booking_limit_per_staff(link: PublicBookingLink | None) -> int | None:
+    raw = getattr(link, "daily_booking_limit_per_staff", None) if link is not None else None
+    if raw in (None, ""):
+        return None
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+async def load_link_daily_booking_counts(
+    session: AsyncSession,
+    org: BookingOrg,
+    link: PublicBookingLink | None,
+    staff_ids: list[int],
+    range_start: datetime,
+    range_end: datetime,
+) -> dict[date, dict[int, int]]:
+    link_id = int(getattr(link, "id", 0) or 0)
+    ids = [int(sid) for sid in staff_ids if sid is not None]
+    if link_id <= 0 or not ids:
+        return {}
+    day0_utc, _ = org_calendar_day_bounds_utc(range_start, org)
+    _, day1_utc = org_calendar_day_bounds_utc(range_end, org)
+    rows = (
+        await session.scalars(
+            select(Booking).where(
+                Booking.org_id == org.id,
+                Booking.public_link_id == link_id,
+                Booking.staff_id.in_(ids),
+                Booking.status.in_(("pending", "confirmed")),
+                Booking.start_utc >= day0_utc,
+                Booking.start_utc < day1_utc,
+            )
+        )
+    ).all()
+    out: dict[date, dict[int, int]] = {}
+    for booking in rows:
+        if booking.staff_id is None:
+            continue
+        local_day = org_local_date_for_utc_instant(booking.start_utc, org)
+        day_counts = out.setdefault(local_day, {})
+        sid = int(booking.staff_id)
+        day_counts[sid] = int(day_counts.get(sid, 0) or 0) + 1
+    return out
+
+
 async def _load_google_busy_map(
     staff_list: list[StaffMember],
     window_start: datetime,
@@ -625,13 +693,19 @@ async def staff_is_free(
 async def pick_staff_round_robin(
     session: AsyncSession,
     candidates: list[StaffMember],
+    *,
+    link: PublicBookingLink | None = None,
 ) -> StaffMember | None:
     if not candidates:
         return None
-    candidates.sort(key=lambda s: (s.round_robin_counter, s.id))
+    candidates.sort(key=lambda s: (link_round_robin_count(link, s.id), s.id))
     chosen = candidates[0]
-    chosen.round_robin_counter += 1
-    await session.flush()
+    if link is not None:
+        counters = normalize_link_round_robin_counters(getattr(link, "round_robin_counters_json", None))
+        key = str(int(chosen.id))
+        counters[key] = int(counters.get(key, 0) or 0) + 1
+        link.round_robin_counters_json = counters
+        await session.flush()
     return chosen
 
 
@@ -662,6 +736,9 @@ async def pick_staff_for_slot(
     merged_busy_map: dict[int, list[tuple[datetime, datetime]]] | None = None,
     staff_list_override: list[StaffMember] | None = None,
     routing_mode_override: str | None = None,
+    link: PublicBookingLink | None = None,
+    daily_booking_counts_override: dict[date, dict[int, int]] | None = None,
+    daily_booking_limit_per_staff_override: int | None = None,
     dry_run: bool = False,
 ) -> StaffMember | None:
     """担当のうち、この枠が Google+DB 的に取れる人を列挙し、優先度またはラウンドロビンで1名を返す。"""
@@ -700,6 +777,17 @@ async def pick_staff_for_slot(
             free.append(s)
     if not free:
         return None
+    daily_limit = (
+        max(1, int(daily_booking_limit_per_staff_override))
+        if daily_booking_limit_per_staff_override is not None and int(daily_booking_limit_per_staff_override) > 0
+        else None
+    )
+    if daily_limit is not None:
+        local_day = org_local_date_for_utc_instant(start, org)
+        counts_for_day = (daily_booking_counts_override or {}).get(local_day, {})
+        free = [s for s in free if int(counts_for_day.get(int(s.id), 0) or 0) < daily_limit]
+        if not free:
+            return None
     free.sort(key=lambda s: (link_priority_rank_for_staff(s, link_priority_overrides), s.id))
     # 複数担当が空いていても calendar には1名分のみ。優先度（小さいほど先）で決定。
     routing_mode = normalize_link_routing_mode(routing_mode_override)
@@ -707,9 +795,9 @@ async def pick_staff_for_slot(
         best_rank = link_priority_rank_for_staff(free[0], link_priority_overrides)
         tier = [s for s in free if link_priority_rank_for_staff(s, link_priority_overrides) == best_rank]
         if dry_run:
-            tier_sorted = sorted(tier, key=lambda s: (s.round_robin_counter, s.id))
+            tier_sorted = sorted(tier, key=lambda s: (link_round_robin_count(link, s.id), s.id))
             return tier_sorted[0]
-        return await pick_staff_round_robin(session, tier)
+        return await pick_staff_round_robin(session, tier, link=link)
     return await pick_staff_priority(session, free, link_priority_overrides)
 
 
@@ -796,6 +884,7 @@ async def available_slots_for_link(
     extra_blocked_dates: set[date] | None = None,
     link_priority_overrides: dict[str, int] | None = None,
     routing_mode_override: str | None = None,
+    link: PublicBookingLink | None = None,
     buffer_minutes_override: int | None = None,
     max_advance_days_override: int | None = None,
     bookable_until_date_override: date | None = None,
@@ -834,6 +923,15 @@ async def available_slots_for_link(
             rs_utc,
             re_utc + AVAILABILITY_RANGE_END_SLACK,
         )
+    daily_booking_counts = await load_link_daily_booking_counts(
+        session,
+        org,
+        link,
+        [int(s.id) for s in staff_list],
+        rs_utc,
+        re_utc,
+    )
+    daily_booking_limit = link_daily_booking_limit_per_staff(link)
     merged_busy_map = {
         int(s.id): merge_intervals(
             list(db_busy_map.get(int(s.id)) or [])
@@ -898,6 +996,9 @@ async def available_slots_for_link(
                     settings,
                     link_priority_overrides=link_priority_overrides,
                     routing_mode_override=routing_mode_override,
+                    link=link,
+                    daily_booking_counts_override=daily_booking_counts,
+                    daily_booking_limit_per_staff_override=daily_booking_limit,
                     buffer_minutes_override=buffer_minutes_override,
                     google_busy_map=gmap,
                     db_busy_map=db_busy_map,

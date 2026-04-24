@@ -181,6 +181,7 @@ class PublicLinkCreate(BaseModel):
     service_name: str | None = None
     service_duration_minutes: int = Field(30, ge=5, le=480)
     routing_mode: str = "priority"
+    daily_booking_limit_per_staff: int | None = Field(None, ge=0, le=50)
     staff_ids: list[int] = Field(default_factory=list)
     staff_priority_overrides: dict[str, int] = Field(default_factory=dict)
     buffer_minutes: int | None = Field(None, ge=0, le=180)
@@ -202,6 +203,7 @@ class PublicLinkPatch(BaseModel):
     service_name: str | None = None
     service_duration_minutes: int | None = Field(None, ge=5, le=480)
     routing_mode: str | None = None
+    daily_booking_limit_per_staff: int | None = Field(None, ge=0, le=50)
     staff_ids: list[int] | None = None
     staff_priority_overrides: dict[str, int] | None = None
     buffer_minutes: int | None = Field(None, ge=0, le=180)

@@ -48,6 +48,8 @@ SCHEMA_DRIFT_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
         ("active", '"active" BOOLEAN NOT NULL DEFAULT 1', '"active" BOOLEAN NOT NULL DEFAULT TRUE'),
         ("block_next_days", '"block_next_days" INTEGER NOT NULL DEFAULT 0', '"block_next_days" INTEGER NOT NULL DEFAULT 0'),
         ("routing_mode", '"routing_mode" VARCHAR(32) NOT NULL DEFAULT \'priority\'', '"routing_mode" VARCHAR(32) NOT NULL DEFAULT \'priority\''),
+        ("daily_booking_limit_per_staff", '"daily_booking_limit_per_staff" INTEGER', '"daily_booking_limit_per_staff" INTEGER'),
+        ("round_robin_counters_json", '"round_robin_counters_json" TEXT', '"round_robin_counters_json" JSON'),
         ("staff_priority_overrides_json", '"staff_priority_overrides_json" TEXT', '"staff_priority_overrides_json" JSON'),
         ("buffer_minutes", '"buffer_minutes" INTEGER', '"buffer_minutes" INTEGER'),
         ("max_advance_booking_days", '"max_advance_booking_days" INTEGER', '"max_advance_booking_days" INTEGER'),
@@ -56,6 +58,7 @@ SCHEMA_DRIFT_COLUMNS: dict[str, list[tuple[str, str, str]]] = {
         ("post_booking_message", '"post_booking_message" TEXT', '"post_booking_message" TEXT'),
     ],
     "bookings": [
+        ("public_link_id", '"public_link_id" INTEGER', '"public_link_id" INTEGER'),
         ("customer_reminder_sent_at", '"customer_reminder_sent_at" DATETIME', '"customer_reminder_sent_at" TIMESTAMP WITH TIME ZONE'),
         ("staff_reminder_sent_at", '"staff_reminder_sent_at" DATETIME', '"staff_reminder_sent_at" TIMESTAMP WITH TIME ZONE'),
         ("last_outreach_at", '"last_outreach_at" DATETIME', '"last_outreach_at" TIMESTAMP WITH TIME ZONE'),
@@ -261,6 +264,16 @@ async def _normalize_link_routing_modes() -> None:
                     """
                 )
             )
+            await conn.execute(
+                text(
+                    """
+                    UPDATE booking_public_links
+                    SET round_robin_counters_json = '{}'
+                    WHERE round_robin_counters_json IS NULL
+                       OR TRIM(CAST(round_robin_counters_json AS TEXT)) = ''
+                    """
+                )
+            )
         elif str(engine.url).startswith("postgresql"):
             await conn.execute(
                 text(
@@ -282,6 +295,15 @@ async def _normalize_link_routing_modes() -> None:
                     UPDATE booking_public_links
                     SET routing_mode = 'priority'
                     WHERE routing_mode NOT IN ('priority', 'round_robin')
+                    """
+                )
+            )
+            await conn.execute(
+                text(
+                    """
+                    UPDATE booking_public_links
+                    SET round_robin_counters_json = '{}'::json
+                    WHERE round_robin_counters_json IS NULL
                     """
                 )
             )

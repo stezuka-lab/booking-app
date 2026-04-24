@@ -19,25 +19,6 @@
     </div>
   </div>
 
-  <section class="panel admin-section" id="org-settings-panel" hidden>
-    <h2 class="panel-title">担当の割り当て方</h2>
-    <p class="muted panel-hint">予約が入ったときに、誰へ割り当てるかを決めます。迷う場合は「優先度順」で問題ありません。</p>
-    <div class="admin-row align-end">
-      <div class="admin-field">
-        <label class="field-label" for="org-routing-mode">ルーティング</label>
-        <select id="org-routing-mode">
-          <option value="priority">優先度順: 優先度が高い担当から割り当てます</option>
-          <option value="round_robin">均等割り: できるだけ均等に割り当てます</option>
-          <option value="priority_fill">上から順: 上位担当の枠から先に埋めます</option>
-        </select>
-        <p class="muted small">担当ごとの優先度は「予約リンク」画面で設定します。</p>
-      </div>
-    </div>
-    <div class="section-actions">
-      <button type="button" class="btn primary" id="btn-save-org">割り当て方を保存</button>
-    </div>
-  </section>
-
   <section class="panel admin-section" id="org-email-panel" hidden>
     <h2 class="panel-title">予約完了メール</h2>
     <p class="muted panel-hint">顧客向け確認メールと担当通知メールの ON/OFF と文面を設定します。</p>
@@ -552,27 +533,6 @@
     setTimeout(function () {
       setMsg('');
     }, 2000);
-    await loadSummary(true);
-  });
-
-  document.getElementById('btn-save-org').addEventListener('click', async function () {
-    if (!ensureOrgSelected()) return;
-    setMsg('');
-    const body = {
-      routing_mode: document.getElementById('org-routing-mode').value,
-    };
-    const r = await fetch('/api/booking/admin/orgs/' + encodeURIComponent(getPatchSlug()), {
-      method: 'PATCH',
-      headers: headersJson(),
-      body: JSON.stringify(body),
-    });
-    const j = await r.json().catch(function () { return {}; });
-    if (!r.ok) {
-      setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
-      return;
-    }
-    setMsg('保存しました', 'ok');
-    setTimeout(function () { setMsg(''); }, 2000);
     await loadSummary(true);
   });
 

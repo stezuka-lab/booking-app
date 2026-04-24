@@ -64,11 +64,13 @@ from app.booking.routing_service import (
     fallback_open_hour_slots_for_link,
     link_bookable_until_date,
     link_buffer_minutes,
+    link_daily_booking_limit_per_staff,
     org_buffer_minutes,
     org_calendar_day_bounds_utc,
     org_local_date_for_utc_instant,
     json_list_or_empty,
     json_object_or_empty,
+    load_link_daily_booking_counts,
     link_max_advance_booking_days,
     normalize_link_routing_mode,
     pick_staff_for_slot,
@@ -842,6 +844,13 @@ def _normalize_optional_non_negative_int(
         return None
 
 
+def _normalize_link_daily_booking_limit(raw: Any) -> int | None:
+    value = _normalize_optional_non_negative_int(raw, max_value=50)
+    if value is None or value <= 0:
+        return None
+    return value
+
+
 def _normalize_optional_text(
     raw: Any,
     *,
@@ -892,20 +901,29 @@ async def _load_public_link_context(
     service_id: int | None = None,
 ) -> tuple[PublicBookingLink, BookingOrg, BookingService | None]:
     await ensure_runtime_schema_compat()
-    row = (
-        await db.execute(
-            select(PublicBookingLink, BookingOrg, BookingService)
-            .join(BookingOrg, BookingOrg.id == PublicBookingLink.org_id)
-            .outerjoin(
-                BookingService,
-                BookingService.id == PublicBookingLink.service_id,
+    if hasattr(db, "execute"):
+        row = (
+            await db.execute(
+                select(PublicBookingLink, BookingOrg, BookingService)
+                .join(BookingOrg, BookingOrg.id == PublicBookingLink.org_id)
+                .outerjoin(
+                    BookingService,
+                    BookingService.id == PublicBookingLink.service_id,
+                )
+                .where(PublicBookingLink.token == token)
             )
-            .where(PublicBookingLink.token == token)
-        )
-    ).one_or_none()
-    if not row:
-        raise HTTPException(404, "link not found")
-    link, org, fixed_service = row
+        ).one_or_none()
+        if not row:
+            raise HTTPException(404, "link not found")
+        link, org, fixed_service = row
+    else:
+        link = await db.scalar(select(PublicBookingLink).where(PublicBookingLink.token == token))
+        if not link:
+            raise HTTPException(404, "link not found")
+        org = await db.get(BookingOrg, link.org_id)
+        fixed_service = await db.get(BookingService, link.service_id) if link.service_id is not None else None
+        if org is None:
+            raise HTTPException(404, "org not found")
     if getattr(link, "active", True) is False:
         raise HTTPException(403, "この予約リンクは無効です")
     effective_sid = link.service_id if link.service_id is not None else service_id
@@ -1142,6 +1160,7 @@ async def link_availability(
             extra_blocked_dates=lead_blocked,
             link_priority_overrides=link_priority_overrides,
             routing_mode_override=normalize_link_routing_mode(getattr(link, "routing_mode", None)),
+            link=link,
             buffer_minutes_override=buf_min,
             max_advance_days_override=link_max_adv_days,
             bookable_until_date_override=link_cutoff_date,
@@ -1382,6 +1401,16 @@ async def _create_booking_from_body(
         )
 
     buf_org = link_buffer_minutes(link, org, settings)
+    daily_booking_limit = link_daily_booking_limit_per_staff(link)
+    daily_booking_counts = await load_link_daily_booking_counts(
+        db,
+        org,
+        link,
+        [int(s.id) for s in staff_probe_list],
+        start,
+        end,
+    )
+    counts_for_day = daily_booking_counts.get(local_booking_date, {})
 
     staff: StaffMember | None = None
     if body.staff_id:
@@ -1393,6 +1422,16 @@ async def _create_booking_from_body(
             raise HTTPException(
                 400,
                 "この担当はこの予約リンク・区分の対象外です（担当割当・スキル・Google連携をご確認ください）",
+            )
+        if daily_booking_limit is not None and int(counts_for_day.get(int(staff.id), 0) or 0) >= daily_booking_limit:
+            raise HTTPException(
+                status_code=409,
+                detail=booking_conflict_detail_json(
+                    "slot_not_available",
+                    "この時間は予約できません。別の時間をお選びください。",
+                    duration_minutes=service.duration_minutes,
+                    buffer_minutes=buf_org,
+                ),
             )
         if not await staff_is_free(
             db,
@@ -1441,6 +1480,9 @@ async def _create_booking_from_body(
             settings,
             link_priority_overrides=link_priority_overrides,
             routing_mode_override=normalize_link_routing_mode(getattr(link, "routing_mode", None)),
+            link=link,
+            daily_booking_counts_override=daily_booking_counts,
+            daily_booking_limit_per_staff_override=daily_booking_limit,
             buffer_minutes_override=buf_org,
             google_busy_map=gmap_probe,
             dry_run=False,
@@ -1513,6 +1555,7 @@ async def _create_booking_from_body(
     _staff_label = (staff.name or "").strip() or None
     b = Booking(
         org_id=org.id,
+        public_link_id=link.id,
         staff_id=staff.id,
         staff_display_name=_staff_label,
         service_id=service.id,
@@ -2432,6 +2475,10 @@ async def admin_org_summary(
                     valid_staff_ids,
                 ),
                 "routing_mode": normalize_link_routing_mode(getattr(l, "routing_mode", None)),
+                "daily_booking_limit_per_staff": _normalize_optional_non_negative_int(
+                    getattr(l, "daily_booking_limit_per_staff", None),
+                    max_value=50,
+                ),
                 "buffer_minutes": _normalize_optional_non_negative_int(
                     getattr(l, "buffer_minutes", None),
                     max_value=180,
@@ -3148,6 +3195,7 @@ async def admin_add_link(
     pre_booking_notice = _normalize_optional_text(body.pre_booking_notice, max_length=4000)
     post_booking_message = _normalize_optional_text(body.post_booking_message, max_length=4000)
     routing_mode = normalize_link_routing_mode(body.routing_mode)
+    daily_booking_limit_per_staff = _normalize_link_daily_booking_limit(body.daily_booking_limit_per_staff)
     token = secrets.token_urlsafe(16)
     bnd = max(0, min(366, int(body.block_next_days)))
     link = PublicBookingLink(
@@ -3158,6 +3206,7 @@ async def admin_add_link(
         staff_ids_json=ids,
         staff_priority_overrides_json=pri_map,
         routing_mode=routing_mode,
+        daily_booking_limit_per_staff=daily_booking_limit_per_staff,
         buffer_minutes=buffer_minutes,
         max_advance_booking_days=max_advance_days,
         bookable_until_date=bookable_until_date,
@@ -3192,6 +3241,7 @@ async def admin_add_link(
         "staff_ids": ids,
         "staff_priority_overrides": pri_map,
         "routing_mode": routing_mode,
+        "daily_booking_limit_per_staff": daily_booking_limit_per_staff,
         "buffer_minutes": buffer_minutes,
         "max_advance_booking_days": max_advance_days,
         "bookable_until_date": bookable_until_date or "",
@@ -3262,6 +3312,8 @@ async def admin_patch_link(
         )
     if body.routing_mode is not None:
         link.routing_mode = normalize_link_routing_mode(body.routing_mode)
+    if body.daily_booking_limit_per_staff is not None:
+        link.daily_booking_limit_per_staff = _normalize_link_daily_booking_limit(body.daily_booking_limit_per_staff)
     if body.max_advance_booking_days is not None:
         link.max_advance_booking_days = _normalize_optional_non_negative_int(
             body.max_advance_booking_days,
@@ -3313,6 +3365,10 @@ async def admin_patch_link(
             valid_staff_ids,
         ),
         "routing_mode": normalize_link_routing_mode(getattr(link, "routing_mode", None)),
+        "daily_booking_limit_per_staff": _normalize_optional_non_negative_int(
+            getattr(link, "daily_booking_limit_per_staff", None),
+            max_value=50,
+        ),
         "buffer_minutes": _normalize_optional_non_negative_int(
             getattr(link, "buffer_minutes", None),
             max_value=180,

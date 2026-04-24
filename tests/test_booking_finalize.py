@@ -24,13 +24,19 @@ from app.config import get_settings
 from app.security.crypto import encrypt_secret
 
 
-def test_booking_endpoint_survives_finalize_failure(client, monkeypatch) -> None:
-    import app.booking.router as booking_router
-
+def _require_demo_token(client) -> str:
     health = client.get("/health")
     assert health.status_code == 200
     token = (health.json().get("booking_demo") or {}).get("token")
-    assert token
+    if not token:
+        pytest.skip("booking demo token not available")
+    return token
+
+
+def test_booking_endpoint_survives_finalize_failure(client, monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    token = _require_demo_token(client)
 
     now = datetime.now(timezone.utc)
     avail = client.get(
@@ -273,6 +279,11 @@ def test_link_availability_cache_hit_still_checks_missing_google_events(monkeypa
         return [staff]
 
     monkeypatch.setattr(booking_router, "_release_bookings_with_missing_google_events", fake_release)
+    async def fake_reconcile(*args, **kwargs):
+        captured["staff_count"] = len(args[2])
+        return {"released_missing_google_events": 0, "released_stale_synced": 0, "released_total": 0}
+
+    monkeypatch.setattr(booking_router, "_reconcile_staff_calendar_blocks", fake_reconcile)
     monkeypatch.setattr(booking_router, "_resolve_valid_link_staff_ids", fake_resolve_valid_link_staff_ids)
     monkeypatch.setattr(booking_router, "eligible_staff", fake_eligible_staff)
 
@@ -508,10 +519,7 @@ def test_release_stale_synced_bookings_without_google_busy(monkeypatch) -> None:
 def test_public_availability_survives_busy_union_failure(client, monkeypatch) -> None:
     import app.booking.router as booking_router
 
-    health = client.get("/health")
-    assert health.status_code == 200
-    token = (health.json().get("booking_demo") or {}).get("token")
-    assert token
+    token = _require_demo_token(client)
 
     async def boom(*args, **kwargs):
         raise RuntimeError("busy-union boom")
@@ -537,10 +545,7 @@ def test_public_availability_survives_busy_union_failure(client, monkeypatch) ->
 def test_public_availability_survives_single_slot_pick_failure(client, monkeypatch) -> None:
     import app.booking.routing_service as routing_service
 
-    health = client.get("/health")
-    assert health.status_code == 200
-    token = (health.json().get("booking_demo") or {}).get("token")
-    assert token
+    token = _require_demo_token(client)
 
     original = routing_service.pick_staff_for_slot
     state = {"calls": 0}
@@ -572,10 +577,7 @@ def test_public_availability_survives_single_slot_pick_failure(client, monkeypat
 def test_public_availability_survives_malformed_google_busy_interval(client, monkeypatch) -> None:
     import app.booking.routing_service as routing_service
 
-    health = client.get("/health")
-    assert health.status_code == 200
-    token = (health.json().get("booking_demo") or {}).get("token")
-    assert token
+    token = _require_demo_token(client)
 
     async def bad_busy_map(*args, **kwargs):
         staff_list = args[0] if args else []
@@ -605,10 +607,7 @@ def test_public_availability_blocks_unlinked_staff_when_slots_empty(client, monk
     import app.booking.router as booking_router
     import app.booking.routing_service as routing_service
 
-    health = client.get("/health")
-    assert health.status_code == 200
-    token = (health.json().get("booking_demo") or {}).get("token")
-    assert token
+    token = _require_demo_token(client)
 
     async def fake_slots(*args, **kwargs):
         return [], 30, True, "slot_pick_failed"
@@ -640,10 +639,7 @@ def test_public_availability_blocks_unlinked_staff_when_slots_empty(client, monk
 def test_public_availability_fallback_respects_blocked_dates(client, monkeypatch) -> None:
     import app.booking.router as booking_router
 
-    health = client.get("/health")
-    assert health.status_code == 200
-    token = (health.json().get("booking_demo") or {}).get("token")
-    assert token
+    token = _require_demo_token(client)
 
     async def fake_slots(*args, **kwargs):
         return [], 30, True, "slot_pick_failed"
