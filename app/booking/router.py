@@ -2442,6 +2442,29 @@ async def admin_org_summary(
             counts["forms"] = len(forms) if include_forms else int(row.forms_count or 0)
     counts_ms = (time_module.monotonic() - section_started) * 1000
     section_started = time_module.monotonic()
+    link_booking_totals: dict[int, int] = {}
+    link_active_booking_totals: dict[int, int] = {}
+    if links:
+        link_ids = [int(l.id) for l in links]
+        rows = (
+            await db.execute(
+                select(
+                    Booking.public_link_id,
+                    Booking.status,
+                    func.count(Booking.id),
+                )
+                .where(Booking.public_link_id.in_(link_ids))
+                .group_by(Booking.public_link_id, Booking.status)
+            )
+        ).all()
+        for public_link_id, status, row_count in rows:
+            if public_link_id is None:
+                continue
+            link_booking_totals[int(public_link_id)] = link_booking_totals.get(int(public_link_id), 0) + int(row_count or 0)
+            if str(status or "") in {"pending", "confirmed"}:
+                link_active_booking_totals[int(public_link_id)] = (
+                    link_active_booking_totals.get(int(public_link_id), 0) + int(row_count or 0)
+                )
     links_payload: list[dict[str, Any]] = []
     for l in links:
         raw_staff_ids = json_list_or_empty(l.staff_ids_json)
@@ -2466,6 +2489,8 @@ async def admin_org_summary(
                 "service_id": l.service_id,
                 "service_name": svc.name if svc else None,
                 "service_duration_minutes": svc.duration_minutes if svc else None,
+                "total_booking_count": link_booking_totals.get(int(l.id), 0),
+                "active_booking_count": link_active_booking_totals.get(int(l.id), 0),
                 "staff_ids": valid_staff_ids,
                 "staff_priority_overrides": _normalize_link_priority_overrides(
                     getattr(l, "staff_priority_overrides_json", None),

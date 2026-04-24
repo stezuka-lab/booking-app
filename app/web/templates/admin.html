@@ -100,6 +100,7 @@
           <tr>
             <th>予約タイトル</th>
             <th>所要</th>
+            <th>予約件数</th>
             <th>担当</th>
             <th>直近ブロック</th>
             <th>状態</th>
@@ -153,7 +154,7 @@
 </div>
 
 <dialog class="booking-dialog" id="edit-campaign-dialog" aria-labelledby="edit-campaign-dialog-title">
-  <div class="booking-dialog__panel" style="max-width: 32rem">
+  <div class="booking-dialog__panel" style="width: 100%; max-width: 32rem; box-sizing: border-box;">
     <h2 class="booking-dialog__title" id="edit-campaign-dialog-title">予約リンクを編集</h2>
     <input type="hidden" id="edit-campaign-id" />
     <div class="admin-field" style="margin-bottom: 0.75rem">
@@ -541,6 +542,12 @@
       tdT.textContent = l.title || '';
       const tdCat = document.createElement('td');
       tdCat.textContent = l.service_duration_minutes ? (String(l.service_duration_minutes) + '分') : '—';
+      const tdCnt = document.createElement('td');
+      const activeBookings = Number(l.active_booking_count || 0);
+      const totalBookings = Number(l.total_booking_count || 0);
+      tdCnt.innerHTML =
+        '<div>' + esc(String(totalBookings)) + '件</div>' +
+        '<div class="muted small">有効 ' + esc(String(activeBookings)) + '件</div>';
       const tdSt = document.createElement('td');
       tdSt.textContent = staffNamesForIds(data, l.staff_ids || []);
       const tdBlk = document.createElement('td');
@@ -603,6 +610,7 @@
       tdA.appendChild(b2);
       tr.appendChild(tdT);
       tr.appendChild(tdCat);
+      tr.appendChild(tdCnt);
       tr.appendChild(tdSt);
       tr.appendChild(tdBlk);
       tr.appendChild(tdSta);
