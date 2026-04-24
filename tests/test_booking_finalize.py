@@ -1223,3 +1223,98 @@ def test_sync_booking_to_staff_calendar_retries_once(monkeypatch) -> None:
     assert calls["count"] == 2
     assert booking.google_event_id == "evt-retry"
     assert booking.google_calendar_sync_error is None
+
+
+def test_manage_info_allows_cancel_even_after_reschedule_deadline() -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    org = BookingOrg(
+        id=1,
+        name="Test Org",
+        slug="test-org",
+        cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": True},
+    )
+    booking = Booking(
+        id=20,
+        org_id=1,
+        staff_id=4,
+        service_id=1,
+        start_utc=now + timedelta(hours=1),
+        end_utc=now + timedelta(hours=2),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        manage_token="manage-token",
+    )
+
+    class DummyDb:
+        async def scalar(self, _query):
+            return booking
+
+        async def get(self, model, _id):
+            if model is BookingOrg:
+                return org
+            return None
+
+    body = asyncio.run(booking_router.manage_info("manage-token", DummyDb(), settings))
+
+    assert body["can_cancel_online"] is True
+    assert body["can_reschedule_online"] is False
+    assert body["policy_reason"] == "deadline_passed_phone_only"
+
+
+def test_manage_cancel_ignores_deadline_policy(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    org = BookingOrg(
+        id=1,
+        name="Test Org",
+        slug="test-org",
+        cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": True},
+    )
+    staff = StaffMember(id=4, org_id=1, name="担当A", email="staff@example.com")
+    booking = Booking(
+        id=21,
+        org_id=1,
+        staff_id=4,
+        service_id=1,
+        start_utc=now + timedelta(hours=1),
+        end_utc=now + timedelta(hours=2),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        manage_token="manage-token",
+    )
+
+    class DummyDb:
+        def __init__(self) -> None:
+            self.committed = False
+
+        async def scalar(self, _query):
+            return booking
+
+        async def get(self, model, _id):
+            if model is BookingOrg:
+                return org
+            if model is StaffMember:
+                return staff
+            return None
+
+        async def commit(self):
+            self.committed = True
+
+    async def fake_delete(*args, **kwargs):
+        return None
+
+    monkeypatch.setattr(booking_router, "_delete_staff_calendar_event_if_present", fake_delete)
+
+    db = DummyDb()
+    body = asyncio.run(booking_router.manage_cancel("manage-token", db, settings))
+
+    assert body == {"ok": True, "status": "cancelled"}
+    assert booking.status == "cancelled"
+    assert db.committed is True

@@ -1890,7 +1890,8 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
     if not b:
         raise HTTPException(404, "not found")
     org = await db.get(BookingOrg, b.org_id)
-    allowed, reason = can_change_or_cancel_online(org, b) if org else (False, "no_org")
+    can_reschedule, reason = can_change_or_cancel_online(org, b) if org else (False, "no_org")
+    can_cancel = b.status in ("pending", "confirmed")
     return {
         "booking": {
             "id": b.id,
@@ -1900,8 +1901,8 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
             "meeting_url": _booking_meeting_url(b, settings),
             "link_title": (b.booking_link_title_snapshot or "").strip() or "予約",
         },
-        "can_cancel_online": allowed,
-        "can_reschedule_online": allowed,
+        "can_cancel_online": can_cancel,
+        "can_reschedule_online": can_reschedule,
         "policy_reason": reason,
     }
 
@@ -1911,12 +1912,8 @@ async def manage_cancel(manage_token: str, db: DbSession, settings: SettingsDep)
     b = await db.scalar(select(Booking).where(Booking.manage_token == manage_token))
     if not b:
         raise HTTPException(404, "not found")
-    org = await db.get(BookingOrg, b.org_id)
-    if not org:
-        raise HTTPException(404, "org missing")
-    allowed, reason = can_change_or_cancel_online(org, b)
-    if not allowed:
-        raise HTTPException(400, reason)
+    if b.status not in ("pending", "confirmed"):
+        raise HTTPException(400, "already_cancelled")
     staff = await db.get(StaffMember, b.staff_id)
     b.status = "cancelled"
     b.cancelled_at = datetime.now(timezone.utc)

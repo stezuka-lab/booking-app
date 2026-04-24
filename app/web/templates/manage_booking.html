@@ -22,7 +22,7 @@
       <strong>このページでできること</strong>
       <span class="muted">予約内容の確認、会議 URL の確認、キャンセル手続きができます。</span>
     </div>
-    <p id="manage-msg" class="err booking-page-msg" role="alert"></p>
+    <p id="manage-msg" class="booking-page-msg" role="alert" hidden></p>
     <div class="booking-dialog__actions">
       <button type="button" class="btn secondary" id="manage-open-meeting" hidden>Zoom / 会議 URL を開く</button>
       <button type="button" class="btn primary" id="manage-cancel-btn" hidden>この予約をキャンセル</button>
@@ -42,6 +42,24 @@
   var cancelBtn = document.getElementById('manage-cancel-btn');
   var meetingBtn = document.getElementById('manage-open-meeting');
   var manageData = null;
+
+  function setManageMessage(message, isError) {
+    var text = (message || '').trim();
+    msgEl.textContent = text;
+    msgEl.hidden = !text;
+    msgEl.classList.toggle('err', !!text && !!isError);
+  }
+
+  function loadErrorMessage() {
+    return '予約情報を読み込めませんでした。時間をおいて再度お試しください。';
+  }
+
+  function cancelErrorMessage(detail) {
+    if ((detail || '') === 'already_cancelled') {
+      return 'この予約はすでにキャンセル済みです。';
+    }
+    return 'キャンセルに失敗しました。時間をおいて再度お試しください。';
+  }
 
   function fmtJa(iso) {
     return new Intl.DateTimeFormat('ja-JP', {
@@ -76,10 +94,12 @@
     }).join('') + '</div>';
     cancelBtn.hidden = !manageData.can_cancel_online || b.status === 'cancelled';
     meetingBtn.hidden = !b.meeting_url;
-    if (manageData.policy_reason === 'ok') {
-      policyEl.textContent = 'オンラインでキャンセルできます。';
+    if (b.status === 'cancelled') {
+      policyEl.textContent = 'この予約はキャンセル済みです。';
+    } else if (manageData.can_reschedule_online) {
+      policyEl.textContent = 'キャンセルはいつでも可能です。日時変更もオンラインで受け付けています。';
     } else {
-      policyEl.textContent = 'オンライン変更の期限外です。必要に応じて運営へ連絡してください。';
+      policyEl.textContent = 'キャンセルはいつでも可能です。日時変更のオンライン受付は終了しています。';
     }
   }
 
@@ -89,14 +109,15 @@
     })
     .then(function (x) {
       if (!x.r.ok) {
-        msgEl.textContent = typeof x.j.detail === 'string' ? x.j.detail : JSON.stringify(x.j.detail || {});
+        setManageMessage(loadErrorMessage(), true);
         statusEl.textContent = '予約情報を読み込めませんでした';
         return;
       }
+      setManageMessage('', false);
       render(x.j);
     })
     .catch(function (e) {
-      msgEl.textContent = String(e);
+      setManageMessage(loadErrorMessage(), true);
       statusEl.textContent = '予約情報を読み込めませんでした';
     });
 
@@ -107,7 +128,7 @@
 
   cancelBtn.addEventListener('click', function () {
     if (!window.confirm('この予約をキャンセルしますか？')) return;
-    msgEl.textContent = '';
+    setManageMessage('', false);
     fetch('/api/booking/manage/' + encodeURIComponent(token) + '/cancel', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' }
@@ -117,15 +138,17 @@
       })
       .then(function (x) {
         if (!x.r.ok) {
-          msgEl.textContent = typeof x.j.detail === 'string' ? x.j.detail : JSON.stringify(x.j.detail || {});
+          var detail = typeof x.j.detail === 'string' ? x.j.detail : '';
+          setManageMessage(cancelErrorMessage(detail), true);
           return;
         }
         statusEl.textContent = '状態: cancelled';
-        msgEl.textContent = '予約をキャンセルしました。';
+        policyEl.textContent = 'この予約はキャンセル済みです。';
+        setManageMessage('予約をキャンセルしました。', false);
         cancelBtn.hidden = true;
       })
       .catch(function (e) {
-        msgEl.textContent = String(e);
+        setManageMessage(cancelErrorMessage(''), true);
       });
   });
 })();
