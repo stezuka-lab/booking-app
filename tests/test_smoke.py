@@ -13,8 +13,11 @@ def test_settings_defines_actions_dry_run() -> None:
     s = get_settings()
     assert isinstance(s.actions_dry_run, bool)
     assert isinstance(s.booking_jobs_embedded, bool)
+    assert isinstance(s.booking_cron_secret, str)
+    assert isinstance(s.booking_google_delete_check_interval_sec, int)
     assert isinstance(s.smtp_use_ssl, bool)
     assert isinstance(s.smtp_starttls, bool)
+    assert isinstance(s.smtp_timeout_sec, int)
 
 
 def test_health(client: TestClient) -> None:
@@ -91,6 +94,45 @@ def test_admin_template_defines_esc_helper() -> None:
     assert "function esc(" in tpl
 
 
+def test_admin_template_opens_link_bookings_page() -> None:
+    tpl = (Path(__file__).resolve().parents[1] / "app" / "web" / "templates" / "admin.html").read_text(encoding="utf-8")
+    assert "予約一覧" in tpl
+    assert "'/app/booking-links/'" in tpl
+    assert "target = '_blank'" in tpl
+    assert "rel = 'noopener'" in tpl
+
+
+def test_link_bookings_template_lists_required_columns() -> None:
+    tpl = (Path(__file__).resolve().parents[1] / "app" / "web" / "templates" / "link_bookings.html").read_text(encoding="utf-8")
+    assert "予約日時" in tpl
+    assert "受付日時" in tpl
+    assert "予約内容" in tpl
+    assert "予約番号" in tpl
+    assert "顧客ID" in tpl
+    assert "担当" in tpl
+    assert "予約状況" in tpl
+    assert "予約時表示リンク" in tpl
+    assert "manage_url" in tpl
+    assert "表示ページ" in tpl
+    assert "fmtJstRange" in tpl
+    assert "'<td>' + esc(fmtJstRange(b.start_utc, b.end_utc)) + '</td>'" in tpl
+    assert "'<td>' + esc(fmtJst(b.created_at)) + '</td>'" in tpl
+    assert "public_link_id" in tpl
+
+
+def test_web_app_link_bookings_page_requires_login(client: TestClient) -> None:
+    r = client.get("/app/booking-links/1/bookings", follow_redirects=False)
+    assert r.status_code == 302
+    assert "/app/login" in (r.headers.get("location") or "")
+
+
+def test_link_bookings_api_sorts_filtered_results_by_booking_number_desc() -> None:
+    src = (Path(__file__).resolve().parents[1] / "app" / "booking" / "router.py").read_text(encoding="utf-8")
+    assert "if public_link_id is not None:" in src
+    assert "q = q.order_by(Booking.id.desc())" in src
+    assert "q = q.order_by(Booking.start_utc.desc())" in src
+
+
 def test_accounts_template_has_audit_logs_section() -> None:
     tpl = (Path(__file__).resolve().parents[1] / "app" / "web" / "templates" / "accounts.html").read_text(encoding="utf-8")
     assert "監査ログ" in tpl
@@ -115,6 +157,12 @@ def test_public_booking_page_no_store(client: TestClient) -> None:
     r = client.get("/app/booking/sample-token")
     assert r.status_code == 200
     assert "no-store" in (r.headers.get("cache-control") or "")
+
+
+def test_manage_booking_template_shows_created_at() -> None:
+    tpl = (Path(__file__).resolve().parents[1] / "app" / "web" / "templates" / "manage_booking.html").read_text(encoding="utf-8")
+    assert "予約受付日時" in tpl
+    assert "b.created_at" in tpl
 
 
 def test_manage_page_no_store(client: TestClient) -> None:
@@ -247,3 +295,37 @@ def test_admin_patch_org_demo_shop_when_secret_configured(client: TestClient) ->
         headers=h,
     )
     assert r2.status_code == 200
+
+
+def test_admin_summary_can_skip_link_booking_counts(client: TestClient) -> None:
+    secret = (get_settings().booking_admin_secret or "").strip()
+    if not secret:
+        pytest.skip("BOOKING_ADMIN_SECRET が空のため管理 API をスキップ")
+    r = client.get(
+        "/api/booking/admin/orgs/demo-shop/summary"
+        "?include_staff=false&include_services=false&include_links=true&include_forms=false"
+        "&include_counts=false&include_link_booking_counts=false&include_link_staff_validation=false",
+        headers={"X-Admin-Secret": secret},
+    )
+    assert r.status_code == 200
+    links = r.json().get("links") or []
+    assert links
+    assert links[0].get("active_booking_count") is None
+    assert links[0].get("total_booking_count") is None
+
+
+def test_admin_links_overview_returns_lightweight_links(client: TestClient) -> None:
+    secret = (get_settings().booking_admin_secret or "").strip()
+    if not secret:
+        pytest.skip("BOOKING_ADMIN_SECRET が空のため管理 API をスキップ")
+    r = client.get(
+        "/api/booking/admin/orgs/demo-shop/links-overview",
+        headers={"X-Admin-Secret": secret},
+    )
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("summary_options", {}).get("overview") is True
+    links = data.get("links") or []
+    assert links
+    assert links[0].get("public_url")
+    assert links[0].get("active_booking_count") is None

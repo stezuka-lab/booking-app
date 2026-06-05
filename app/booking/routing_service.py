@@ -951,6 +951,7 @@ async def available_slots_for_link(
         max_adv = max(0, int(max_advance_days_override))
     else:
         max_adv = max(0, int(defaults.get("max_advance_booking_days") or 0))
+    now_utc = datetime.now(timezone.utc)
     today_org = datetime.now(loc_tz).date()
     last_bookable: date | None = (today_org + timedelta(days=max_adv)) if max_adv > 0 else None
     cutoff_date = bookable_until_date_override
@@ -984,7 +985,7 @@ async def available_slots_for_link(
             seg_end = cur + duration
             cur_u = cur.astimezone(timezone.utc)
             seg_u = seg_end.astimezone(timezone.utc)
-            if cur_u >= rs_utc and seg_u <= re_utc + AVAILABILITY_RANGE_END_SLACK:
+            if cur_u > now_utc and cur_u >= rs_utc and seg_u <= re_utc + AVAILABILITY_RANGE_END_SLACK:
                 try:
                     picked = await pick_staff_for_slot(
                         session,
@@ -1064,6 +1065,7 @@ def fallback_open_hour_slots_for_link(
         max_adv = max(0, int(max_advance_days_override))
     else:
         max_adv = max(0, int(defaults.get("max_advance_booking_days") or 0))
+    now_utc = datetime.now(timezone.utc)
     today_org = datetime.now(loc_tz).date()
     last_bookable: date | None = (today_org + timedelta(days=max_adv)) if max_adv > 0 else None
     cutoff_date = bookable_until_date_override
@@ -1103,7 +1105,7 @@ def fallback_open_hour_slots_for_link(
             seg_end = cur + duration
             cur_u = cur.astimezone(timezone.utc)
             seg_u = seg_end.astimezone(timezone.utc)
-            if cur_u >= rs_utc and seg_u <= re_utc + AVAILABILITY_RANGE_END_SLACK:
+            if cur_u > now_utc and cur_u >= rs_utc and seg_u <= re_utc + AVAILABILITY_RANGE_END_SLACK:
                 out.append(
                     {
                         "start_utc": cur_u.isoformat(),

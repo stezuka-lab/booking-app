@@ -285,6 +285,17 @@
     } catch (e) {}
   }
 
+  function mergeOrgIntoCurrentSummary(partialOrg) {
+    if (!currentSummaryData || !currentSummaryData.org) return;
+    currentSummaryData.org = Object.assign({}, currentSummaryData.org, partialOrg || {});
+    writeSummaryCache(currentSummaryData);
+    renderSummary(currentSummaryData);
+  }
+
+  function refreshSummaryInBackground() {
+    loadSummary(true).catch(function () {});
+  }
+
   /** HH:MM(:SS) や H:MM を input[type=time] 用に正規化 */
   function normalizeTimeForInput(raw, fallback) {
     if (raw == null || String(raw).trim() === '') return fallback;
@@ -529,11 +540,12 @@
       setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
       return;
     }
+    mergeOrgIntoCurrentSummary({ email_settings_json: body.email_settings });
     setMsg('メール設定を保存しました', 'ok');
     setTimeout(function () {
       setMsg('');
     }, 2000);
-    await loadSummary(true);
+    refreshSummaryInBackground();
   });
 
   document.getElementById('btn-save-availability').addEventListener('click', async function () {
@@ -563,9 +575,10 @@
       setMsg((j.detail && (typeof j.detail === 'string' ? j.detail : JSON.stringify(j.detail))) || r.statusText, 'err');
       return;
     }
+    mergeOrgIntoCurrentSummary({ availability_defaults_json: merged });
     setMsg('予約可能時間・休日・カレンダー件名を保存しました', 'ok');
     setTimeout(function () { setMsg(''); }, 2000);
-    await loadSummary(true);
+    refreshSummaryInBackground();
   });
 
   document.querySelectorAll('.cal-title-insert-btn').forEach(function (b) {
@@ -616,6 +629,10 @@
   function maybeAutoLoadSummary() {
     applyMeOrgPreference()
       .then(function () {
+        if (getPatchSlug()) {
+          showPanels(true);
+          setMsg('設定を読み込んでいます…');
+        }
         return loadSummary(false);
       })
       .catch(function () {});

@@ -7,7 +7,7 @@ from pathlib import Path
 from typing import Annotated, Any
 from urllib.parse import urlparse
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Request
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy import text
@@ -19,7 +19,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from app.auth.bootstrap import run_bootstrap_admin_if_needed
 from app.auth.router import router as auth_router
 from app.booking.demo_seed import get_demo_booking_info, run_demo_seed_if_enabled
-from app.booking.jobs import setup_booking_scheduler, shutdown_booking_scheduler
+from app.booking.jobs import run_booking_reminders_and_crm, setup_booking_scheduler, shutdown_booking_scheduler
 from app.booking.router import router as booking_router
 from app.config import Settings, get_settings
 from app.db import get_session_factory, init_db
@@ -28,6 +28,36 @@ from app.version import __version__
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def _validate_public_deployment_settings(settings: Settings) -> None:
+    if not settings.is_public_deployment():
+        return
+    if not (settings.booking_session_secret or "").strip():
+        raise RuntimeError(
+            "公開サーバーでは BOOKING_SESSION_SECRET を必ず設定してください。"
+        )
+    encryption_key = (settings.booking_data_encryption_key or "").strip()
+    if not encryption_key:
+        raise RuntimeError(
+            "公開サーバーでは BOOKING_DATA_ENCRYPTION_KEY を必ず設定してください。"
+        )
+    try:
+        from cryptography.fernet import Fernet
+
+        Fernet(encryption_key.encode("utf-8"))
+    except Exception as exc:
+        raise RuntimeError(
+            "BOOKING_DATA_ENCRYPTION_KEY は Fernet 形式の有効なキーを設定してください。"
+        ) from exc
+    if settings.booking_seed_demo:
+        raise RuntimeError(
+            "公開サーバーでは BOOKING_SEED_DEMO=false にしてください。"
+        )
+    if settings.actions_dry_run:
+        raise RuntimeError(
+            "公開サーバーでは ACTIONS_DRY_RUN=false にしてください。"
+        )
 
 
 @asynccontextmanager
@@ -43,15 +73,7 @@ async def lifespan(app: FastAPI):
         logger.info("Startup: init_db done")
     else:
         logger.info("Startup: init_db skipped for this deployment target")
-    if settings.is_public_deployment():
-        if not (settings.booking_session_secret or "").strip():
-            raise RuntimeError(
-                "公開サーバーでは BOOKING_SESSION_SECRET を必ず設定してください。"
-            )
-        if settings.booking_seed_demo:
-            raise RuntimeError(
-                "公開サーバーでは BOOKING_SEED_DEMO=false にしてください。"
-            )
+    _validate_public_deployment_settings(settings)
     if settings.should_run_startup_bootstrap_admin():
         logger.info("Startup: bootstrap admin begin")
         await run_bootstrap_admin_if_needed(settings)
@@ -185,6 +207,27 @@ def _should_disable_cache(request_path: str) -> bool:
     )
 
 
+def _cron_request_authorized(request: Request, settings: Settings) -> bool:
+    expected = (settings.booking_cron_secret or "").strip()
+    if not expected:
+        return True
+    authorization = (request.headers.get("authorization") or "").strip()
+    supplied = ""
+    if authorization.lower().startswith("bearer "):
+        supplied = authorization[7:].strip()
+    if not supplied:
+        supplied = (request.headers.get("x-cron-secret") or "").strip()
+    return bool(supplied and secrets.compare_digest(supplied, expected))
+
+
+def _job_request_authorized(request: Request, settings: Settings) -> bool:
+    if (settings.booking_cron_secret or "").strip():
+        return _cron_request_authorized(request, settings)
+    expected = (settings.booking_admin_secret or "").strip()
+    supplied = (request.headers.get("x-admin-secret") or "").strip()
+    return bool(expected and supplied and secrets.compare_digest(supplied, expected))
+
+
 @app.middleware("http")
 async def apply_http_security(request, call_next):
     settings = get_settings()
@@ -285,9 +328,20 @@ async def health(settings: SettingsDep) -> dict[str, Any]:
 
 
 @app.get("/api/booking/keepalive")
-async def booking_keepalive() -> dict[str, Any]:
+async def booking_keepalive(request: Request, settings: SettingsDep) -> dict[str, Any]:
     """Vercel Cron 用。個人情報を返さず、DB接続を軽く起こす。"""
+    if not _cron_request_authorized(request, settings):
+        raise HTTPException(status_code=401, detail="cron secret is invalid")
     factory = get_session_factory()
     async with factory() as session:
         await session.execute(text("SELECT 1"))
     return {"status": "ok"}
+
+
+@app.post("/api/booking/jobs/run")
+async def booking_jobs_run(request: Request, settings: SettingsDep) -> dict[str, Any]:
+    """外部Cron用。予約同期・メール再送などを1回だけ実行する。"""
+    if not _job_request_authorized(request, settings):
+        raise HTTPException(status_code=401, detail="job secret is invalid")
+    result = await run_booking_reminders_and_crm()
+    return {"status": "ok", "jobs": result}

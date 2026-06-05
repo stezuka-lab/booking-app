@@ -1,0 +1,240 @@
+{% extends "base.html" %}
+{% block title %}予約一覧{% endblock %}
+{% set nav = 'links' %}
+{% block main_class %}wide{% endblock %}
+{% block content %}
+<div class="admin-console">
+  <div class="admin-page-head">
+    <div>
+      <span class="page-kicker">予約リンク別</span>
+      <h1 class="page-title" id="page-title">予約一覧</h1>
+      <p class="page-lead muted" id="page-lead">この予約リンクから入った予約だけを表示します。</p>
+    </div>
+    <div class="admin-toolbar">
+      <a class="btn secondary" href="/app/campaigns">予約リンクへ戻る</a>
+      <a class="btn secondary" href="#" id="public-link-open" target="_blank" rel="noopener" hidden>予約リンクを開く</a>
+    </div>
+  </div>
+
+  <section class="panel admin-section">
+    <div class="panel-header-actions">
+      <div>
+        <h2 class="panel-title">リンク情報</h2>
+        <p class="muted panel-hint" id="link-meta">読み込み中…</p>
+      </div>
+      <button type="button" class="btn secondary" id="btn-reload">再読み込み</button>
+    </div>
+  </section>
+
+  <section class="panel admin-section">
+    <div class="panel-header-actions">
+      <div>
+        <h2 class="panel-title">予約</h2>
+        <p class="muted panel-hint" id="booking-count">予約一覧を読み込んでいます…</p>
+      </div>
+    </div>
+    <div class="table-wrap">
+      <table class="admin-table">
+        <thead>
+          <tr>
+            <th>予約日時</th>
+            <th>受付日時</th>
+            <th>予約内容</th>
+            <th>予約番号</th>
+            <th>顧客ID</th>
+            <th>担当</th>
+            <th>予約状況</th>
+            <th>予約時表示リンク</th>
+          </tr>
+        </thead>
+        <tbody id="bookings-tbody">
+          <tr>
+            <td colspan="8" class="muted">読み込んでいます…</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <p id="page-msg" class="admin-msg" role="alert"></p>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const linkId = {{ link_id | tojson }};
+  const appViewer = window.__APP_VIEWER__ || {};
+  const tbody = document.getElementById('bookings-tbody');
+  const msg = document.getElementById('page-msg');
+  const pageTitle = document.getElementById('page-title');
+  const pageLead = document.getElementById('page-lead');
+  const linkMeta = document.getElementById('link-meta');
+  const bookingCount = document.getElementById('booking-count');
+  const openLink = document.getElementById('public-link-open');
+  const reloadBtn = document.getElementById('btn-reload');
+  let currentOrgSlug = appViewer.authenticated && appViewer.user ? appViewer.user.default_org_slug : '';
+  let currentLink = null;
+
+  function esc(value) {
+    return String(value == null ? '' : value)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;')
+      .replace(/'/g, '&#39;');
+  }
+
+  function setMsg(text, cls) {
+    if (!msg) return;
+    msg.textContent = text || '';
+    msg.className = 'admin-msg' + (cls ? ' ' + cls : '');
+  }
+
+  function headersJson() {
+    const h = { 'Content-Type': 'application/json' };
+    try {
+      const sec = localStorage.getItem('booking_admin_secret') || localStorage.getItem('booking_admin_secret_v1') || '';
+      if (sec) h['X-Admin-Secret'] = sec;
+    } catch (e) {}
+    return h;
+  }
+
+  async function resolveOrgSlug() {
+    if (currentOrgSlug) return currentOrgSlug;
+    const live = await fetch('/api/auth/me', { credentials: 'same-origin', __skipBusy: true })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return null; });
+    if (live && live.authenticated && live.user && live.user.default_org_slug) {
+      currentOrgSlug = live.user.default_org_slug;
+      return currentOrgSlug;
+    }
+    throw new Error('ログイン情報から組織を確認できません。ログインし直してください。');
+  }
+
+  async function getJson(path) {
+    const r = await fetch(path, { credentials: 'same-origin', headers: headersJson() });
+    const text = await r.text();
+    let data = null;
+    try {
+      data = text ? JSON.parse(text) : {};
+    } catch (e) {
+      data = { detail: text };
+    }
+    if (!r.ok) {
+      const detail = data && data.detail ? (typeof data.detail === 'string' ? data.detail : JSON.stringify(data.detail)) : r.statusText;
+      throw new Error(detail || '読み込みに失敗しました');
+    }
+    return data;
+  }
+
+  function fmtJst(value) {
+    if (!value) return '—';
+    try {
+      return new Intl.DateTimeFormat('ja-JP', {
+        timeZone: 'Asia/Tokyo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+        weekday: 'short',
+        hour: '2-digit',
+        minute: '2-digit',
+      }).format(new Date(value));
+    } catch (e) {
+      return String(value);
+    }
+  }
+
+  function fmtJstRange(startValue, endValue) {
+    return fmtJst(startValue) + ' 〜 ' + fmtJst(endValue);
+  }
+
+  function statusText(status) {
+    if (status === 'confirmed') return '確定';
+    if (status === 'pending') return '承認待ち';
+    if (status === 'cancelled') return 'キャンセル';
+    return status || '—';
+  }
+
+  function renderEmpty(text) {
+    tbody.innerHTML = '';
+    const tr = document.createElement('tr');
+    const td = document.createElement('td');
+    td.colSpan = 8;
+    td.className = 'muted';
+    td.textContent = text;
+    tr.appendChild(td);
+    tbody.appendChild(tr);
+  }
+
+  function renderLink(link) {
+    currentLink = link;
+    const title = link && link.title ? String(link.title) : '予約リンク';
+    pageTitle.textContent = title + ' の予約一覧';
+    pageLead.textContent = 'この予約リンクから入った予約だけを表示します。';
+    linkMeta.textContent =
+      '所要 ' + (link.service_duration_minutes ? String(link.service_duration_minutes) + '分' : '—') +
+      ' / 担当 ' + ((link.staff_ids || []).length ? String((link.staff_ids || []).length) + '名' : '全担当') +
+      ' / 状態 ' + (link.active === false ? '無効' : '有効');
+    if (link.public_url) {
+      openLink.hidden = false;
+      openLink.href = link.public_url;
+    } else {
+      openLink.hidden = true;
+      openLink.href = '#';
+    }
+  }
+
+  function renderBookings(bookings) {
+    tbody.innerHTML = '';
+    if (!bookings.length) {
+      renderEmpty('この予約リンクの予約はまだありません。');
+      return;
+    }
+    bookings.forEach(function (b) {
+      const tr = document.createElement('tr');
+      const linkTitle = currentLink && currentLink.title ? currentLink.title : (b.booking_link_title_snapshot || '予約リンク');
+      const displayPageUrl = b.manage_url || '';
+      tr.innerHTML =
+        '<td>' + esc(fmtJstRange(b.start_utc, b.end_utc)) + '</td>' +
+        '<td>' + esc(fmtJst(b.created_at)) + '</td>' +
+        '<td>' + esc(b.booking_link_title_snapshot || linkTitle || '予約') + '</td>' +
+        '<td>' + esc(String(b.id || '—')) + '</td>' +
+        '<td>' + (b.customer_id ? esc(String(b.customer_id)) : '<span class="muted">—</span>') + '</td>' +
+        '<td>' + esc(b.staff_display_name || (b.staff_id != null ? 'id ' + b.staff_id : '—')) + '</td>' +
+        '<td>' + esc(statusText(b.status)) + '</td>' +
+        '<td>' + (displayPageUrl ? '<a href="' + esc(displayPageUrl) + '" target="_blank" rel="noopener">表示ページ</a>' : '<span class="muted">—</span>') + '</td>';
+      tbody.appendChild(tr);
+    });
+  }
+
+  async function loadPage() {
+    setMsg('');
+    renderEmpty('読み込んでいます…');
+    if (reloadBtn) reloadBtn.disabled = true;
+    try {
+      const slug = await resolveOrgSlug();
+      const summary = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug) + '/summary');
+      const links = summary && Array.isArray(summary.links) ? summary.links : [];
+      const link = links.find(function (l) { return Number(l.id) === Number(linkId); });
+      if (!link) throw new Error('対象の予約リンクが見つかりません。');
+      renderLink(link);
+      const qs = new URLSearchParams({ limit: '500', public_link_id: String(linkId) });
+      const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug) + '/bookings?' + qs.toString());
+      const bookings = data && Array.isArray(data.bookings) ? data.bookings : [];
+      bookingCount.textContent = bookings.length + '件の予約を表示しています。';
+      renderBookings(bookings);
+    } catch (e) {
+      bookingCount.textContent = '予約一覧を読み込めませんでした。';
+      renderEmpty('読み込みに失敗しました。');
+      setMsg(String(e && e.message ? e.message : e), 'err');
+    } finally {
+      if (reloadBtn) reloadBtn.disabled = false;
+    }
+  }
+
+  if (reloadBtn) reloadBtn.addEventListener('click', loadPage);
+  loadPage();
+})();
+</script>
+{% endblock %}

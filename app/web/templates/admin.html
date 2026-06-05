@@ -117,9 +117,10 @@
     <div class="panel-header-actions">
       <div>
         <h2 class="panel-title">最近の予約と同期状態</h2>
-        <p class="muted panel-hint">直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。</p>
+        <p class="muted panel-hint" id="bookings-panel-hint">直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。</p>
       </div>
       <div class="cal-td-actions">
+        <button type="button" class="btn secondary" id="btn-clear-booking-filter" hidden>全予約に戻す</button>
         <button type="button" class="btn secondary" id="btn-load-bookings">予約一覧を読み込む</button>
         <button type="button" class="btn secondary" id="btn-reconcile-calendar-blocks">今すぐ整合性を回復</button>
       </div>
@@ -128,7 +129,8 @@
       <table class="admin-table">
         <thead>
           <tr>
-            <th>日時</th>
+            <th>予約日時</th>
+            <th>受付日時</th>
             <th>予約内容</th>
             <th>担当</th>
             <th>予約状態</th>
@@ -239,10 +241,14 @@
   const msg = document.getElementById('admin-msg');
   const out = document.getElementById('admin-out');
   const bookingsLoadBtn = document.getElementById('btn-load-bookings');
+  const bookingsClearFilterBtn = document.getElementById('btn-clear-booking-filter');
+  const bookingsPanelHint = document.getElementById('bookings-panel-hint');
   let campaignSummary = null;
   let currentBookings = [];
   let bookingsLoaded = false;
   let bookingsLoading = false;
+  let bookingLinkFilter = null;
+  let fullSummaryLoading = false;
   const summaryCacheTtlMs = 120000;
 
   function esc(value) {
@@ -301,10 +307,81 @@
     } catch (e) {}
   }
 
+  function refreshSummaryInBackground() {
+    loadSummary(true, { full: true }).catch(function () {});
+  }
+
+  function patchLinkInSummary(linkId, patch) {
+    if (!campaignSummary || !Array.isArray(campaignSummary.links)) return;
+    campaignSummary.links = campaignSummary.links.map(function (l) {
+      if (Number(l.id) !== Number(linkId)) return l;
+      const next = Object.assign({}, l);
+      if (patch.title !== undefined) next.title = patch.title;
+      if (patch.service_name !== undefined) next.service_name = patch.service_name;
+      if (patch.service_duration_minutes !== undefined) next.service_duration_minutes = patch.service_duration_minutes;
+      if (patch.routing_mode !== undefined) next.routing_mode = patch.routing_mode;
+      if (patch.daily_booking_limit_per_staff !== undefined) next.daily_booking_limit_per_staff = patch.daily_booking_limit_per_staff || null;
+      if (patch.staff_ids !== undefined) next.staff_ids = patch.staff_ids || [];
+      if (patch.staff_priority_overrides !== undefined) next.staff_priority_overrides = patch.staff_priority_overrides || {};
+      if (patch.buffer_minutes !== undefined) next.buffer_minutes = patch.buffer_minutes;
+      if (patch.max_advance_booking_days !== undefined) next.max_advance_booking_days = patch.max_advance_booking_days;
+      if (patch.bookable_until_date !== undefined) next.bookable_until_date = patch.bookable_until_date || '';
+      if (patch.pre_booking_notice !== undefined) next.pre_booking_notice = patch.pre_booking_notice || '';
+      if (patch.post_booking_message !== undefined) next.post_booking_message = patch.post_booking_message || '';
+      if (patch.active !== undefined) next.active = patch.active;
+      if (patch.block_next_days !== undefined) next.block_next_days = patch.block_next_days;
+      return next;
+    });
+    writeSummaryCache(campaignSummary);
+    renderLinksSummary(campaignSummary);
+  }
+
+  function addLinkToSummary(link) {
+    if (!campaignSummary || !Array.isArray(campaignSummary.links) || !link) return false;
+    campaignSummary.links = campaignSummary.links.concat([Object.assign({ active_booking_count: 0 }, link)]);
+    if (campaignSummary.counts && typeof campaignSummary.counts.links === 'number') {
+      campaignSummary.counts.links += 1;
+    }
+    writeSummaryCache(campaignSummary);
+    renderLinksSummary(campaignSummary);
+    return true;
+  }
+
+  function removeLinkFromSummary(linkId) {
+    if (!campaignSummary || !Array.isArray(campaignSummary.links)) return false;
+    campaignSummary.links = campaignSummary.links.filter(function (l) {
+      return Number(l.id) !== Number(linkId);
+    });
+    if (campaignSummary.counts && typeof campaignSummary.counts.links === 'number') {
+      campaignSummary.counts.links = Math.max(0, campaignSummary.counts.links - 1);
+    }
+    writeSummaryCache(campaignSummary);
+    renderLinksSummary(campaignSummary);
+    return true;
+  }
+
   function showLinkPanels(show) {
     document.getElementById('link-create-panel').hidden = !show;
     document.getElementById('links-panel').hidden = !show;
     document.getElementById('bookings-panel').hidden = !show;
+  }
+
+  function setBookingLinkFilter(link) {
+    bookingLinkFilter = link
+      ? { id: Number(link.id), title: String(link.title || '予約リンク') }
+      : null;
+    bookingsLoaded = false;
+    if (bookingsPanelHint) {
+      bookingsPanelHint.textContent = bookingLinkFilter
+        ? '「' + bookingLinkFilter.title + '」の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。'
+        : '直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。';
+    }
+    if (bookingsClearFilterBtn) {
+      bookingsClearFilterBtn.hidden = !bookingLinkFilter;
+    }
+    if (bookingsLoadBtn) {
+      bookingsLoadBtn.textContent = bookingLinkFilter ? 'このリンクの予約一覧を再読み込み' : '予約一覧を読み込む';
+    }
   }
 
   function renderBookingsPlaceholder(text) {
@@ -361,6 +438,10 @@
     }
   }
 
+  function fmtJstRange(startIso, endIso) {
+    return fmtJst(startIso) + ' 〜 ' + fmtJst(endIso);
+  }
+
   function badgeHtml(text, kind) {
     return '<span class="admin-status-badge' + (kind ? ' ' + kind : '') + '">' + esc(text) + '</span>';
   }
@@ -391,6 +472,9 @@
     if (!ids || !ids.length) {
       return '（指定なし：全アクティブ担当）';
     }
+    if (!data || !Array.isArray(data.staff) || !data.staff.length) {
+      return String(ids.length) + '名';
+    }
     const map = {};
     (data.staff || []).forEach(function (s) {
       map[s.id] = s.name;
@@ -404,6 +488,13 @@
 
   function fillStaffCheckboxes(container, data, checkedIds, priorityOverrides) {
     container.innerHTML = '';
+    if (!data || !Array.isArray(data.staff) || !data.staff.length) {
+      const p = document.createElement('p');
+      p.className = 'muted small';
+      p.textContent = '担当情報を読み込んでいます…';
+      container.appendChild(p);
+      return;
+    }
     const set = {};
     const priMap = priorityOverrides || {};
     (checkedIds || []).forEach(function (id) {
@@ -487,11 +578,27 @@
       setMsg(okMessage, 'ok');
       setTimeout(function () { setMsg(''); }, 2000);
     }
-    await loadSummary(true);
+    patchLinkInSummary(linkId, payload);
+    refreshSummaryInBackground();
     return j;
   }
 
-  function openEditCampaign(linkId) {
+  function hasFullSummary(data) {
+    const opts = data && data.summary_options ? data.summary_options : {};
+    return !!(data && Array.isArray(data.staff) && !opts.overview);
+  }
+
+  function ensureFullSummaryLoaded() {
+    if (hasFullSummary(campaignSummary)) return Promise.resolve(campaignSummary);
+    return loadSummary(true, { full: true });
+  }
+
+  async function openEditCampaign(linkId) {
+    if (!hasFullSummary(campaignSummary)) {
+      setMsg('担当情報を読み込んでいます…');
+      await ensureFullSummaryLoaded();
+      setMsg('');
+    }
     const data = campaignSummary;
     if (!data) return;
     const link = (data.links || []).find(function (x) {
@@ -536,6 +643,37 @@
 
     const ltBody = document.getElementById('links-tbody');
     ltBody.innerHTML = '';
+    function warmPublicBookingLink(link) {
+      const url = link.public_url || '';
+      const token = link.token || '';
+      if (!url || !token) return;
+      try {
+        fetch(url, { credentials: 'omit', cache: 'no-store', keepalive: true }).catch(function () {});
+        fetch('/api/booking/links/' + encodeURIComponent(token) + '/meta', {
+          credentials: 'omit',
+          cache: 'no-store',
+          keepalive: true,
+          __skipBusy: true,
+        }).catch(function () {});
+        const from = new Date();
+        from.setHours(0, 0, 0, 0);
+        const to = new Date(from);
+        to.setDate(to.getDate() + 7);
+        to.setMilliseconds(-1);
+        const q = new URLSearchParams({ from_ts: from.toISOString(), to_ts: to.toISOString() });
+        if (Number.isFinite(Number(link.service_id))) {
+          q.set('service_id', String(link.service_id));
+        }
+        fetch('/api/booking/links/' + encodeURIComponent(token) + '/availability?' + q.toString(), {
+          credentials: 'omit',
+          cache: 'no-store',
+          keepalive: true,
+          __skipBusy: true,
+        }).catch(function () {});
+      } catch (e) {
+        /* best-effort warmup */
+      }
+    }
     (data.links || []).forEach(function (l) {
       const tr = document.createElement('tr');
       const tdT = document.createElement('td');
@@ -543,8 +681,12 @@
       const tdCat = document.createElement('td');
       tdCat.textContent = l.service_duration_minutes ? (String(l.service_duration_minutes) + '分') : '—';
       const tdCnt = document.createElement('td');
-      const activeBookings = Number(l.active_booking_count || 0);
-      tdCnt.textContent = activeBookings + '件';
+      if (l.active_booking_count == null) {
+        tdCnt.innerHTML = '<span class="muted">集計中…</span>';
+      } else {
+        const activeBookings = Number(l.active_booking_count || 0);
+        tdCnt.textContent = activeBookings + '件';
+      }
       const tdSt = document.createElement('td');
       tdSt.textContent = staffNamesForIds(data, l.staff_ids || []);
       const tdBlk = document.createElement('td');
@@ -566,8 +708,14 @@
       b0.type = 'button';
       b0.className = 'btn sm secondary';
       b0.textContent = '編集';
+      if (!hasFullSummary(data)) {
+        b0.disabled = true;
+        b0.title = '担当情報の読み込み後に編集できます';
+      }
       b0.addEventListener('click', function () {
-        openEditCampaign(l.id);
+        openEditCampaign(l.id).catch(function (e) {
+          setMsg(String(e && e.message ? e.message : e), 'err');
+        });
       });
       const bToggle = document.createElement('button');
       bToggle.type = 'button';
@@ -599,10 +747,37 @@
       b2.className = 'btn sm ghost';
       b2.href = l.public_url || '#';
       b2.target = '_blank';
-      b2.rel = 'noopener noreferrer';
+      b2.rel = 'noopener';
       b2.textContent = '開く';
+      b2.addEventListener(
+        'pointerenter',
+        function () {
+          warmPublicBookingLink(l);
+        },
+        { once: true }
+      );
+      b2.addEventListener(
+        'focus',
+        function () {
+          warmPublicBookingLink(l);
+        },
+        { once: true }
+      );
+      b2.addEventListener('click', function (ev) {
+        const url = l.public_url || '';
+        if (!url) {
+          ev.preventDefault();
+        }
+      });
+      const bBookings = document.createElement('a');
+      bBookings.className = 'btn sm secondary';
+      bBookings.href = '/app/booking-links/' + encodeURIComponent(String(l.id)) + '/bookings';
+      bBookings.target = '_blank';
+      bBookings.rel = 'noopener';
+      bBookings.textContent = '予約一覧';
       tdA.appendChild(b0);
       tdA.appendChild(bToggle);
+      tdA.appendChild(bBookings);
       tdA.appendChild(b1);
       tdA.appendChild(b2);
       tr.appendChild(tdT);
@@ -625,7 +800,7 @@
     bookingsLoading = false;
     if (bookingsLoadBtn) {
       bookingsLoadBtn.disabled = false;
-      bookingsLoadBtn.textContent = '予約一覧を再読み込み';
+      bookingsLoadBtn.textContent = bookingLinkFilter ? 'このリンクの予約一覧を再読み込み' : '予約一覧を再読み込み';
     }
     currentBookings = (data && data.bookings) || [];
     var tbody = document.getElementById('bookings-tbody');
@@ -633,9 +808,9 @@
     if (!currentBookings.length) {
       var trEmpty = document.createElement('tr');
       var tdEmpty = document.createElement('td');
-      tdEmpty.colSpan = 8;
+      tdEmpty.colSpan = 9;
       tdEmpty.className = 'muted';
-      tdEmpty.textContent = 'まだ予約はありません。';
+      tdEmpty.textContent = bookingLinkFilter ? 'この予約リンクの予約はまだありません。' : 'まだ予約はありません。';
       trEmpty.appendChild(tdEmpty);
       tbody.appendChild(trEmpty);
       return;
@@ -644,14 +819,16 @@
       var tr = document.createElement('tr');
 
       var tdWhen = document.createElement('td');
-      tdWhen.innerHTML =
-        '<div>' + esc(fmtJst(b.start_utc)) + '</div>' +
-        '<div class="muted small">〜 ' + esc(fmtJst(b.end_utc)) + '</div>';
+      tdWhen.textContent = fmtJstRange(b.start_utc, b.end_utc);
+
+      var tdCreated = document.createElement('td');
+      tdCreated.textContent = fmtJst(b.created_at);
 
       var tdBooking = document.createElement('td');
       tdBooking.innerHTML =
         '<div>' + esc(b.booking_link_title_snapshot || '予約') + '</div>' +
-        '<div class="muted small">予約 #' + esc(String(b.id || '—')) + '</div>';
+        '<div class="muted small">予約 #' + esc(String(b.id || '—')) + '</div>' +
+        (b.customer_id ? '<div class="muted small">顧客ID: ' + esc(String(b.customer_id)) + '</div>' : '');
 
       var tdStaff = document.createElement('td');
       tdStaff.textContent = b.staff_display_name || (b.staff_id != null ? 'id ' + b.staff_id : '—');
@@ -695,6 +872,7 @@
       }
 
       tr.appendChild(tdWhen);
+      tr.appendChild(tdCreated);
       tr.appendChild(tdBooking);
       tr.appendChild(tdStaff);
       tr.appendChild(tdStatus);
@@ -714,7 +892,11 @@
       bookingsLoadBtn.disabled = true;
       bookingsLoadBtn.textContent = '読み込み中…';
     }
-    var data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/bookings?limit=50');
+    var qs = new URLSearchParams({ limit: '50' });
+    if (bookingLinkFilter && Number.isFinite(Number(bookingLinkFilter.id))) {
+      qs.set('public_link_id', String(Number(bookingLinkFilter.id)));
+    }
+    var data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/bookings?' + qs.toString());
     if (data) {
       renderBookings(data);
       return;
@@ -722,7 +904,9 @@
     bookingsLoading = false;
     if (bookingsLoadBtn) {
       bookingsLoadBtn.disabled = false;
-      bookingsLoadBtn.textContent = bookingsLoaded ? '予約一覧を再読み込み' : '予約一覧を読み込む';
+      bookingsLoadBtn.textContent = bookingLinkFilter
+        ? (bookingsLoaded ? 'このリンクの予約一覧を再読み込み' : 'このリンクの予約一覧を読み込む')
+        : (bookingsLoaded ? '予約一覧を再読み込み' : '予約一覧を読み込む');
     }
   }
 
@@ -764,23 +948,49 @@
     return data;
   }
 
-  async function loadSummary(forceRefresh) {
+  async function loadSummary(forceRefresh, options) {
+    options = options || {};
     if (!ensureOrgSelected()) return;
     if (!forceRefresh) {
       const cached = readSummaryCache();
-      if (cached) {
+      if (cached && (!options.full || hasFullSummary(cached))) {
         renderLinksSummary(cached);
         return cached;
       }
     }
     const q = new URLSearchParams({
-      include_staff: 'true',
+      include_staff: options.full ? 'true' : 'false',
       include_services: 'false',
       include_links: 'true',
       include_forms: 'false',
-      include_counts: 'false'
+      include_counts: 'false',
+      include_link_booking_counts: options.full ? 'true' : 'false',
+      include_link_staff_validation: options.full ? 'true' : 'false'
     });
-    const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString(), { __skipBusy: !forceRefresh });
+    if (options.full) fullSummaryLoading = true;
+    try {
+      const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/summary?' + q.toString(), { __skipBusy: !forceRefresh });
+      if (data) {
+        writeSummaryCache(data);
+        renderLinksSummary(data);
+      }
+      return data;
+    } finally {
+      if (options.full) fullSummaryLoading = false;
+    }
+  }
+
+  async function loadLinksOverview() {
+    if (!ensureOrgSelected()) return;
+    const cached = readSummaryCache();
+    if (cached) {
+      renderLinksSummary(cached);
+      if (!hasFullSummary(cached)) return cached;
+    }
+    const data = await getJson(
+      '/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/links-overview',
+      { __skipBusy: true }
+    );
     if (data) {
       writeSummaryCache(data);
       renderLinksSummary(data);
@@ -846,7 +1056,8 @@
       document.getElementById('new-link-bookable-until-date').value = '';
       document.getElementById('new-link-pre-booking-notice').value = '';
       document.getElementById('new-link-post-booking-message').value = '';
-      await loadSummary(true);
+      addLinkToSummary(j);
+      refreshSummaryInBackground();
       alert('発行しました。\n' + (j.public_url || ''));
     } catch (e) {
       setMsg(String(e), 'err');
@@ -864,6 +1075,13 @@
   });
 
   document.getElementById('btn-load-bookings').addEventListener('click', loadBookings);
+  if (bookingsClearFilterBtn) {
+    bookingsClearFilterBtn.addEventListener('click', async function () {
+      setBookingLinkFilter(null);
+      renderBookingsPlaceholder('予約一覧を読み込んでいます…');
+      await loadBookings();
+    });
+  }
   document.getElementById('btn-reconcile-calendar-blocks').addEventListener('click', reconcileCalendarBlocks);
 
   document.getElementById('edit-campaign-save').addEventListener('click', async function () {
@@ -934,13 +1152,29 @@
     setTimeout(function () {
       setMsg('');
     }, 2000);
-    await loadSummary(true);
+    removeLinkFromSummary(linkId);
+    refreshSummaryInBackground();
   });
 
   var appViewer = window.__APP_VIEWER__ || {};
   function loadAdminPageData() {
-    loadSummary().catch(function () {});
+    showLinkPanels(true);
     renderBookingsPlaceholder('予約一覧は必要な時だけ読み込みます。上の「予約一覧を読み込む」を押してください。');
+    var linksBody = document.getElementById('links-tbody');
+    if (linksBody && !linksBody.children.length) {
+      var tr = document.createElement('tr');
+      var td = document.createElement('td');
+      td.colSpan = 8;
+      td.className = 'muted';
+      td.textContent = '予約リンクを読み込んでいます…';
+      tr.appendChild(td);
+      linksBody.appendChild(tr);
+    }
+    loadLinksOverview().then(function () {
+      if (!fullSummaryLoading) {
+        loadSummary(true, { full: true }).catch(function () {});
+      }
+    }).catch(function () {});
   }
 
   function bootAdminPage() {

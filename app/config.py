@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     zoom_default_meeting_url: str = ""
     teams_default_meeting_url: str = ""
     booking_jobs_cron: str = "*/5 * * * *"
+    booking_cron_secret: str = Field(
+        default="",
+        validation_alias=AliasChoices("BOOKING_CRON_SECRET", "CRON_SECRET"),
+        description="Cron/keepalive エンドポイント保護用シークレット。空なら互換性のため保護しない。",
+    )
     booking_jobs_embedded: bool = True
     booking_reminder_hours_before: int = 24
     booking_reminder_second_hours_before: int = 1
@@ -79,6 +84,7 @@ class Settings(BaseSettings):
     booking_public_rate_limit_max_requests: int = 40
     booking_public_availability_cache_sec: int = 30
     booking_google_busy_cache_sec: int = 120
+    booking_google_delete_check_interval_sec: int = 60
     db_startup_maintenance_timeout_sec: int = 20
     db_pool_size: int = 8
     db_max_overflow: int = 8
@@ -105,6 +111,7 @@ class Settings(BaseSettings):
     smtp_from: str = ""
     smtp_use_ssl: bool = False
     smtp_starttls: bool = True
+    smtp_timeout_sec: int = 8
     booking_data_encryption_key: str = ""
 
     @field_validator(
@@ -112,6 +119,8 @@ class Settings(BaseSettings):
         "google_oauth_client_id",
         "google_oauth_client_secret",
         "google_oauth_redirect_uri",
+        "booking_cron_secret",
+        "booking_data_encryption_key",
         "booking_session_secret",
         mode="before",
     )

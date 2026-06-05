@@ -419,6 +419,64 @@ async def app_campaigns_alias(request: Request) -> Any:
     return response
 
 
+@router.get("/app/booking-links/{link_id}/bookings", response_class=HTMLResponse)
+async def app_link_bookings(request: Request, link_id: int) -> Any:
+    started = time_module.perf_counter()
+    settings = get_settings()
+    snap = _session_user_snapshot(request)
+    if snap is not None:
+        render_started = time_module.perf_counter()
+        response = _html(
+            "link_bookings.html",
+            request,
+            settings,
+            link_id=link_id,
+            viewer_is_admin=bool(snap.role == "admin"),
+            app_viewer=_viewer_payload(snap),
+        )
+        render_ms = (time_module.perf_counter() - render_started) * 1000
+        logger.info(
+            "web.app_page path=/app/booking-links/%s/bookings authenticated=True snapshot=True optimistic=False user_ms=0.0 render_ms=%.1f total_ms=%.1f",
+            link_id,
+            render_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
+        return response
+    had_snapshot = _session_user_snapshot(request) is not None
+    user_started = time_module.perf_counter()
+    u = await _load_session_user_with_org(request)
+    user_ms = (time_module.perf_counter() - user_started) * 1000
+    if not u:
+        next_path = f"/app/booking-links/{link_id}/bookings"
+        logger.info(
+            "web.app_page path=%s authenticated=False snapshot=%s user_ms=%.1f total_ms=%.1f",
+            next_path,
+            had_snapshot,
+            user_ms,
+            (time_module.perf_counter() - started) * 1000,
+        )
+        return RedirectResponse(url="/app/login?next=" + quote(next_path, safe=""), status_code=302)
+    render_started = time_module.perf_counter()
+    response = _html(
+        "link_bookings.html",
+        request,
+        settings,
+        link_id=link_id,
+        viewer_is_admin=bool(u and u.role == "admin"),
+        app_viewer=_viewer_payload(u),
+    )
+    render_ms = (time_module.perf_counter() - render_started) * 1000
+    logger.info(
+        "web.app_page path=/app/booking-links/%s/bookings authenticated=True snapshot=%s user_ms=%.1f render_ms=%.1f total_ms=%.1f",
+        link_id,
+        had_snapshot,
+        user_ms,
+        render_ms,
+        (time_module.perf_counter() - started) * 1000,
+    )
+    return response
+
+
 @router.get("/app/settings", response_class=HTMLResponse)
 async def app_settings(request: Request) -> Any:
     started = time_module.perf_counter()

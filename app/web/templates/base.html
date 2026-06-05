@@ -191,16 +191,81 @@
           prefetched[href] = false;
         });
       }
+      function writeSessionCache(key, data) {
+        try {
+          if (!key || !data) return;
+          sessionStorage.setItem(key, JSON.stringify({ ts: Date.now(), data: data }));
+        } catch (e) {}
+      }
+      function readSessionCacheFresh(key, ttlMs) {
+        try {
+          var raw = sessionStorage.getItem(key);
+          if (!raw) return null;
+          var parsed = JSON.parse(raw);
+          if (!parsed || !parsed.data || !parsed.ts) return null;
+          if ((Date.now() - Number(parsed.ts)) > ttlMs) return null;
+          return parsed.data;
+        } catch (e) {
+          return null;
+        }
+      }
+      function prefetchSummaryCache(slug, kind) {
+        if (!slug) return;
+        var isLinks = kind === 'links';
+        var cacheKey = isLinks ? 'booking.admin.summary.' + slug : 'booking.settings.summary.' + slug;
+        if (readSessionCacheFresh(cacheKey, 120000)) return;
+        var q = new URLSearchParams({
+          include_staff: isLinks ? 'true' : 'false',
+          include_services: 'false',
+          include_links: isLinks ? 'true' : 'false',
+          include_forms: 'false',
+          include_counts: 'false',
+          include_link_booking_counts: 'false',
+          include_link_staff_validation: 'false'
+        });
+        var rawFetch = window.__appRawFetch || window.fetch;
+        var url = isLinks
+          ? '/api/booking/admin/orgs/' + encodeURIComponent(slug) + '/links-overview'
+          : '/api/booking/admin/orgs/' + encodeURIComponent(slug) + '/summary?' + q.toString();
+        rawFetch(url, {
+          credentials: 'same-origin',
+          headers: { 'X-Booking-Prefetch': '1' },
+        })
+          .then(function (r) { return r.ok ? r.json() : null; })
+          .then(function (data) { if (data) writeSessionCache(cacheKey, data); })
+          .catch(function () {});
+      }
+      function idlePrefetchCorePages() {
+        var viewer = window.__APP_VIEWER__ || {};
+        var user = viewer.user || {};
+        var slug = user.default_org_slug || '';
+        if (!slug) return;
+        prefetchPage('/app/settings');
+        prefetchPage('/app/campaigns');
+        prefetchSummaryCache(slug, 'settings');
+        prefetchSummaryCache(slug, 'links');
+      }
+      var scheduleIdle = window.requestIdleCallback || function (fn) { return window.setTimeout(fn, 700); };
+      scheduleIdle(idlePrefetchCorePages);
       document.addEventListener('pointerenter', function (ev) {
         var link = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
         if (!link) return;
         var href = link.getAttribute('href') || '';
         prefetchPage(href);
+        var viewer = window.__APP_VIEWER__ || {};
+        var slug = viewer.user && viewer.user.default_org_slug ? viewer.user.default_org_slug : '';
+        if (href === '/app/settings') prefetchSummaryCache(slug, 'settings');
+        if (href === '/app/campaigns' || href === '/app/admin') prefetchSummaryCache(slug, 'links');
       }, true);
       document.addEventListener('focusin', function (ev) {
         var link = ev.target && ev.target.closest ? ev.target.closest('a[href]') : null;
         if (!link) return;
-        prefetchPage(link.getAttribute('href') || '');
+        var href = link.getAttribute('href') || '';
+        prefetchPage(href);
+        var viewer = window.__APP_VIEWER__ || {};
+        var slug = viewer.user && viewer.user.default_org_slug ? viewer.user.default_org_slug : '';
+        if (href === '/app/settings') prefetchSummaryCache(slug, 'settings');
+        if (href === '/app/campaigns' || href === '/app/admin') prefetchSummaryCache(slug, 'links');
       }, true);
     }
   })();

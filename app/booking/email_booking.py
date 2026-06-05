@@ -179,10 +179,11 @@ def _send_sync(settings: Settings, to_addrs: list[str], subject: str, body: str)
     msg["Subject"] = subject
     msg["From"] = settings.smtp_from or settings.smtp_user
     msg["To"] = ", ".join(to_addrs)
+    timeout = max(1, int(getattr(settings, "smtp_timeout_sec", 8) or 8))
     if settings.smtp_use_ssl:
-        smtp_ctx = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port)
+        smtp_ctx = smtplib.SMTP_SSL(settings.smtp_host, settings.smtp_port, timeout=timeout)
     else:
-        smtp_ctx = smtplib.SMTP(settings.smtp_host, settings.smtp_port)
+        smtp_ctx = smtplib.SMTP(settings.smtp_host, settings.smtp_port, timeout=timeout)
     with smtp_ctx as smtp:
         smtp.ehlo()
         if settings.smtp_starttls and not settings.smtp_use_ssl:

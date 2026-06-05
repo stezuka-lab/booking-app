@@ -35,6 +35,9 @@ class DummySession:
             return self._services.get(_id)
         return None
 
+    async def flush(self):
+        return None
+
 
 def test_send_reminders_is_disabled() -> None:
     booking = Booking(
@@ -138,7 +141,7 @@ def test_retry_staff_calendar_syncs_cancels_missing_google_event(monkeypatch) ->
         raise AssertionError("should not resync when event is missing")
 
     monkeypatch.setattr("app.booking.jobs._load_google_busy_map", fake_load_google_busy_map)
-    monkeypatch.setattr("app.booking.jobs.get_calendar_event_status", fake_get_status)
+    monkeypatch.setattr("app.booking.router.get_calendar_event_status", fake_get_status)
     monkeypatch.setattr("app.booking.router._sync_booking_to_staff_calendar", fake_sync)
 
     asyncio.run(_retry_staff_calendar_syncs(session, Settings()))

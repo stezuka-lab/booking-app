@@ -6,7 +6,9 @@ import pytest
 
 from app.booking.oauth_util import (
     google_calendar_authorization_url,
+    sign_google_oauth_state,
     sign_staff_oauth_link,
+    verify_google_oauth_state,
     verify_staff_oauth_link,
 )
 from app.config import Settings
@@ -30,13 +32,22 @@ def test_google_calendar_authorization_url_contains_scopes_and_state() -> None:
         google_oauth_client_id="test-id.apps.googleusercontent.com",
         google_oauth_client_secret="unused-here",
         google_oauth_redirect_uri="http://127.0.0.1:8000/api/booking/oauth/google/callback",
+        booking_session_secret="session-secret",
     )
     url = google_calendar_authorization_url(99, s)
     assert url.startswith("https://accounts.google.com/o/oauth2/v2/auth?")
     assert "googleapis.com%2Fauth%2Fcalendar" in url or "calendar" in url
-    assert "state=99" in url
+    assert "state=99%3A" in url
     assert "access_type=offline" in url
     assert "prompt=" in url and "consent" in url
+
+
+def test_google_oauth_state_is_signed_and_verified() -> None:
+    settings = Settings(booking_session_secret="session-secret")
+    state = sign_google_oauth_state(42, settings)
+    assert verify_google_oauth_state(state, settings) == 42
+    assert verify_google_oauth_state(state.replace("42:", "43:", 1), settings) is None
+    assert verify_google_oauth_state("42", settings) is None
 
 
 def test_google_calendar_authorization_url_uses_platform_redirect_uri() -> None:
@@ -46,6 +57,7 @@ def test_google_calendar_authorization_url_uses_platform_redirect_uri() -> None:
         google_oauth_client_id="test-id.apps.googleusercontent.com",
         google_oauth_client_secret="unused-here",
         google_oauth_redirect_uri="http://127.0.0.1:8000/api/booking/oauth/google/callback",
+        booking_session_secret="session-secret",
     )
     url = google_calendar_authorization_url(5, s)
     assert (
@@ -59,6 +71,7 @@ def test_google_calendar_authorization_url_raises_when_not_configured() -> None:
         google_oauth_client_id="",
         google_oauth_client_secret="",
         google_oauth_redirect_uri="",
+        booking_session_secret="session-secret",
     )
     with pytest.raises(RuntimeError, match="Google OAuth not configured"):
         google_calendar_authorization_url(1, s)

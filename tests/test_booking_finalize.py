@@ -6,14 +6,18 @@ from zoneinfo import ZoneInfo
 from urllib.parse import unquote
 
 import pytest
+from fastapi import HTTPException
 
 from app.booking.db_models import Booking, BookingOrg, BookingService, PublicBookingLink, StaffMember
 from app.booking.calendar_google import get_calendar_event_status_sync
 from app.booking.routing_service import db_booking_busy_intervals_for_staff
+from app.booking.schemas import BookingCreate
 from app.booking.router import (
     _delete_staff_calendar_event_if_present,
     _finalize_confirmed_booking,
     _public_booking_response,
+    _public_reconcile_check_due,
+    _reconcile_staff_calendar_blocks,
     _release_bookings_with_missing_google_events,
     _release_stale_synced_bookings_without_google_busy,
     _release_unsynced_orphan_bookings,
@@ -31,6 +35,155 @@ def _require_demo_token(client) -> str:
     if not token:
         pytest.skip("booking demo token not available")
     return token
+
+
+@pytest.mark.anyio
+async def test_create_booking_rejects_started_slot_before_google_or_staff_checks(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    token = "past-slot-token"
+    link = PublicBookingLink(id=1, org_id=1, token=token, service_id=1, active=True, title="Past Slot")
+    org = BookingOrg(id=1, name="Test Org", slug="test-org", availability_defaults_json={})
+    svc = BookingService(id=1, org_id=1, name="Consulting", duration_minutes=30, active=True)
+
+    class FakeDb:
+        async def scalar(self, stmt):
+            return link
+
+        async def get(self, model, ident):
+            if model is BookingOrg:
+                return org
+            if model is BookingService:
+                return svc
+            return None
+
+    async def fail_if_called(*args, **kwargs):
+        raise AssertionError("staff/google checks must not run for started slots")
+
+    monkeypatch.setattr(booking_router, "eligible_staff", fail_if_called)
+
+    body = BookingCreate(
+        link_token=token,
+        service_id=1,
+        start_utc=datetime.now(timezone.utc) - timedelta(minutes=1),
+        customer_name="Test User",
+        customer_email="test@example.com",
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        await booking_router._create_booking_from_body(token, body, FakeDb(), get_settings())
+
+    assert exc.value.status_code == 409
+    assert exc.value.detail["code"] == "slot_not_available"
+
+
+@pytest.mark.anyio
+async def test_round_robin_link_ignores_client_staff_id_and_picks_server_side(monkeypatch) -> None:
+    import app.booking.router as booking_router
+    import app.booking.routing_service as routing_service
+
+    token = "rr-token"
+    link = PublicBookingLink(
+        id=10,
+        org_id=1,
+        token=token,
+        service_id=1,
+        active=True,
+        title="Round Robin",
+        staff_ids_json=[27, 28],
+        routing_mode="round_robin",
+        staff_priority_overrides_json={"27": 100, "28": 100},
+        round_robin_counters_json={"27": 1, "28": 0},
+    )
+    org = BookingOrg(id=1, name="Test Org", slug="test-org", auto_confirm=True, availability_defaults_json={})
+    service = BookingService(id=1, org_id=1, name="Consulting", duration_minutes=30, active=True)
+    staff27 = StaffMember(id=27, org_id=1, name="担当A", priority_rank=100, active=True)
+    staff28 = StaffMember(id=28, org_id=1, name="担当B", priority_rank=100, active=True)
+
+    class FakeDb:
+        def __init__(self) -> None:
+            self.added: list[Booking] = []
+
+        async def scalar(self, _stmt):
+            return link
+
+        async def get(self, model, ident):
+            if model is BookingOrg:
+                return org
+            if model is BookingService:
+                return service
+            if model is StaffMember:
+                return {27: staff27, 28: staff28}.get(int(ident))
+            return None
+
+        def add(self, row):
+            self.added.append(row)
+
+        async def flush(self):
+            for idx, row in enumerate(self.added, start=1):
+                if getattr(row, "id", None) is None:
+                    row.id = idx
+
+    async def noop(*args, **kwargs):
+        return None
+
+    async def fake_release(*args, **kwargs):
+        return 0
+
+    async def fake_reconcile(*args, **kwargs):
+        return {"released_total": 0}
+
+    async def fake_resolve_staff_ids(*args, **kwargs):
+        return [27, 28]
+
+    async def fake_eligible_staff(*args, **kwargs):
+        return [staff27, staff28]
+
+    async def fake_google_busy(*args, **kwargs):
+        return {}, {}
+
+    async def fake_daily_counts(*args, **kwargs):
+        return {}
+
+    async def always_free(*args, **kwargs):
+        return True
+
+    async def fake_finalize(*args, **kwargs):
+        return False
+
+    monkeypatch.setattr(booking_router, "ensure_runtime_schema_compat", noop)
+    monkeypatch.setattr(booking_router, "_release_bookings_with_missing_google_events", fake_release)
+    monkeypatch.setattr(booking_router, "_reconcile_staff_calendar_blocks", fake_reconcile)
+    monkeypatch.setattr(booking_router, "_resolve_valid_link_staff_ids", fake_resolve_staff_ids)
+    monkeypatch.setattr(booking_router, "eligible_staff", fake_eligible_staff)
+    monkeypatch.setattr(routing_service, "eligible_staff", fake_eligible_staff)
+    monkeypatch.setattr(booking_router, "_load_google_busy_map", fake_google_busy)
+    monkeypatch.setattr(booking_router, "load_link_daily_booking_counts", fake_daily_counts)
+    monkeypatch.setattr(booking_router, "staff_is_free", always_free)
+    monkeypatch.setattr(routing_service, "staff_is_free", always_free)
+    monkeypatch.setattr(booking_router, "_lock_link_assignment", noop)
+    monkeypatch.setattr(booking_router, "_lock_staff_booking_day", noop)
+    monkeypatch.setattr(booking_router, "_finalize_confirmed_booking", fake_finalize)
+
+    body = BookingCreate(
+        link_token=token,
+        service_id=1,
+        staff_id=27,
+        start_utc=datetime.now(timezone.utc) + timedelta(days=3),
+        customer_name="Test User",
+        customer_email="test@example.com",
+    )
+
+    booking, picked_staff, _customer_cal, _link_title, _message = await booking_router._create_booking_from_body(
+        token,
+        body,
+        FakeDb(),
+        get_settings(),
+    )
+
+    assert picked_staff.id == 28
+    assert booking.staff_id == 28
+    assert link.round_robin_counters_json == {"27": 1, "28": 1}
 
 
 def test_booking_endpoint_survives_finalize_failure(client, monkeypatch) -> None:
@@ -516,6 +669,67 @@ def test_release_stale_synced_bookings_without_google_busy(monkeypatch) -> None:
     assert "自動で解放" in (booking.google_calendar_sync_error or "")
 
 
+def test_reconcile_does_not_release_synced_booking_only_missing_from_freebusy(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    settings = get_settings()
+    staff = StaffMember(
+        id=6,
+        org_id=1,
+        name="担当A",
+        google_refresh_token=encrypt_secret("refresh-token", settings),
+        google_calendar_id="primary",
+    )
+    calls = {"stale": 0}
+
+    async def fake_missing(*args, **kwargs):
+        return 0
+
+    async def fake_orphans(*args, **kwargs):
+        return 0
+
+    async def fake_stale(*args, **kwargs):
+        calls["stale"] += 1
+        return 1
+
+    monkeypatch.setattr(booking_router, "_release_bookings_with_missing_google_events", fake_missing)
+    monkeypatch.setattr(booking_router, "_release_unsynced_orphan_bookings", fake_orphans)
+    monkeypatch.setattr(booking_router, "_release_stale_synced_bookings_without_google_busy", fake_stale)
+
+    class DummySession:
+        pass
+
+    result = asyncio.run(
+        _reconcile_staff_calendar_blocks(
+            DummySession(),
+            settings,
+            [staff],
+            datetime(2030, 1, 3, 0, 0, tzinfo=timezone.utc),
+            datetime(2030, 1, 4, 0, 0, tzinfo=timezone.utc),
+            google_busy_map={6: []},
+            google_busy_errors={},
+        )
+    )
+
+    assert result["released_total"] == 0
+    assert result["released_stale_synced"] == 0
+    assert calls["stale"] == 0
+
+
+def test_public_reconcile_check_is_throttled(monkeypatch) -> None:
+    import app.booking.router as booking_router
+
+    booking_router._PUBLIC_RECONCILE_CHECK_CACHE.clear()
+    settings = get_settings()
+    monkeypatch.setattr(settings, "booking_google_delete_check_interval_sec", 60, raising=False)
+
+    assert _public_reconcile_check_due("tok", settings) is True
+    assert _public_reconcile_check_due("tok", settings) is False
+    assert _public_reconcile_check_due("other", settings) is True
+    booking_router._clear_public_availability_cache("tok")
+    assert _public_reconcile_check_due("tok", settings) is True
+
+
 def test_public_availability_survives_busy_union_failure(client, monkeypatch) -> None:
     import app.booking.router as booking_router
 
@@ -776,7 +990,7 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
     assert booking.customer_name == ""
     assert booking.customer_email == ""
     assert booking.company_name is None
-    assert booking.form_answers_json == {}
+    assert booking.form_answers_json == {"customer_number": "AP12345"}
     assert booking.customer_confirmation_email_sent_at is None
     assert booking.customer_confirmation_email_error == "SMTP temporary failure"
     assert booking.customer_confirmation_email_last_attempt_at is not None
@@ -1058,7 +1272,7 @@ def test_finalize_confirmed_booking_scrubs_even_when_email_send_raises(monkeypat
     assert booking.customer_name == ""
     assert booking.customer_email == ""
     assert booking.company_name is None
-    assert booking.form_answers_json == {}
+    assert booking.form_answers_json == {"customer_number": "AP12345"}
 
 
 def test_sync_booking_to_staff_calendar_recreates_event(monkeypatch) -> None:
@@ -1318,3 +1532,152 @@ def test_manage_cancel_ignores_deadline_policy(monkeypatch) -> None:
     assert body == {"ok": True, "status": "cancelled"}
     assert booking.status == "cancelled"
     assert db.committed is True
+
+
+def test_manage_reschedule_uses_link_buffer(monkeypatch) -> None:
+    import app.booking.router as booking_router
+    from fastapi import HTTPException
+    from app.booking.schemas import RescheduleBody
+
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    org = BookingOrg(
+        id=1,
+        name="Test Org",
+        slug="test-org",
+        cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": False},
+        availability_defaults_json={"buffer_minutes": 0},
+    )
+    staff = StaffMember(id=4, org_id=1, name="担当A", email="staff@example.com")
+    svc = BookingService(id=1, org_id=1, name="初回相談", duration_minutes=30)
+    link = PublicBookingLink(
+        id=7,
+        org_id=1,
+        token="tok",
+        title="リンク別",
+        service_id=1,
+        buffer_minutes=15,
+    )
+    booking = Booking(
+        id=22,
+        org_id=1,
+        public_link_id=7,
+        staff_id=4,
+        service_id=1,
+        start_utc=now + timedelta(days=3),
+        end_utc=now + timedelta(days=3, minutes=30),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        manage_token="manage-token",
+    )
+    captured: dict[str, object] = {}
+
+    class DummyDb:
+        async def scalar(self, _query):
+            return booking
+
+        async def get(self, model, _id):
+            if model is BookingOrg:
+                return org
+            if model is StaffMember:
+                return staff
+            if model is BookingService:
+                return svc
+            if model is PublicBookingLink:
+                return link
+            return None
+
+    async def fake_lock(*args, **kwargs):
+        return None
+
+    async def fake_busy(*args, **kwargs):
+        return {}, {}
+
+    async def fake_staff_is_free(*args, **kwargs):
+        captured["buffer_minutes"] = kwargs.get("buffer_minutes")
+        return False
+
+    monkeypatch.setattr(booking_router, "_lock_staff_booking_day", fake_lock)
+    monkeypatch.setattr(booking_router, "_load_google_busy_map", fake_busy)
+    monkeypatch.setattr(booking_router, "staff_is_free", fake_staff_is_free)
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(
+            booking_router.manage_reschedule(
+                "manage-token",
+                RescheduleBody(new_start_utc=now + timedelta(days=4)),
+                DummyDb(),
+                settings,
+            )
+        )
+
+    assert excinfo.value.status_code == 409
+    assert captured["buffer_minutes"] == 15
+
+
+def test_manage_reschedule_respects_link_max_advance_days(monkeypatch) -> None:
+    import app.booking.router as booking_router
+    from fastapi import HTTPException
+    from app.booking.schemas import RescheduleBody
+
+    settings = get_settings()
+    now = datetime.now(timezone.utc)
+    org = BookingOrg(
+        id=1,
+        name="Test Org",
+        slug="test-org",
+        cancel_policy_json={"change_until_hours_before": 24, "same_day_phone_only": False},
+        availability_defaults_json={},
+    )
+    staff = StaffMember(id=4, org_id=1, name="担当A", email="staff@example.com")
+    svc = BookingService(id=1, org_id=1, name="初回相談", duration_minutes=30)
+    link = PublicBookingLink(
+        id=8,
+        org_id=1,
+        token="tok",
+        title="短期リンク",
+        service_id=1,
+        max_advance_booking_days=1,
+    )
+    booking = Booking(
+        id=23,
+        org_id=1,
+        public_link_id=8,
+        staff_id=4,
+        service_id=1,
+        start_utc=now + timedelta(days=3),
+        end_utc=now + timedelta(days=3, minutes=30),
+        status="confirmed",
+        customer_name="Customer",
+        customer_email="customer@example.com",
+        manage_token="manage-token",
+    )
+
+    class DummyDb:
+        async def scalar(self, _query):
+            return booking
+
+        async def get(self, model, _id):
+            if model is BookingOrg:
+                return org
+            if model is StaffMember:
+                return staff
+            if model is BookingService:
+                return svc
+            if model is PublicBookingLink:
+                return link
+            return None
+
+    with pytest.raises(HTTPException) as excinfo:
+        asyncio.run(
+            booking_router.manage_reschedule(
+                "manage-token",
+                RescheduleBody(new_start_utc=now + timedelta(days=10)),
+                DummyDb(),
+                settings,
+            )
+        )
+
+    assert excinfo.value.status_code == 400
+    assert "先行予約" in str(excinfo.value.detail)

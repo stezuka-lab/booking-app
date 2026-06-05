@@ -309,6 +309,50 @@ async def _normalize_link_routing_modes() -> None:
             )
 
 
+async def _ensure_booking_exact_overlap_guard() -> None:
+    """Create a low-risk DB guard against exact duplicate active bookings."""
+    engine = _get_engine()
+    async with engine.begin() as conn:
+        duplicate = await conn.scalar(
+            text(
+                """
+                SELECT 1
+                FROM bookings
+                WHERE staff_id IS NOT NULL
+                  AND status IN ('pending', 'confirmed')
+                GROUP BY staff_id, start_utc, end_utc
+                HAVING COUNT(*) > 1
+                LIMIT 1
+                """
+            )
+        )
+        if duplicate:
+            logger.warning(
+                "DB init: skip exact duplicate booking guard; existing duplicate active bookings were found"
+            )
+            return
+        if str(engine.url).startswith("sqlite"):
+            await conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS ux_bookings_staff_exact_active
+                    ON bookings (staff_id, start_utc, end_utc)
+                    WHERE staff_id IS NOT NULL AND status IN ('pending', 'confirmed')
+                    """
+                )
+            )
+        elif str(engine.url).startswith("postgresql"):
+            await conn.execute(
+                text(
+                    """
+                    CREATE UNIQUE INDEX IF NOT EXISTS ux_bookings_staff_exact_active
+                    ON bookings (staff_id, start_utc, end_utc)
+                    WHERE staff_id IS NOT NULL AND status IN ('pending', 'confirmed')
+                    """
+                )
+            )
+
+
 def _sqlite_rebuild_bookings_nullable_staff_sync(connection: Any) -> None:
     """staff_id を NULL 可・ON DELETE SET NULL にしたテーブルへ移行（既存 SQLite）。"""
     from sqlalchemy.dialects.sqlite import dialect as sqlite_dialect
@@ -377,6 +421,9 @@ async def init_db() -> None:
         logger.info("DB init: link routing normalize start")
         await _normalize_link_routing_modes()
         logger.info("DB init: link routing normalize done")
+        logger.info("DB init: booking duplicate guard start")
+        await _ensure_booking_exact_overlap_guard()
+        logger.info("DB init: booking duplicate guard done")
         logger.info("DB init: sqlite staff migration start")
         await _sqlite_migrate_bookings_nullable_staff(engine)
         logger.info("DB init: sqlite staff migration done")
@@ -400,6 +447,7 @@ async def ensure_runtime_schema_compat() -> None:
         await _sqlite_add_missing_columns()
         await _postgres_add_missing_columns()
         await _normalize_link_routing_modes()
+        await _ensure_booking_exact_overlap_guard()
         _runtime_schema_compat_ready = True
 
 

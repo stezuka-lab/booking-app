@@ -2,10 +2,12 @@ from __future__ import annotations
 
 import asyncio
 import copy
+import hashlib
 import json
 import logging
 import secrets
 import time as time_module
+from contextlib import suppress
 from datetime import date, datetime, timedelta, timezone
 from typing import Annotated, Any
 from urllib.parse import urlencode
@@ -13,7 +15,7 @@ from urllib.parse import urlencode
 import httpx
 from fastapi import APIRouter, Depends, File, Form, Header, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse, RedirectResponse
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select, text, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -80,6 +82,7 @@ from app.booking.routing_service import (
 from app.booking.oauth_util import (
     google_calendar_authorization_url,
     sign_staff_oauth_link,
+    verify_google_oauth_state,
     verify_staff_oauth_link,
 )
 from app.booking.schemas import (
@@ -106,10 +109,58 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["booking"])
 
 _PUBLIC_AVAILABILITY_CACHE: dict[tuple[str, str, str, str], tuple[float, dict[str, Any]]] = {}
+_PUBLIC_RECONCILE_CHECK_CACHE: dict[str, float] = {}
+_PUBLIC_LINK_META_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _ADMIN_SUMMARY_COUNTS_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _ADMIN_ORG_SUMMARY_CACHE: dict[str, tuple[float, dict[str, Any]]] = {}
 _ADMIN_SUMMARY_COUNTS_CACHE_TTL_SEC = 120.0
 _ADMIN_ORG_SUMMARY_CACHE_TTL_SEC = 120.0
+
+
+def _advisory_lock_key(raw: str) -> int:
+    digest = hashlib.blake2b(raw.encode("utf-8"), digest_size=8).digest()
+    return int.from_bytes(digest, byteorder="big", signed=True)
+
+
+async def _pg_advisory_xact_lock(
+    db: AsyncSession,
+    settings: Settings,
+    raw_key: str,
+) -> None:
+    """Postgres only: serialize critical booking decisions within the current transaction."""
+    if not str(settings.database_url or "").strip().startswith("postgresql"):
+        return
+    await db.execute(
+        text("SELECT pg_advisory_xact_lock(:lock_key)"),
+        {"lock_key": _advisory_lock_key(raw_key)},
+    )
+
+
+async def _lock_staff_booking_day(
+    db: AsyncSession,
+    settings: Settings,
+    org: BookingOrg,
+    staff_id: int,
+    start_utc: datetime,
+) -> None:
+    local_day = org_local_date_for_utc_instant(start_utc, org).isoformat()
+    await _pg_advisory_xact_lock(
+        db,
+        settings,
+        f"booking:staff-day:{int(getattr(org, 'id', 0) or 0)}:{int(staff_id)}:{local_day}",
+    )
+
+
+async def _lock_link_assignment(
+    db: AsyncSession,
+    settings: Settings,
+    link: PublicBookingLink,
+) -> None:
+    await _pg_advisory_xact_lock(
+        db,
+        settings,
+        f"booking:link-assignment:{int(getattr(link, 'id', 0) or 0)}",
+    )
 
 
 def _coerce_google_busy_result(
@@ -208,13 +259,59 @@ def _store_cached_public_availability(
 _set_cached_public_availability = _store_cached_public_availability
 
 
+def _get_cached_public_link_meta(token: str) -> dict[str, Any] | None:
+    cached = _PUBLIC_LINK_META_CACHE.get(token)
+    if not cached:
+        return None
+    expires_at, payload = cached
+    if expires_at <= time_module.monotonic():
+        _PUBLIC_LINK_META_CACHE.pop(token, None)
+        return None
+    return copy.deepcopy(payload)
+
+
+def _store_cached_public_link_meta(token: str, payload: dict[str, Any]) -> None:
+    _PUBLIC_LINK_META_CACHE[token] = (
+        time_module.monotonic() + 120.0,
+        copy.deepcopy(payload),
+    )
+
+
+def _public_reconcile_check_due(token: str, settings: Settings) -> bool:
+    interval = max(
+        0,
+        int(getattr(settings, "booking_google_delete_check_interval_sec", 60) or 0),
+    )
+    if interval <= 0:
+        return True
+    now = time_module.monotonic()
+    next_at = _PUBLIC_RECONCILE_CHECK_CACHE.get(token)
+    if next_at and next_at > now:
+        return False
+    _PUBLIC_RECONCILE_CHECK_CACHE[token] = now + interval
+    return True
+
+
+def _mark_public_reconcile_checked(token: str, settings: Settings) -> None:
+    interval = max(
+        0,
+        int(getattr(settings, "booking_google_delete_check_interval_sec", 60) or 0),
+    )
+    if interval > 0:
+        _PUBLIC_RECONCILE_CHECK_CACHE[token] = time_module.monotonic() + interval
+
+
 def _clear_public_availability_cache(token: str | None = None) -> None:
     if token is None:
         _PUBLIC_AVAILABILITY_CACHE.clear()
+        _PUBLIC_RECONCILE_CHECK_CACHE.clear()
+        _PUBLIC_LINK_META_CACHE.clear()
         return
     doomed = [key for key in _PUBLIC_AVAILABILITY_CACHE if key[0] == token]
     for key in doomed:
         _PUBLIC_AVAILABILITY_CACHE.pop(key, None)
+    _PUBLIC_RECONCILE_CHECK_CACHE.pop(token, None)
+    _PUBLIC_LINK_META_CACHE.pop(token, None)
 
 
 async def _clear_public_availability_cache_for_org(db: AsyncSession, org_id: int) -> None:
@@ -332,15 +429,10 @@ async def _reconcile_staff_calendar_blocks(
         gmap,
         gerr,
     )
-    released_stale = await _release_stale_synced_bookings_without_google_busy(
-        db,
-        settings,
-        staff_list,
-        range_start,
-        range_end,
-        gmap,
-        gerr,
-    )
+    # google_event_id がある予約は events.get の 404/cancelled 判定だけで解放する。
+    # FreeBusy に同時間帯が出ないだけで自動キャンセルすると、同期遅延・透明予定・対象カレンダー違いで
+    # 有効な予約を解放するリスクがある。
+    released_stale = 0
     return {
         "released_total": int(released_missing + released_orphans + released_stale),
         "released_missing_google_events": int(released_missing),
@@ -621,17 +713,26 @@ def _booking_customer_email(booking: Booking | None, settings: Settings) -> str:
 
 
 def _scrub_booking_personal_data(booking: Booking) -> None:
+    customer_id = ""
+    if isinstance(getattr(booking, "form_answers_json", None), dict):
+        customer_id = str((booking.form_answers_json or {}).get("customer_number") or "").strip()
     booking.customer_name = ""
     booking.customer_email = ""
     booking.customer_phone = None
     booking.company_name = None
     booking.calendar_title_note = None
-    booking.form_answers_json = {}
+    booking.form_answers_json = {"customer_number": customer_id} if customer_id else {}
     booking.utm_source = None
     booking.utm_medium = None
     booking.utm_campaign = None
     booking.referrer = None
     booking.ga_client_id = None
+
+
+def _booking_customer_id(booking: Booking | None) -> str:
+    if booking is None or not isinstance(getattr(booking, "form_answers_json", None), dict):
+        return ""
+    return str((booking.form_answers_json or {}).get("customer_number") or "").strip()
 
 
 def _booking_calendar_description(
@@ -943,6 +1044,10 @@ async def legacy_booking_public_redirect(token: str) -> RedirectResponse:
 
 @router.get("/api/booking/links/{token}/meta")
 async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[str, Any]:
+    cached = _get_cached_public_link_meta(token)
+    if cached is not None:
+        cached["cached"] = True
+        return cached
     link, org, fixed_service_row = await _load_public_link_context(db, token)
     initial_service: dict[str, Any] | None = None
     if link.service_id is None:
@@ -979,7 +1084,7 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
             "name": fixed_service_row.name,
             "duration_minutes": fixed_service_row.duration_minutes,
         }
-    return {
+    payload = {
         "fixed_service": fixed_service,
         "initial_service": initial_service,
         "form_fields": json_list_or_empty(form.fields_json) if form else [],
@@ -995,6 +1100,9 @@ async def link_meta(token: str, db: DbSession, settings: SettingsDep) -> dict[st
         },
         "availability_defaults": json_object_or_empty(org.availability_defaults_json),
     }
+    _store_cached_public_link_meta(token, payload)
+    payload["cached"] = False
+    return payload
 
 
 @router.get("/api/booking/links/{token}/availability")
@@ -1008,9 +1116,38 @@ async def link_availability(
 ) -> dict[str, Any]:
     req_started = time_module.monotonic()
     cached_payload = _get_cached_public_availability(token, from_ts, to_ts, service_id, settings)
+    cached_reconcile_checked_until = (
+        float(cached_payload.get("_reconcile_checked_until") or 0.0)
+        if cached_payload is not None
+        else 0.0
+    )
+    if cached_payload is not None and cached_reconcile_checked_until > time_module.monotonic():
+        cached_payload.pop("_reconcile_checked_until", None)
+        cached_payload["cached"] = True
+        logger.info(
+            "booking.availability cache_fast_hit token=%s service_id=%s from=%s to=%s total_ms=%s",
+            token,
+            service_id,
+            from_ts.isoformat(),
+            to_ts.isoformat(),
+            round((time_module.monotonic() - req_started) * 1000, 1),
+        )
+        return cached_payload
     initial_started = time_module.monotonic()
     link, org, service = await _load_public_link_context(db, token, service_id)
     effective_sid = link.service_id if link.service_id is not None else service_id
+    if service is None and effective_sid is None:
+        service = await db.scalar(
+            select(BookingService)
+            .where(
+                BookingService.org_id == org.id,
+                BookingService.active.is_(True),
+            )
+            .order_by(BookingService.id.asc())
+            .limit(1)
+        )
+        if service is not None:
+            effective_sid = int(service.id)
     defaults = json_object_or_empty(org.availability_defaults_json)
     buf_min = link_buffer_minutes(link, org, settings)
     link_max_adv_days = link_max_advance_booking_days(link, org)
@@ -1047,16 +1184,21 @@ async def link_availability(
         released_total = 0
         released_stale = 0
         release_ms = 0.0
+        reconcile_due = False
         if staff_list:
             release_started = time_module.monotonic()
             release_start = min(fts, datetime.now(timezone.utc) - timedelta(days=1))
             release_end = tts + AVAILABILITY_RANGE_END_SLACK
-            if cached_payload is not None:
+            if cached_payload is not None and cached_reconcile_checked_until > time_module.monotonic():
+                release_ms = (time_module.monotonic() - release_started) * 1000
+            elif cached_payload is not None:
+                reconcile_due = True
                 reconcile = await _reconcile_staff_calendar_blocks(db, settings, staff_list, release_start, release_end)
                 released_missing = int(reconcile.get("released_missing_google_events") or 0)
                 released_stale = int(reconcile.get("released_stale_synced") or 0)
                 released_total = int(reconcile.get("released_total") or 0)
-            else:
+            elif _public_reconcile_check_due(token, settings):
+                reconcile_due = True
                 released_missing = await _release_bookings_with_missing_google_events(
                     db,
                     settings,
@@ -1070,6 +1212,7 @@ async def link_availability(
                 _clear_public_availability_cache(token)
             release_ms = (time_module.monotonic() - release_started) * 1000
         if cached_payload is not None and not released_total:
+            cached_payload.pop("_reconcile_checked_until", None)
             logger.info(
                 "booking.availability cache_hit token=%s service_id=%s from=%s to=%s released_missing=%s released_stale=%s "
                 "initial_ms=%s resolve_ms=%s release_ms=%s total_ms=%s",
@@ -1117,20 +1260,18 @@ async def link_availability(
             gmap = {}
             google_busy_errors = {}
         google_busy_ms = (time_module.monotonic() - google_busy_started) * 1000
-        if staff_list:
+        if staff_list and reconcile_due:
             reconcile_started = time_module.monotonic()
-            reconcile = await _reconcile_staff_calendar_blocks(
+            released_orphans = await _release_unsynced_orphan_bookings(
                 db,
                 settings,
                 staff_list,
                 fts,
                 tts,
-                google_busy_map=gmap,
-                google_busy_errors=google_busy_errors,
+                gmap,
+                google_busy_errors,
             )
-            released_missing = int(reconcile.get("released_missing_google_events") or released_missing)
-            released_stale = int(reconcile.get("released_stale_synced") or 0)
-            released_total = int(reconcile.get("released_total") or released_total)
+            released_total = int(released_total + released_orphans)
             if released_total:
                 await db.commit()
                 _clear_public_availability_cache(token)
@@ -1206,6 +1347,7 @@ async def link_availability(
             "busy_intervals": [],
             "blocked_dates": blocked_dates,
             "slot_minutes": slot_generation_step,
+            "service_id": int(service.id) if service is not None else None,
             "service_duration_minutes": duration_min,
             "buffer_minutes": buf_min,
             "max_advance_booking_days": link_max_adv_days,
@@ -1259,7 +1401,12 @@ async def link_availability(
             gmap_failed,
             had_slot_errors,
         )
+        _mark_public_reconcile_checked(token, settings)
+        checked_until = _PUBLIC_RECONCILE_CHECK_CACHE.get(token)
+        if checked_until and checked_until > time_module.monotonic():
+            response_payload["_reconcile_checked_until"] = checked_until
         _store_cached_public_availability(token, from_ts, to_ts, service_id, response_payload, settings)
+        response_payload.pop("_reconcile_checked_until", None)
         response_payload["cached"] = False
         return response_payload
     except Exception:
@@ -1270,6 +1417,7 @@ async def link_availability(
             "busy_intervals": [],
             "blocked_dates": blocked_dates,
             "slot_minutes": max(1, min(BOOKING_SLOT_STEP_MINUTES, duration_min)),
+            "service_id": int(service.id) if service is not None else None,
             "service_duration_minutes": duration_min,
             "buffer_minutes": buf_min,
             "max_advance_booking_days": link_max_adv_days,
@@ -1288,7 +1436,12 @@ async def link_availability(
                 "warning_ja": None,
             },
         }
+        _mark_public_reconcile_checked(token, settings)
+        checked_until = _PUBLIC_RECONCILE_CHECK_CACHE.get(token)
+        if checked_until and checked_until > time_module.monotonic():
+            response_payload["_reconcile_checked_until"] = checked_until
         _store_cached_public_availability(token, from_ts, to_ts, service_id, response_payload, settings)
+        response_payload.pop("_reconcile_checked_until", None)
         response_payload["cached"] = False
         return response_payload
 
@@ -1340,6 +1493,17 @@ async def _create_booking_from_body(
     start = body.start_utc
     if start.tzinfo is None:
         start = start.replace(tzinfo=timezone.utc)
+    start = start.astimezone(timezone.utc)
+    if start <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=409,
+            detail=booking_conflict_detail_json(
+                "slot_not_available",
+                "開始時刻を過ぎた予約枠は予約できません。別の時間をお選びください。",
+                duration_minutes=service.duration_minutes,
+                buffer_minutes=link_buffer_minutes(link, org, settings),
+            ),
+        )
     staff_probe_list = await eligible_staff(db, org, staff_ids, service, settings)
     mark("resolve_ms")
     gmap_probe, gmap_probe_errors = _coerce_google_busy_result(
@@ -1413,8 +1577,19 @@ async def _create_booking_from_body(
     counts_for_day = daily_booking_counts.get(local_booking_date, {})
 
     staff: StaffMember | None = None
-    if body.staff_id:
-        staff = await db.get(StaffMember, body.staff_id)
+    link_routing_mode = normalize_link_routing_mode(getattr(link, "routing_mode", None))
+    requested_staff_id = body.staff_id
+    if requested_staff_id and link_routing_mode == "round_robin" and len(staff_probe_list) > 1:
+        logger.info(
+            "booking.create ignoring client staff_id for round_robin link token=%s requested_staff_id=%s eligible_staff=%s",
+            token,
+            requested_staff_id,
+            len(staff_probe_list),
+        )
+        requested_staff_id = None
+
+    if requested_staff_id:
+        staff = await db.get(StaffMember, requested_staff_id)
         if not staff or staff.org_id != org.id:
             raise HTTPException(400, "invalid staff")
         eligible_for_link = staff_probe_list
@@ -1470,6 +1645,15 @@ async def _create_booking_from_body(
                     buffer_minutes=buf_org,
                 ),
             )
+        await _lock_link_assignment(db, settings, link)
+        daily_booking_counts = await load_link_daily_booking_counts(
+            db,
+            org,
+            link,
+            [int(s.id) for s in staff_probe_list],
+            start,
+            end,
+        )
         picked = await pick_staff_for_slot(
             db,
             org,
@@ -1479,7 +1663,7 @@ async def _create_booking_from_body(
             end,
             settings,
             link_priority_overrides=link_priority_overrides,
-            routing_mode_override=normalize_link_routing_mode(getattr(link, "routing_mode", None)),
+            routing_mode_override=link_routing_mode,
             link=link,
             daily_booking_counts_override=daily_booking_counts,
             daily_booking_limit_per_staff_override=daily_booking_limit,
@@ -1506,6 +1690,28 @@ async def _create_booking_from_body(
             )
         staff = picked
     mark("staff_pick_ms")
+
+    await _lock_staff_booking_day(db, settings, org, int(staff.id), start)
+    daily_booking_counts = await load_link_daily_booking_counts(
+        db,
+        org,
+        link,
+        [int(staff.id)],
+        start,
+        end,
+    )
+    locked_counts_for_day = daily_booking_counts.get(local_booking_date, {})
+    if daily_booking_limit is not None and int(locked_counts_for_day.get(int(staff.id), 0) or 0) >= daily_booking_limit:
+        raise HTTPException(
+            status_code=409,
+            detail=booking_conflict_detail_json(
+                "slot_not_available",
+                "この時間は予約できません。別の時間をお選びください。",
+                duration_minutes=service.duration_minutes,
+                buffer_minutes=buf_org,
+            ),
+        )
+
     final_gmap, _final_google_busy_errors = _coerce_google_busy_result(
         await _load_google_busy_map(
             [staff],
@@ -1763,7 +1969,28 @@ async def _finalize_confirmed_booking(
     customer_email = _booking_customer_email(b, settings)
     manage_url = f"{settings.public_base_url_value()}/app/manage/{b.manage_token}"
     customer_cal_ok = False
+    email_results: dict[str, Any] = {}
+    email_task: asyncio.Task[dict[str, Any]] | None = None
+    meeting_provider = (b.meeting_provider or "").strip().lower()
+    needs_staff_calendar_before_email = (
+        meeting_provider == "meet"
+        or (meeting_provider in {"zoom", "teams"} and not _booking_meeting_url(b, settings))
+    )
     try:
+        if not needs_staff_calendar_before_email:
+            email_task = asyncio.create_task(
+                send_booking_emails(
+                    settings,
+                    org,
+                    b,
+                    staff,
+                    service_name,
+                    booking_link_title=booking_link_title,
+                    manage_url=manage_url,
+                    post_booking_message=post_booking_message,
+                    dry_run=settings.actions_dry_run,
+                )
+            )
         await _sync_booking_to_staff_calendar(
             session,
             settings,
@@ -1776,6 +2003,20 @@ async def _finalize_confirmed_booking(
         )
         mark("staff_calendar_ms")
         meeting_url = _booking_meeting_url(b, settings)
+        if email_task is None:
+            email_task = asyncio.create_task(
+                send_booking_emails(
+                    settings,
+                    org,
+                    b,
+                    staff,
+                    service_name,
+                    booking_link_title=booking_link_title,
+                    manage_url=manage_url,
+                    post_booking_message=post_booking_message,
+                    dry_run=settings.actions_dry_run,
+                )
+            )
         cust_tok = (customer_google_access_token or "").strip()
         if cust_tok:
             cust_no = ""
@@ -1795,7 +2036,7 @@ async def _finalize_confirmed_booking(
                 desc_lines.append(f"会社名: {(b.company_name or '').strip()}")
             desc_lines.append(f"担当: {(staff.name or '').strip()}")
             desc_lines.append(f"予約の変更・キャンセル: {manage_url}")
-            ev_c = await insert_customer_primary_calendar_with_access_token(
+            customer_calendar_task = insert_customer_primary_calendar_with_access_token(
                 cust_tok,
                 summary,
                 b.start_utc.isoformat(),
@@ -1803,21 +2044,14 @@ async def _finalize_confirmed_booking(
                 description="\n".join(desc_lines),
                 location=meeting_url or None,
             )
+        else:
+            customer_calendar_task = None
+        if customer_calendar_task is not None:
+            ev_c, email_results = await asyncio.gather(customer_calendar_task, email_task)
             customer_cal_ok = ev_c is not None
-        mark("customer_calendar_ms")
-
-        email_results = await send_booking_emails(
-            settings,
-            org,
-            b,
-            staff,
-            service_name,
-            booking_link_title=booking_link_title,
-            manage_url=manage_url,
-            post_booking_message=post_booking_message,
-            dry_run=settings.actions_dry_run,
-        )
-        mark("email_ms")
+        else:
+            email_results = await email_task
+        mark("customer_calendar_and_email_ms")
         email_now = datetime.now(timezone.utc)
         b.customer_confirmation_email_last_attempt_at = email_now
         if email_results.get("customer"):
@@ -1838,14 +2072,20 @@ async def _finalize_confirmed_booking(
             "email_ms=%.1f flush_ms=%.1f total_ms=%.1f customer_email=%s staff_email=%s",
             b.id,
             timings.get("staff_calendar_ms", 0.0),
-            timings.get("customer_calendar_ms", 0.0),
-            timings.get("email_ms", 0.0),
+            timings.get("customer_calendar_and_email_ms", 0.0),
+            timings.get("customer_calendar_and_email_ms", 0.0),
             timings.get("flush_ms", 0.0),
             (time_module.perf_counter() - t_total) * 1000,
             bool(email_results.get("customer")),
             bool(email_results.get("staff")),
         )
         return customer_cal_ok
+    except Exception:
+        if email_task is not None and not email_task.done():
+            email_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await email_task
+        raise
     finally:
         _scrub_booking_personal_data(b)
         await session.flush()
@@ -1898,6 +2138,11 @@ async def manage_info(manage_token: str, db: DbSession, settings: SettingsDep) -
             "status": b.status,
             "start_utc": b.start_utc.isoformat(),
             "end_utc": b.end_utc.isoformat(),
+            "created_at": (
+                getattr(b, "created_at").isoformat()
+                if getattr(b, "created_at", None)
+                else None
+            ),
             "meeting_url": _booking_meeting_url(b, settings),
             "link_title": (b.booking_link_title_snapshot or "").strip() or "予約",
         },
@@ -1950,22 +2195,87 @@ async def manage_reschedule(
             400,
             "担当が削除されているため、オンラインでの変更はできません。担当者へお問い合わせください。",
         )
+    link = await db.get(PublicBookingLink, b.public_link_id) if b.public_link_id else None
     new_start = body.new_start_utc
     if new_start.tzinfo is None:
         new_start = new_start.replace(tzinfo=timezone.utc)
+    new_start = new_start.astimezone(timezone.utc)
+    if new_start <= datetime.now(timezone.utc):
+        raise HTTPException(
+            status_code=409,
+            detail=booking_conflict_detail_json(
+                "slot_not_available",
+                "開始時刻を過ぎた予約枠には変更できません。別の時間をお選びください。",
+                duration_minutes=svc.duration_minutes,
+                buffer_minutes=link_buffer_minutes(link, org, settings) if link is not None else org_buffer_minutes(org, settings),
+            ),
+        )
     new_end = new_start + timedelta(minutes=svc.duration_minutes)
     defaults_avail = org.availability_defaults_json or {}
-    if day_is_blocked_for_booking(org_local_date_for_utc_instant(new_start, org), defaults_avail):
+    local_new_date = org_local_date_for_utc_instant(new_start, org)
+    if link is not None:
+        max_adv_days = link_max_advance_booking_days(link, org)
+        if max_adv_days > 0:
+            loc_tz = availability_zone(json_object_or_empty(org.availability_defaults_json))
+            today = datetime.now(loc_tz).date()
+            if local_new_date > today + timedelta(days=max_adv_days):
+                raise HTTPException(
+                    400,
+                    "この日付は予約受付の範囲外です（先行予約の上限日数の設定）。",
+                )
+        cutoff_date = link_bookable_until_date(link)
+        if cutoff_date is not None and local_new_date > cutoff_date:
+            raise HTTPException(
+                400,
+                f"この予約リンクは {cutoff_date.isoformat()} 以降の予約を受け付けていません。",
+            )
+        if local_new_date in link_lead_blocked_dates(org, link):
+            raise HTTPException(
+                400,
+                "この期間はこの予約リンクでは受け付けていません（直近の受付開始までお待ちください）",
+            )
+    if day_is_blocked_for_booking(local_new_date, defaults_avail):
         raise HTTPException(
             400,
             "この日は予約を受け付けていません（土日祝・休業設定）",
         )
+    await _lock_staff_booking_day(db, settings, org, int(staff.id), new_start)
+    buf_res = link_buffer_minutes(link, org, settings) if link is not None else org_buffer_minutes(org, settings)
+    if link is not None:
+        daily_limit = link_daily_booking_limit_per_staff(link)
+        if daily_limit is not None:
+            counts_by_day = await load_link_daily_booking_counts(
+                db,
+                org,
+                link,
+                [int(staff.id)],
+                new_start,
+                new_end,
+            )
+            count_for_staff = int((counts_by_day.get(local_new_date, {}) or {}).get(int(staff.id), 0) or 0)
+            current_local_date = org_local_date_for_utc_instant(b.start_utc, org)
+            if (
+                b.public_link_id == link.id
+                and b.staff_id == staff.id
+                and current_local_date == local_new_date
+                and count_for_staff > 0
+            ):
+                count_for_staff -= 1
+            if count_for_staff >= daily_limit:
+                raise HTTPException(
+                    status_code=409,
+                    detail=booking_conflict_detail_json(
+                        "slot_not_available",
+                        "この時間は予約できません。別の時間をお選びください。",
+                        duration_minutes=svc.duration_minutes,
+                        buffer_minutes=buf_res,
+                    ),
+                )
     ws, we = org_calendar_day_bounds_utc(new_start, org)
     _pad = timedelta(days=1)
     gmap, _google_busy_errors = _coerce_google_busy_result(
         await _load_google_busy_map([staff], ws - _pad, we + _pad, settings)
     )
-    buf_res = org_buffer_minutes(org, settings)
     if not await staff_is_free(
         db,
         staff,
@@ -2061,10 +2371,14 @@ async def admin_patch_org(
         org.ga4_measurement_id = body.ga4_measurement_id or None
     if body.cancel_policy is not None:
         org.cancel_policy_json = body.cancel_policy
+    public_link_cache_affected = False
     if body.availability_defaults is not None:
         org.availability_defaults_json = body.availability_defaults
+        public_link_cache_affected = True
     if body.email_settings is not None:
         org.email_settings_json = body.email_settings
+    if body.ga4_measurement_id is not None:
+        public_link_cache_affected = True
     try:
         await db.commit()
         await db.refresh(org)
@@ -2073,7 +2387,8 @@ async def admin_patch_org(
         raise HTTPException(400, "この slug は既に使われています")
     _clear_admin_summary_counts_cache(slug)
     _clear_admin_summary_counts_cache(org.slug)
-    await _clear_public_availability_cache_for_org(db, org.id)
+    if public_link_cache_affected:
+        await _clear_public_availability_cache_for_org(db, org.id)
     return {"ok": True, "slug": org.slug, "name": org.name}
 
 
@@ -2303,6 +2618,8 @@ async def admin_org_summary(
     include_links: bool = True,
     include_forms: bool = True,
     include_counts: bool = False,
+    include_link_booking_counts: bool = True,
+    include_link_staff_validation: bool = True,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
     await ensure_runtime_schema_compat()
@@ -2370,7 +2687,7 @@ async def admin_org_summary(
     service_map = {int(s.id): s for s in services}
     if include_staff:
         active_staff_ids = {int(s.id) for s in staff if bool(getattr(s, "active", True))}
-    elif include_links:
+    elif include_links and include_link_staff_validation:
         active_staff_ids = {
             int(x)
             for x in (
@@ -2444,7 +2761,7 @@ async def admin_org_summary(
     section_started = time_module.monotonic()
     link_booking_totals: dict[int, int] = {}
     link_active_booking_totals: dict[int, int] = {}
-    if links:
+    if links and include_link_booking_counts:
         link_ids = [int(l.id) for l in links]
         rows = (
             await db.execute(
@@ -2478,7 +2795,7 @@ async def admin_org_summary(
             if sid in seen_staff_ids:
                 continue
             seen_staff_ids.add(sid)
-            if not active_staff_ids or sid in active_staff_ids:
+            if not include_link_staff_validation or not active_staff_ids or sid in active_staff_ids:
                 valid_staff_ids.append(sid)
         svc = service_map.get(int(l.service_id)) if l.service_id is not None else None
         links_payload.append(
@@ -2489,8 +2806,10 @@ async def admin_org_summary(
                 "service_id": l.service_id,
                 "service_name": svc.name if svc else None,
                 "service_duration_minutes": svc.duration_minutes if svc else None,
-                "total_booking_count": link_booking_totals.get(int(l.id), 0),
-                "active_booking_count": link_active_booking_totals.get(int(l.id), 0),
+                "total_booking_count": link_booking_totals.get(int(l.id), 0) if include_link_booking_counts else None,
+                "active_booking_count": (
+                    link_active_booking_totals.get(int(l.id), 0) if include_link_booking_counts else None
+                ),
                 "staff_ids": valid_staff_ids,
                 "staff_priority_overrides": _normalize_link_priority_overrides(
                     getattr(l, "staff_priority_overrides_json", None),
@@ -2552,12 +2871,17 @@ async def admin_org_summary(
         "google_oauth_ready": settings.is_google_oauth_configured(),
         "counts": counts,
         "forms": [{"id": f.id, "name": f.name, "active": f.active} for f in forms],
+        "summary_options": {
+            "include_link_booking_counts": include_link_booking_counts,
+            "include_link_staff_validation": include_link_staff_validation,
+        },
     }
     payload_ms = (time_module.monotonic() - section_started) * 1000
     total_ms = (time_module.monotonic() - req_started) * 1000
     logger.info(
         "booking.admin.summary slug=%s include_staff=%s include_services=%s include_links=%s include_forms=%s "
-        "include_counts=%s staff_rows=%s service_rows=%s link_rows=%s form_rows=%s "
+        "include_counts=%s include_link_booking_counts=%s include_link_staff_validation=%s "
+        "staff_rows=%s service_rows=%s link_rows=%s form_rows=%s "
         "auth_ms=%s org_ms=%s staff_ms=%s services_ms=%s links_ms=%s forms_ms=%s active_staff_ms=%s "
         "counts_ms=%s links_payload_ms=%s payload_ms=%s total_ms=%s",
         slug,
@@ -2566,6 +2890,8 @@ async def admin_org_summary(
         include_links,
         include_forms,
         include_counts,
+        include_link_booking_counts,
+        include_link_staff_validation,
         len(staff),
         len(services),
         len(links),
@@ -2585,6 +2911,130 @@ async def admin_org_summary(
     if org_only_summary:
         _store_cached_admin_org_summary(slug, response_payload)
     return response_payload
+
+
+@router.get("/api/booking/admin/orgs/{slug}/links-overview")
+async def admin_org_links_overview(
+    request: Request,
+    slug: str,
+    db: DbSession,
+    settings: SettingsDep,
+    x_admin_secret: Annotated[str | None, Header()] = None,
+) -> dict[str, Any]:
+    req_started = time_module.monotonic()
+    org = await _load_summary_org_for_admin(request, slug, db, settings, x_admin_secret)
+    auth_ms = (time_module.monotonic() - req_started) * 1000
+    section_started = time_module.monotonic()
+    rows = (
+        await db.execute(
+            select(PublicBookingLink, BookingService.name, BookingService.duration_minutes)
+            .outerjoin(BookingService, BookingService.id == PublicBookingLink.service_id)
+            .where(PublicBookingLink.org_id == org.id)
+            .order_by(PublicBookingLink.id.asc())
+        )
+    ).all()
+    links_ms = (time_module.monotonic() - section_started) * 1000
+    staff_ids: set[int] = set()
+    for link, _, _ in rows:
+        for raw in json_list_or_empty(link.staff_ids_json):
+            try:
+                staff_ids.add(int(raw))
+            except (TypeError, ValueError):
+                continue
+    section_started = time_module.monotonic()
+    staff_rows = []
+    if staff_ids:
+        staff_rows = (
+            await db.execute(
+                select(StaffMember.id, StaffMember.name)
+                .where(StaffMember.org_id == org.id, StaffMember.id.in_(staff_ids))
+            )
+        ).all()
+    staff_ms = (time_module.monotonic() - section_started) * 1000
+    staff_name_map = {int(staff_id): name for staff_id, name in staff_rows}
+    base = settings.public_base_url_value()
+    links_payload: list[dict[str, Any]] = []
+    for link, service_name, duration_minutes in rows:
+        raw_staff_ids = json_list_or_empty(link.staff_ids_json)
+        valid_staff_ids: list[int] = []
+        seen_staff_ids: set[int] = set()
+        for raw in raw_staff_ids:
+            try:
+                sid = int(raw)
+            except (TypeError, ValueError):
+                continue
+            if sid in seen_staff_ids:
+                continue
+            seen_staff_ids.add(sid)
+            valid_staff_ids.append(sid)
+        links_payload.append(
+            {
+                "id": link.id,
+                "token": link.token,
+                "title": link.title,
+                "service_id": link.service_id,
+                "service_name": service_name,
+                "service_duration_minutes": duration_minutes,
+                "total_booking_count": None,
+                "active_booking_count": None,
+                "staff_ids": valid_staff_ids,
+                "staff_priority_overrides": _normalize_link_priority_overrides(
+                    getattr(link, "staff_priority_overrides_json", None),
+                    valid_staff_ids,
+                ),
+                "routing_mode": normalize_link_routing_mode(getattr(link, "routing_mode", None)),
+                "daily_booking_limit_per_staff": _normalize_optional_non_negative_int(
+                    getattr(link, "daily_booking_limit_per_staff", None),
+                    max_value=50,
+                ),
+                "buffer_minutes": _normalize_optional_non_negative_int(
+                    getattr(link, "buffer_minutes", None),
+                    max_value=180,
+                ),
+                "max_advance_booking_days": _normalize_optional_non_negative_int(
+                    getattr(link, "max_advance_booking_days", None),
+                    max_value=730,
+                ),
+                "bookable_until_date": getattr(link, "bookable_until_date", None) or "",
+                "pre_booking_notice": getattr(link, "pre_booking_notice", None) or "",
+                "post_booking_message": getattr(link, "post_booking_message", None) or "",
+                "active": getattr(link, "active", True),
+                "block_next_days": int(getattr(link, "block_next_days", 0) or 0),
+                "public_url": f"{base}/app/booking/{link.token}",
+                "public_path": f"/app/booking/{link.token}",
+            }
+        )
+    payload = {
+        "public_base_url": base,
+        "org": {
+            "id": org.id,
+            "name": org.name,
+            "slug": org.slug,
+        },
+        "staff": [{"id": staff_id, "name": name} for staff_id, name in staff_name_map.items()],
+        "services": [],
+        "links": links_payload,
+        "google_oauth_ready": settings.is_google_oauth_configured(),
+        "counts": {},
+        "forms": [],
+        "summary_options": {
+            "overview": True,
+            "include_link_booking_counts": False,
+            "include_link_staff_validation": False,
+        },
+    }
+    total_ms = (time_module.monotonic() - req_started) * 1000
+    logger.info(
+        "booking.admin.links_overview slug=%s link_rows=%s staff_rows=%s auth_ms=%s links_ms=%s staff_ms=%s total_ms=%s",
+        slug,
+        len(rows),
+        len(staff_rows),
+        round(auth_ms, 1),
+        round(links_ms, 1),
+        round(staff_ms, 1),
+        round(total_ms, 1),
+    )
+    return payload
 
 
 @router.get("/api/booking/admin/orgs/{slug}/calendar-diagnostics")
@@ -2724,6 +3174,7 @@ async def admin_list_bookings(
     db: DbSession,
     settings: SettingsDep,
     status: str | None = None,
+    public_link_id: int | None = None,
     limit: int = 100,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
@@ -2734,19 +3185,36 @@ async def admin_list_bookings(
     q = select(Booking).where(Booking.org_id == org.id)
     if status:
         q = q.where(Booking.status == status)
-    q = q.order_by(Booking.start_utc.desc()).limit(min(max(limit, 1), 500))
+    if public_link_id is not None:
+        q = q.where(Booking.public_link_id == public_link_id)
+        q = q.order_by(Booking.id.desc())
+    else:
+        q = q.order_by(Booking.start_utc.desc())
+    q = q.limit(min(max(limit, 1), 500))
     rows = (await db.scalars(q)).all()
+    base_url = settings.public_base_url_value()
     return {
+        "filter": {
+            "public_link_id": public_link_id,
+            "status": status,
+        },
         "bookings": [
             {
                 "id": b.id,
                 "status": b.status,
                 "start_utc": b.start_utc.isoformat(),
                 "end_utc": b.end_utc.isoformat(),
+                "created_at": b.created_at.isoformat() if b.created_at else None,
+                "public_link_id": b.public_link_id,
                 "booking_link_title_snapshot": b.booking_link_title_snapshot,
                 "staff_id": b.staff_id,
                 "staff_display_name": b.staff_display_name,
                 "service_id": b.service_id,
+                "customer_id": _booking_customer_id(b),
+                "customer_number": _booking_customer_id(b),
+                "meeting_provider": b.meeting_provider,
+                "meeting_url": _booking_meeting_url(b, settings),
+                "manage_url": f"{base_url}/app/manage/{b.manage_token}",
                 "google_event_id": b.google_event_id,
                 "google_calendar_synced_at": (
                     b.google_calendar_synced_at.isoformat()
@@ -2880,6 +3348,7 @@ async def admin_add_staff(
     await db.commit()
     await db.refresh(s)
     _clear_admin_summary_counts_cache(org.slug)
+    await _clear_public_availability_cache_for_org(db, org.id)
     return {"id": s.id}
 
 
@@ -3005,6 +3474,7 @@ async def admin_upsert_form(
     await db.commit()
     await db.refresh(f)
     _clear_admin_summary_counts_cache(org.slug)
+    await _clear_public_availability_cache_for_org(db, org.id)
     return {"id": f.id}
 
 
@@ -3029,6 +3499,7 @@ async def admin_put_form(
     f.active = True
     await db.commit()
     _clear_admin_summary_counts_cache(org.slug)
+    await _clear_public_availability_cache_for_org(db, org.id)
     return {"ok": True}
 
 
@@ -3091,6 +3562,7 @@ async def admin_patch_service(
     await db.commit()
     await db.refresh(svc)
     _clear_admin_summary_counts_cache(org.slug)
+    await _clear_public_availability_cache_for_org(db, org.id)
     return {
         "id": svc.id,
         "name": svc.name,
@@ -3705,9 +4177,8 @@ async def oauth_google_callback(
         return redirect_err(error, error_description or "")
     if not code or not state:
         return redirect_err("missing_code")
-    try:
-        staff_id = int(state)
-    except ValueError:
+    staff_id = verify_google_oauth_state(state, settings)
+    if staff_id is None:
         return redirect_err("bad_state")
     staff = await db.get(StaffMember, staff_id)
     if not staff:

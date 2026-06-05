@@ -2,6 +2,8 @@
 
 from datetime import datetime, timedelta, timezone
 
+import pytest
+
 from app.booking.availability import (
     buffer_td,
     candidate_blocks_existing,
@@ -10,10 +12,13 @@ from app.booking.availability import (
     intervals_overlap,
     merge_intervals,
 )
-from app.booking.db_models import BookingOrg
+from app.booking.db_models import BookingOrg, BookingService, StaffMember
+import app.booking.routing_service as routing_service
 from app.booking.routing_service import (
+    available_slots_for_link,
     expand_intervals_by_buffer_minutes,
     filter_slots_not_overlapping_busy,
+    fallback_open_hour_slots_for_link,
     org_calendar_day_bounds_utc,
     union_intervals,
 )
@@ -153,3 +158,75 @@ def test_filter_slots_with_buffer_expanded_busy_would_false_positive():
     assert len(kept_raw) == 1
     assert len(kept_expanded) == 0
     assert busy_expanded[0][1] > busy_end
+
+
+@pytest.mark.anyio
+async def test_available_slots_for_link_does_not_return_started_today_slots(monkeypatch):
+    fixed_now = datetime(2026, 1, 1, 10, 15, tzinfo=timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now.astimezone(tz) if tz else fixed_now.replace(tzinfo=None)
+
+    async def fake_pick_staff_for_slot(*args, **kwargs):
+        return staff
+
+    async def fake_daily_counts(*args, **kwargs):
+        return {}
+
+    monkeypatch.setattr(routing_service, "datetime", FixedDateTime)
+    monkeypatch.setattr(routing_service, "pick_staff_for_slot", fake_pick_staff_for_slot)
+    monkeypatch.setattr(routing_service, "load_link_daily_booking_counts", fake_daily_counts)
+
+    org = BookingOrg(id=1, availability_defaults_json={"timezone": "UTC", "start": "09:00", "end": "12:00"})
+    service = BookingService(id=1, org_id=1, name="Consulting", duration_minutes=30, active=True)
+    staff = StaffMember(id=1, org_id=1, name="Staff", active=True)
+
+    slots, _step, _had_errors, _msg = await available_slots_for_link(
+        None,
+        org,
+        [1],
+        service,
+        datetime(2026, 1, 1, 9, 0, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+        None,
+        staff_list=[staff],
+        google_busy_map={1: []},
+        db_busy_map={1: []},
+    )
+
+    starts = [datetime.fromisoformat(slot["start_utc"]) for slot in slots]
+    assert starts
+    assert all(start > fixed_now for start in starts)
+    assert datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc) not in starts
+    assert datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc) in starts
+
+
+def test_fallback_open_hour_slots_does_not_return_started_today_slots(monkeypatch):
+    fixed_now = datetime(2026, 1, 1, 10, 15, tzinfo=timezone.utc)
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return fixed_now.astimezone(tz) if tz else fixed_now.replace(tzinfo=None)
+
+    monkeypatch.setattr(routing_service, "datetime", FixedDateTime)
+
+    org = BookingOrg(id=1, availability_defaults_json={"timezone": "UTC", "start": "09:00", "end": "12:00"})
+    service = BookingService(id=1, org_id=1, name="Consulting", duration_minutes=30, active=True)
+    staff = StaffMember(id=1, org_id=1, name="Staff", active=True)
+
+    slots, _step = fallback_open_hour_slots_for_link(
+        org,
+        [staff],
+        datetime(2026, 1, 1, 9, 0, tzinfo=timezone.utc),
+        datetime(2026, 1, 1, 12, 0, tzinfo=timezone.utc),
+        service=service,
+    )
+
+    starts = [datetime.fromisoformat(slot["start_utc"]) for slot in slots]
+    assert starts
+    assert all(start > fixed_now for start in starts)
+    assert datetime(2026, 1, 1, 10, 0, tzinfo=timezone.utc) not in starts
+    assert datetime(2026, 1, 1, 10, 30, tzinfo=timezone.utc) in starts
