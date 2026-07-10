@@ -120,6 +120,8 @@ def test_admin_template_opens_link_bookings_page() -> None:
     assert "target = '_blank'" in tpl
     assert "rel = 'noopener'" in tpl
     assert "bookings-include-cancelled" in tpl
+    assert "キャンセル済み予約" in tpl
+    assert "表示しない" in tpl
     assert "include_cancelled" in tpl
 
 
@@ -140,6 +142,8 @@ def test_link_bookings_template_lists_required_columns() -> None:
     assert "'<td>' + esc(fmtJst(b.created_at)) + '</td>'" in tpl
     assert "public_link_id" in tpl
     assert "bookings-include-cancelled" in tpl
+    assert "キャンセル済み予約" in tpl
+    assert "表示しない" in tpl
     assert "include_cancelled" in tpl
 
 

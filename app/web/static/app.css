@@ -2695,6 +2695,20 @@ body.app-busy a {
   padding-bottom: 0.35rem;
 }
 
+.booking-list-filter {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+  margin-right: 0.35rem;
+  color: var(--muted);
+  font-size: 0.86rem;
+  white-space: nowrap;
+}
+
+.booking-list-filter select {
+  min-width: 7.5rem;
+}
+
 .admin-row.align-start {
   align-items: flex-start;
 }

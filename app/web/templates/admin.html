@@ -120,9 +120,12 @@
         <p class="muted panel-hint" id="bookings-panel-hint">直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。</p>
       </div>
       <div class="cal-td-actions">
-        <label class="admin-field-check">
-          <input type="checkbox" id="bookings-include-cancelled" checked />
-          キャンセル済みを表示
+        <label class="booking-list-filter" for="bookings-include-cancelled">
+          <span>キャンセル済み予約</span>
+          <select id="bookings-include-cancelled" class="admin-input-sm">
+            <option value="true" selected>表示する</option>
+            <option value="false">表示しない</option>
+          </select>
         </label>
         <button type="button" class="btn secondary" id="btn-clear-booking-filter" hidden>全予約に戻す</button>
         <button type="button" class="btn secondary" id="btn-load-bookings">予約一覧を読み込む</button>
@@ -901,7 +904,7 @@
     if (bookingLinkFilter && Number.isFinite(Number(bookingLinkFilter.id))) {
       qs.set('public_link_id', String(Number(bookingLinkFilter.id)));
     }
-    if (bookingsIncludeCancelled && !bookingsIncludeCancelled.checked) {
+    if (bookingsIncludeCancelled && bookingsIncludeCancelled.value === 'false') {
       qs.set('include_cancelled', 'false');
     }
     var data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/bookings?' + qs.toString());

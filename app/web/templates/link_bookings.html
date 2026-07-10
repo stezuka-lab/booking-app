@@ -32,9 +32,12 @@
         <h2 class="panel-title">予約</h2>
         <p class="muted panel-hint" id="booking-count">予約一覧を読み込んでいます…</p>
       </div>
-      <label class="admin-field-check">
-        <input type="checkbox" id="bookings-include-cancelled" checked />
-        キャンセル済みを表示
+      <label class="booking-list-filter" for="bookings-include-cancelled">
+        <span>キャンセル済み予約</span>
+        <select id="bookings-include-cancelled" class="admin-input-sm">
+          <option value="true" selected>表示する</option>
+          <option value="false">表示しない</option>
+        </select>
       </label>
     </div>
     <div class="table-wrap">
@@ -225,7 +228,7 @@
       if (!link) throw new Error('対象の予約リンクが見つかりません。');
       renderLink(link);
       const qs = new URLSearchParams({ limit: '500', public_link_id: String(linkId) });
-      if (includeCancelled && !includeCancelled.checked) {
+      if (includeCancelled && includeCancelled.value === 'false') {
         qs.set('include_cancelled', 'false');
       }
       const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug) + '/bookings?' + qs.toString());
