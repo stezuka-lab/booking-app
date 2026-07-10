@@ -68,6 +68,7 @@ async def test_create_booking_rejects_started_slot_before_google_or_staff_checks
         start_utc=datetime.now(timezone.utc) - timedelta(minutes=1),
         customer_name="Test User",
         customer_email="test@example.com",
+        form_answers={"customer_number": "KW0000"},
     )
 
     with pytest.raises(HTTPException) as exc:
@@ -172,6 +173,7 @@ async def test_round_robin_link_ignores_client_staff_id_and_picks_server_side(mo
         start_utc=datetime.now(timezone.utc) + timedelta(days=3),
         customer_name="Test User",
         customer_email="test@example.com",
+        form_answers={"customer_number": "KW0000"},
     )
 
     booking, picked_staff, _customer_cal, _link_title, _message = await booking_router._create_booking_from_body(
@@ -986,7 +988,7 @@ def test_finalize_confirmed_booking_creates_event_without_attendees(monkeypatch)
     assert "ご案内: 開始5分前までにご準備ください。" in str(captured["description"])
     assert "予約者: Customer" in str(captured["description"])
     assert "メール: customer@example.com" in str(captured["description"])
-    assert "顧客番号: AP12345" in str(captured["description"])
+    assert "userId（KW）: AP12345" in str(captured["description"])
     assert booking.customer_name == ""
     assert booking.customer_email == ""
     assert booking.company_name is None

@@ -30,8 +30,9 @@ def default_form_fields() -> list[dict[str, object]]:
         {
             "id": "customer_number",
             "type": "text",
-            "label": "顧客番号（AP/EP）",
-            "placeholder": "例: AP123456",
+            "label": "userId（KW）",
+            "placeholder": "例: KW0000",
+            "required": True,
         }
     ]
 

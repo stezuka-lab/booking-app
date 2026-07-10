@@ -135,7 +135,7 @@ async def ensure_demo_booking_data(session: AsyncSession, settings: Settings) ->
         demo_svc = BookingService(org_id=org.id, name="30分相談", duration_minutes=30)
         session.add(demo_svc)
         fields = [
-            {"id": "customer_number", "type": "text", "label": "顧客番号", "placeholder": "任意"},
+            {"id": "customer_number", "type": "text", "label": "userId（KW）", "placeholder": "例: KW0000", "required": True},
         ]
         session.add(
             BookingFormDefinition(org_id=org.id, name="デフォルト", fields_json=fields, active=True)

@@ -5,6 +5,7 @@ from fastapi.testclient import TestClient
 from pathlib import Path
 
 from app.config import get_settings
+from app.booking.schemas import BookingCreate
 from app.web import routes as web_routes
 
 
@@ -18,6 +19,24 @@ def test_settings_defines_actions_dry_run() -> None:
     assert isinstance(s.smtp_use_ssl, bool)
     assert isinstance(s.smtp_starttls, bool)
     assert isinstance(s.smtp_timeout_sec, int)
+
+
+def test_booking_create_requires_kw_user_id() -> None:
+    from datetime import datetime, timezone
+
+    base = {
+        "link_token": "token",
+        "start_utc": datetime.now(timezone.utc),
+        "customer_name": "Test User",
+        "customer_email": "test@example.com",
+    }
+    BookingCreate(**base, form_answers={"customer_number": "KW0000"})
+    with pytest.raises(ValueError):
+        BookingCreate(**base, form_answers={})
+    with pytest.raises(ValueError):
+        BookingCreate(**base, form_answers={"customer_number": "0000"})
+    with pytest.raises(ValueError):
+        BookingCreate(**base, form_answers={"customer_number": "kw0000"})
 
 
 def test_health(client: TestClient) -> None:

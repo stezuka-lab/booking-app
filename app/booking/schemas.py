@@ -69,6 +69,16 @@ class BookingCreate(BaseModel):
     availability_from_ts: datetime | None = None
     availability_to_ts: datetime | None = None
 
+    @field_validator("form_answers")
+    @classmethod
+    def user_id_kw_required(cls, v: dict[str, Any]) -> dict[str, Any]:
+        user_id = str((v or {}).get("customer_number") or "").strip()
+        if not user_id:
+            raise ValueError("userId（KW）を入力してください")
+        if not re.match(r"^KW[0-9]+$", user_id):
+            raise ValueError("userId（KW）は KW0000 の形式で入力してください")
+        return v
+
 
 class BookingManageAction(BaseModel):
     manage_token: str

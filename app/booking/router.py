@@ -759,7 +759,7 @@ def _booking_calendar_description(
     lines.append(f"予約者: {customer_name}")
     lines.append(f"メール: {customer_email}")
     if cust_no:
-        lines.append(f"顧客番号: {cust_no}")
+        lines.append(f"userId（KW）: {cust_no}")
     if (booking.company_name or "").strip():
         lines.append(f"会社名: {(booking.company_name or '').strip()}")
     lines.append(f"担当: {(staff.name or '').strip()}")
@@ -2031,7 +2031,7 @@ async def _finalize_confirmed_booking(
             desc_lines.append(f"予約者: {customer_name}")
             desc_lines.append(f"メール: {customer_email}")
             if cust_no:
-                desc_lines.append(f"顧客番号: {cust_no}")
+                desc_lines.append(f"userId（KW）: {cust_no}")
             if (b.company_name or "").strip():
                 desc_lines.append(f"会社名: {(b.company_name or '').strip()}")
             desc_lines.append(f"担当: {(staff.name or '').strip()}")

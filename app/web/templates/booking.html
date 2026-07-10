@@ -53,8 +53,14 @@
 
     <div id="modal-extra-fields" class="booking-dialog__extra"></div>
 
-    <label class="field-label" for="modal-customer-number">顧客番号（AP/EP）</label>
-    <input id="modal-customer-number" type="text" autocomplete="off" placeholder="例: AP12345 / EP12345" class="booking-dialog__input-wide" />
+    <label class="field-label" for="modal-customer-number">userId（KW） <span class="req">*</span></label>
+    <input id="modal-customer-number" type="text" autocomplete="off" placeholder="例: KW0000" class="booking-dialog__input-wide" required />
+    <p class="muted small">
+      上記IDはパートナーサイトにログイン後ページ左上にてご確認いただけます。<br />
+      正例: KW0000<br />
+      誤例: 0000 数字だけ<br />
+      誤例: kw0000 小文字
+    </p>
     <label class="field-label" for="modal-name">お名前 <span class="req">*</span></label>
     <input id="modal-name" type="text" autocomplete="off" placeholder="山田 太郎" class="booking-dialog__input-wide" />
     <label class="field-label" for="modal-email">メール <span class="req">*</span></label>
@@ -1227,6 +1233,17 @@
     const endD = new Date(startD.getTime() + durMin * 60000);
     if (startD < bounds.start || endD > bounds.end) {
       msg.textContent = '受付時間外の日時です。受付時間内に調整してください。';
+      return;
+    }
+    const userIdKw = document.getElementById('modal-customer-number').value.trim();
+    if (!userIdKw) {
+      msg.textContent = 'userId（KW）を入力してください';
+      document.getElementById('modal-customer-number').focus();
+      return;
+    }
+    if (!/^KW[0-9]+$/.test(userIdKw)) {
+      msg.textContent = 'userId（KW）は KW0000 の形式で入力してください';
+      document.getElementById('modal-customer-number').focus();
       return;
     }
     if (!document.getElementById('modal-name').value.trim() || !document.getElementById('modal-email').value.trim()) {
