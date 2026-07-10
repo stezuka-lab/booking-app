@@ -119,6 +119,8 @@ def test_admin_template_opens_link_bookings_page() -> None:
     assert "'/app/booking-links/'" in tpl
     assert "target = '_blank'" in tpl
     assert "rel = 'noopener'" in tpl
+    assert "bookings-include-cancelled" in tpl
+    assert "include_cancelled" in tpl
 
 
 def test_link_bookings_template_lists_required_columns() -> None:
@@ -137,6 +139,8 @@ def test_link_bookings_template_lists_required_columns() -> None:
     assert "'<td>' + esc(fmtJstRange(b.start_utc, b.end_utc)) + '</td>'" in tpl
     assert "'<td>' + esc(fmtJst(b.created_at)) + '</td>'" in tpl
     assert "public_link_id" in tpl
+    assert "bookings-include-cancelled" in tpl
+    assert "include_cancelled" in tpl
 
 
 def test_web_app_link_bookings_page_requires_login(client: TestClient) -> None:
@@ -150,6 +154,8 @@ def test_link_bookings_api_sorts_filtered_results_by_booking_number_desc() -> No
     assert "if public_link_id is not None:" in src
     assert "q = q.order_by(Booking.id.desc())" in src
     assert "q = q.order_by(Booking.start_utc.desc())" in src
+    assert "include_cancelled: bool = True" in src
+    assert 'Booking.status != "cancelled"' in src
 
 
 def test_accounts_template_has_audit_logs_section() -> None:

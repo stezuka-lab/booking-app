@@ -32,6 +32,10 @@
         <h2 class="panel-title">予約</h2>
         <p class="muted panel-hint" id="booking-count">予約一覧を読み込んでいます…</p>
       </div>
+      <label class="admin-field-check">
+        <input type="checkbox" id="bookings-include-cancelled" checked />
+        キャンセル済みを表示
+      </label>
     </div>
     <div class="table-wrap">
       <table class="admin-table">
@@ -73,6 +77,7 @@
   const bookingCount = document.getElementById('booking-count');
   const openLink = document.getElementById('public-link-open');
   const reloadBtn = document.getElementById('btn-reload');
+  const includeCancelled = document.getElementById('bookings-include-cancelled');
   let currentOrgSlug = appViewer.authenticated && appViewer.user ? appViewer.user.default_org_slug : '';
   let currentLink = null;
 
@@ -220,6 +225,9 @@
       if (!link) throw new Error('対象の予約リンクが見つかりません。');
       renderLink(link);
       const qs = new URLSearchParams({ limit: '500', public_link_id: String(linkId) });
+      if (includeCancelled && !includeCancelled.checked) {
+        qs.set('include_cancelled', 'false');
+      }
       const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug) + '/bookings?' + qs.toString());
       const bookings = data && Array.isArray(data.bookings) ? data.bookings : [];
       bookingCount.textContent = bookings.length + '件の予約を表示しています。';
@@ -234,6 +242,7 @@
   }
 
   if (reloadBtn) reloadBtn.addEventListener('click', loadPage);
+  if (includeCancelled) includeCancelled.addEventListener('change', loadPage);
   loadPage();
 })();
 </script>

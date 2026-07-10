@@ -3175,6 +3175,7 @@ async def admin_list_bookings(
     settings: SettingsDep,
     status: str | None = None,
     public_link_id: int | None = None,
+    include_cancelled: bool = True,
     limit: int = 100,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:
@@ -3185,6 +3186,8 @@ async def admin_list_bookings(
     q = select(Booking).where(Booking.org_id == org.id)
     if status:
         q = q.where(Booking.status == status)
+    elif not include_cancelled:
+        q = q.where(Booking.status != "cancelled")
     if public_link_id is not None:
         q = q.where(Booking.public_link_id == public_link_id)
         q = q.order_by(Booking.id.desc())
@@ -3197,6 +3200,7 @@ async def admin_list_bookings(
         "filter": {
             "public_link_id": public_link_id,
             "status": status,
+            "include_cancelled": include_cancelled,
         },
         "bookings": [
             {

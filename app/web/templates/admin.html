@@ -120,6 +120,10 @@
         <p class="muted panel-hint" id="bookings-panel-hint">直近の予約について、担当カレンダーとの同期状態と自動解放理由を確認できます。</p>
       </div>
       <div class="cal-td-actions">
+        <label class="admin-field-check">
+          <input type="checkbox" id="bookings-include-cancelled" checked />
+          キャンセル済みを表示
+        </label>
         <button type="button" class="btn secondary" id="btn-clear-booking-filter" hidden>全予約に戻す</button>
         <button type="button" class="btn secondary" id="btn-load-bookings">予約一覧を読み込む</button>
         <button type="button" class="btn secondary" id="btn-reconcile-calendar-blocks">今すぐ整合性を回復</button>
@@ -242,6 +246,7 @@
   const out = document.getElementById('admin-out');
   const bookingsLoadBtn = document.getElementById('btn-load-bookings');
   const bookingsClearFilterBtn = document.getElementById('btn-clear-booking-filter');
+  const bookingsIncludeCancelled = document.getElementById('bookings-include-cancelled');
   const bookingsPanelHint = document.getElementById('bookings-panel-hint');
   let campaignSummary = null;
   let currentBookings = [];
@@ -896,6 +901,9 @@
     if (bookingLinkFilter && Number.isFinite(Number(bookingLinkFilter.id))) {
       qs.set('public_link_id', String(Number(bookingLinkFilter.id)));
     }
+    if (bookingsIncludeCancelled && !bookingsIncludeCancelled.checked) {
+      qs.set('include_cancelled', 'false');
+    }
     var data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/bookings?' + qs.toString());
     if (data) {
       renderBookings(data);
@@ -1075,6 +1083,13 @@
   });
 
   document.getElementById('btn-load-bookings').addEventListener('click', loadBookings);
+  if (bookingsIncludeCancelled) {
+    bookingsIncludeCancelled.addEventListener('change', async function () {
+      if (!bookingsLoaded) return;
+      renderBookingsPlaceholder('予約一覧を読み込んでいます…');
+      await loadBookings();
+    });
+  }
   if (bookingsClearFilterBtn) {
     bookingsClearFilterBtn.addEventListener('click', async function () {
       setBookingLinkFilter(null);
