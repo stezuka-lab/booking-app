@@ -121,7 +121,7 @@ def test_admin_template_opens_link_bookings_page() -> None:
     assert "rel = 'noopener'" in tpl
     assert "bookings-include-cancelled" in tpl
     assert "キャンセル済み予約" in tpl
-    assert "表示しない" in tpl
+    assert '<option value="false" selected>表示しない</option>' in tpl
     assert "include_cancelled" in tpl
 
 
@@ -143,7 +143,7 @@ def test_link_bookings_template_lists_required_columns() -> None:
     assert "public_link_id" in tpl
     assert "bookings-include-cancelled" in tpl
     assert "キャンセル済み予約" in tpl
-    assert "表示しない" in tpl
+    assert '<option value="false" selected>表示しない</option>' in tpl
     assert "include_cancelled" in tpl
 
 
@@ -158,7 +158,7 @@ def test_link_bookings_api_sorts_filtered_results_by_booking_number_desc() -> No
     assert "if public_link_id is not None:" in src
     assert "q = q.order_by(Booking.id.desc())" in src
     assert "q = q.order_by(Booking.start_utc.desc())" in src
-    assert "include_cancelled: bool = True" in src
+    assert "include_cancelled: bool = False" in src
     assert 'Booking.status != "cancelled"' in src
 
 

@@ -35,8 +35,8 @@
       <label class="booking-list-filter" for="bookings-include-cancelled">
         <span>キャンセル済み予約</span>
         <select id="bookings-include-cancelled" class="admin-input-sm">
-          <option value="true" selected>表示する</option>
-          <option value="false">表示しない</option>
+          <option value="false" selected>表示しない</option>
+          <option value="true">表示する</option>
         </select>
       </label>
     </div>
@@ -228,8 +228,8 @@
       if (!link) throw new Error('対象の予約リンクが見つかりません。');
       renderLink(link);
       const qs = new URLSearchParams({ limit: '500', public_link_id: String(linkId) });
-      if (includeCancelled && includeCancelled.value === 'false') {
-        qs.set('include_cancelled', 'false');
+      if (includeCancelled && includeCancelled.value === 'true') {
+        qs.set('include_cancelled', 'true');
       }
       const data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug) + '/bookings?' + qs.toString());
       const bookings = data && Array.isArray(data.bookings) ? data.bookings : [];

@@ -3175,7 +3175,7 @@ async def admin_list_bookings(
     settings: SettingsDep,
     status: str | None = None,
     public_link_id: int | None = None,
-    include_cancelled: bool = True,
+    include_cancelled: bool = False,
     limit: int = 100,
     x_admin_secret: Annotated[str | None, Header()] = None,
 ) -> dict[str, Any]:

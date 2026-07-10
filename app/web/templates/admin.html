@@ -123,8 +123,8 @@
         <label class="booking-list-filter" for="bookings-include-cancelled">
           <span>キャンセル済み予約</span>
           <select id="bookings-include-cancelled" class="admin-input-sm">
-            <option value="true" selected>表示する</option>
-            <option value="false">表示しない</option>
+            <option value="false" selected>表示しない</option>
+            <option value="true">表示する</option>
           </select>
         </label>
         <button type="button" class="btn secondary" id="btn-clear-booking-filter" hidden>全予約に戻す</button>
@@ -904,8 +904,8 @@
     if (bookingLinkFilter && Number.isFinite(Number(bookingLinkFilter.id))) {
       qs.set('public_link_id', String(Number(bookingLinkFilter.id)));
     }
-    if (bookingsIncludeCancelled && bookingsIncludeCancelled.value === 'false') {
-      qs.set('include_cancelled', 'false');
+    if (bookingsIncludeCancelled && bookingsIncludeCancelled.value === 'true') {
+      qs.set('include_cancelled', 'true');
     }
     var data = await getJson('/api/booking/admin/orgs/' + encodeURIComponent(slug()) + '/bookings?' + qs.toString());
     if (data) {
